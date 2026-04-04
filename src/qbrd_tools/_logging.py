@@ -1,0 +1,65 @@
+"""Logging setup for qbrd-tools CLIs.
+
+Provides a single setup_logging() function that configures a named logger
+with the correct verbosity level and a consistent output format. Color
+support is automatic based on terminal detection.
+
+The verbosity mapping:
+  - Default (no flags): WARNING -- only problems
+  - -v (verbose=1): INFO -- progress updates
+  - -vv (verbose=2): DEBUG -- implementation details
+  - --quiet: ERROR -- only failures
+"""
+from __future__ import annotations
+
+import logging
+import sys
+
+
+def setup_logging(
+    verbose: int = 0,
+    quiet: bool = False,
+    name: str = "qbrd_tools",
+) -> logging.Logger:
+    """Configure and return a logger with the appropriate verbosity level.
+
+    Args:
+        verbose: How many -v flags were passed (0, 1, or 2+).
+        quiet: Whether --quiet was passed. Overrides verbose.
+        name: Logger name, typically the CLI project name (e.g., "orbit-admin").
+
+    Returns:
+        A configured logging.Logger instance.
+    """
+    # --quiet always wins over --verbose (they're mutually exclusive at the
+    # CLI level, but we handle it defensively here too).
+    if quiet:
+        level = logging.ERROR
+    elif verbose >= 2:
+        level = logging.DEBUG
+    elif verbose == 1:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+
+    # Only add a handler if the logger doesn't already have one.
+    # This prevents duplicate output when setup_logging is called multiple
+    # times (e.g., in tests).
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(level)
+
+        # Use color if stderr is a real terminal (not piped/redirected).
+        use_color = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+        if use_color:
+            fmt = "\033[2m%(name)s\033[0m %(message)s"
+        else:
+            fmt = "%(name)s %(message)s"
+
+        handler.setFormatter(logging.Formatter(fmt))
+        logger.addHandler(handler)
+
+    return logger
