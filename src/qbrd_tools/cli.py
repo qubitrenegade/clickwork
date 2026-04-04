@@ -58,16 +58,42 @@ class MutuallyExclusive(click.Option):
     """
 
     def __init__(self, *args, mutually_exclusive: list[str] | None = None, **kwargs):
+        """Create a Click option that enforces mutual exclusivity.
+
+        Stores the list of conflicting option names for later checking in
+        ``handle_parse_result()``, which runs after all CLI options are parsed.
+
+        Args:
+            *args: Positional arguments forwarded to click.Option.
+            mutually_exclusive: List of other option names (Python identifiers,
+                not flag strings) that conflict with this option.
+            **kwargs: Keyword arguments forwarded to click.Option.
+        """
         # Store the list of option names that this option conflicts with.
         # We'll check them in handle_parse_result() once all parsing is done.
         self._mutually_exclusive = mutually_exclusive or []
         super().__init__(*args, **kwargs)
 
     def handle_parse_result(self, ctx, opts, args):
-        # Only trigger the error if BOTH options have truthy values.
-        # Click puts options in opts even when they have falsy defaults
-        # (e.g., count=True starts at 0, is_flag=True defaults to False).
-        # We only want to error when both were explicitly set by the user.
+        """Check for mutual exclusivity conflicts after all options are parsed.
+
+        Raises a UsageError only when BOTH this option and a conflicting option
+        have truthy values. Click includes all options in ``opts`` even when
+        they carry falsy defaults (e.g., count=True starts at 0), so we check
+        truthiness rather than key presence to avoid false positives.
+
+        Args:
+            ctx: The current Click context.
+            opts: Dict of all parsed option values for this command.
+            args: Remaining unparsed arguments.
+
+        Returns:
+            The result of the parent class ``handle_parse_result()`` call.
+
+        Raises:
+            click.UsageError: If this option and any option in
+                ``_mutually_exclusive`` are both truthy.
+        """
         current_value = opts.get(self.name)
         for other in self._mutually_exclusive:
             other_value = opts.get(other)
@@ -79,15 +105,20 @@ class MutuallyExclusive(click.Option):
 
 
 def pass_cli_context(f):
-    """Decorator that passes CliContext (not Click's Context) to a command.
+    """Decorator that injects a CliContext into a Click command function.
 
-    WHY this wrapper instead of @click.pass_obj directly:
-    - @click.pass_obj passes ctx.obj, which can be None in nested groups
-      if ensure_object() wasn't called. This decorator adds a safety check
-      and a clear error message instead of letting commands fail with
-      AttributeError: 'NoneType' has no attribute 'dry_run'.
-    - It uses ctx.find_object(CliContext) which traverses the context
-      chain upward, so it works even in deeply nested command groups.
+    Safer than ``@click.pass_obj`` because it traverses the full Click
+    context chain with ``find_object(CliContext)`` (works in deeply nested
+    groups) and raises a descriptive UsageError instead of letting commands
+    crash with ``AttributeError: 'NoneType' has no attribute 'dry_run'``
+    when the CLI was not created through ``create_cli()``.
+
+    Args:
+        f: The Click command function to wrap. Its first positional argument
+            must be typed as CliContext.
+
+    Returns:
+        A wrapped function compatible with Click's decorator stack.
 
     Usage:
         @click.command()
@@ -98,6 +129,24 @@ def pass_cli_context(f):
     @click.pass_context
     @functools.wraps(f)
     def wrapper(click_ctx, *args, **kwargs):
+        """Resolve CliContext from the Click context chain and call f.
+
+        Traverses the context chain with ``find_object(CliContext)`` so this
+        works in deeply nested command groups. Raises a descriptive UsageError
+        if no CliContext is found (i.e., the CLI was not built by create_cli()).
+
+        Args:
+            click_ctx: The Click context injected by @click.pass_context.
+            *args: Additional positional arguments forwarded to f.
+            **kwargs: Keyword arguments forwarded to f.
+
+        Returns:
+            Whatever the wrapped command function f returns.
+
+        Raises:
+            click.UsageError: If no CliContext object is found in the context
+                chain, indicating the command is not running under create_cli().
+        """
         # Traverse the Click context chain looking for a CliContext instance.
         # find_object() returns None if no matching object is found anywhere
         # in the parent chain -- not just in the immediate ctx.obj.
@@ -185,7 +234,21 @@ def create_cli(
     )
     @click.pass_context
     def cli_group(ctx: click.Context, verbose: int, quiet: bool, dry_run: bool, env: str | None, yes: bool) -> None:
-        """CLI entry point -- sets up context for all subcommands."""
+        """CLI entry point -- configure logging, load config, and build CliContext.
+
+        Runs before every subcommand. Sets up the logger, loads layered config
+        from TOML files and environment variables, builds a CliContext, binds
+        all convenience helpers to it, and stores it in Click's ctx.obj so
+        subcommands can receive it via @pass_cli_context.
+
+        Args:
+            ctx: The current Click context (injected by @click.pass_context).
+            verbose: Number of -v flags passed (0=WARNING, 1=INFO, 2=DEBUG).
+            quiet: Whether --quiet was passed (overrides verbose; ERROR only).
+            dry_run: Whether --dry-run was passed.
+            env: The selected config environment string, or None.
+            yes: Whether --yes was passed to skip confirmation prompts.
+        """
         # Setup logging first so any errors below are properly formatted.
         # setup_logging() configures both the log level and output format
         # based on the --verbose / --quiet flags.
@@ -276,6 +339,20 @@ def create_cli(
     original_invoke = cli_group.invoke
 
     def wrapped_invoke(ctx: click.Context):
+        """Invoke the CLI group and classify any unhandled exceptions.
+
+        Known exception types (CliProcessError, Click's Exit and Abort) are
+        re-raised so Click's normal handlers surface them with the correct
+        exit codes. Any other unexpected exception is treated as a framework
+        bug and exits with code 2 (EXIT_FRAMEWORK_ERROR) after printing a
+        short message to stderr.
+
+        Args:
+            ctx: The current Click context passed to the group's invoke().
+
+        Returns:
+            Whatever the original invoke() returns on success.
+        """
         try:
             return original_invoke(ctx)
         except CliProcessError:

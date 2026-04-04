@@ -36,6 +36,12 @@ def _validate_cmd(cmd: list[str] | str) -> None:
     Accepting a raw string like "echo hello" would require shell=True, which
     opens the door to injection (e.g., "echo hello; rm -rf /"). Enforcing a
     list forces callers to be explicit about each argument boundary.
+
+    Args:
+        cmd: The command to validate. Must be a list; raises if it is a str.
+
+    Raises:
+        TypeError: If cmd is a string instead of a list.
     """
     if isinstance(cmd, str):
         raise TypeError(
@@ -50,6 +56,14 @@ def _build_env(env: dict[str, str] | None) -> dict[str, str] | None:
     Returning None (not an empty dict) when no extra vars are provided lets
     subprocess inherit the full parent environment via the default env=None
     path, which is what most processes expect (PATH, HOME, etc.).
+
+    Args:
+        env: Additional environment variables to layer on top of os.environ,
+            or None to use the inherited environment unchanged.
+
+    Returns:
+        A merged dict of os.environ plus any caller-supplied vars, or None
+        if no extra vars were provided.
     """
     if env:
         # Spread os.environ first so caller-supplied vars win on conflict.
@@ -60,11 +74,17 @@ def _build_env(env: dict[str, str] | None) -> dict[str, str] | None:
 
 
 def _format_cmd(cmd: list[str]) -> str:
-    """Format a command for human-readable display (properly quoted).
+    """Format a command list as a properly shell-quoted string for display.
 
     shlex.quote wraps each argument in single quotes if it contains spaces or
     special characters, so the printed command can be pasted into a shell and
     reproduce the same invocation.
+
+    Args:
+        cmd: The command as an argv list.
+
+    Returns:
+        A single shell-safe string suitable for logging or dry-run output.
     """
     return " ".join(shlex.quote(arg) for arg in cmd)
 
@@ -76,6 +96,17 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
     the child gets a chance to handle SIGINT and clean up before the parent
     aborts. Without this, Python would raise KeyboardInterrupt immediately and
     leave the child running in the background as an orphan.
+
+    Args:
+        proc: The running subprocess to wait on.
+
+    Returns:
+        The process exit code (0 for success, non-zero for failure).
+
+    Raises:
+        KeyboardInterrupt: After forwarding SIGINT to the child and waiting
+            for it to exit, so the caller sees the interruption only once
+            the child has cleaned up.
     """
     try:
         # Block until the child exits normally.
@@ -92,11 +123,18 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
 # Pluggable confirmation function. Overridden by create_cli() to use the
 # framework's confirm() with TTY detection. Tests can patch this directly.
 def _confirm_fn(message: str, yes: bool = False) -> bool:
-    """Default confirmation: always deny unless yes=True.
+    """Default confirmation stub: deny unless yes=True.
 
     This safe default means un-patched calls never unexpectedly execute
     destructive commands. create_cli() replaces this with an interactive
-    prompt so real CLI invocations ask the user.
+    TTY-aware prompt so real CLI invocations ask the user.
+
+    Args:
+        message: The confirmation prompt text (unused in this stub).
+        yes: If True, return True immediately (simulates --yes flag).
+
+    Returns:
+        True only if yes=True; False in all other cases.
     """
     return yes
 

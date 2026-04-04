@@ -46,6 +46,11 @@ class Secret:
     __slots__ = ("_value",)
 
     def __init__(self, value: str) -> None:
+        """Wrap a sensitive string value in an opaque, redaction-safe container.
+
+        Args:
+            value: The raw secret string (e.g., an API token or password).
+        """
         # Store the real value under a name-mangled-ish private slot.
         # The leading underscore is a convention; the slots guard is the
         # real protection.
@@ -58,39 +63,76 @@ class Secret:
 
         Calling .get() is a deliberate act: reviewers know that any code
         path reaching this line is handling sensitive material.
+
+        Returns:
+            The unwrapped secret string.
         """
         return object.__getattribute__(self, "_value")
 
     # --- redacted repr paths ---
 
     def __str__(self) -> str:
-        # Called by str(), format(), f-strings, and %-style formatting.
+        """Return a redacted placeholder instead of the secret value.
+
+        Called by str(), format(), f-strings, and %-style formatting.
+
+        Returns:
+            The literal string ``"***"``.
+        """
         return "***"
 
     def __repr__(self) -> str:
-        # Called by repr(), debuggers, pytest output, and dataclass __repr__.
-        # Include the type name so developers know what they're looking at,
-        # but never include the value itself.
+        """Return a safe repr that omits the secret value.
+
+        Called by repr(), debuggers, pytest output, and dataclass __repr__.
+        Includes the type name so developers know what they're looking at,
+        but never includes the value itself.
+
+        Returns:
+            The literal string ``"Secret(***)""``.
+        """
         return "Secret(***)"
 
     def __format__(self, format_spec: str) -> str:
-        # f"{secret}" calls __format__("") first, falling back to __str__ only
-        # if __format__ is absent.  We override it explicitly so that format
-        # specs like f"{secret!r}" also return a safe string.
+        """Return a redacted placeholder for all format-spec paths.
+
+        f"{secret}" calls __format__("") first, falling back to __str__ only
+        if __format__ is absent. We override it explicitly so that format
+        specs like f"{secret!r}" also return a safe string.
+
+        Args:
+            format_spec: The format specification string (ignored).
+
+        Returns:
+            The literal string ``"***"``.
+        """
         return "***"
 
     # --- truthiness without value exposure ---
 
     def __bool__(self) -> bool:
-        # Allow guard clauses like `if ctx.token:` without leaking the value.
-        # An empty string is falsy; any non-empty string is truthy.
+        """Allow truthiness checks without exposing the secret value.
+
+        Enables guard clauses like ``if ctx.token:`` without leaking the
+        value. An empty string is falsy; any non-empty string is truthy.
+
+        Returns:
+            True if the wrapped value is non-empty, False otherwise.
+        """
         return bool(object.__getattribute__(self, "_value"))
 
     # --- serialisation block ---
 
     def __reduce__(self):
-        # pickle calls __reduce__ to determine how to serialise an object.
-        # Raising TypeError here stops pickle.dumps() before it writes anything.
+        """Block pickling to prevent accidental serialisation of secrets.
+
+        pickle calls __reduce__ to determine how to serialise an object.
+        Raising TypeError here stops pickle.dumps() before it writes anything
+        to disk or the network.
+
+        Raises:
+            TypeError: Always -- Secret instances cannot be pickled.
+        """
         raise TypeError(
             "Secret cannot be pickled -- serialising secrets is unsafe. "
             "Use Secret.get() to retrieve the value and handle it explicitly."
@@ -99,13 +141,29 @@ class Secret:
     # --- safe copy semantics ---
 
     def __copy__(self) -> "Secret":
-        # copy.copy() calls __copy__ when available.  We return a new Secret
-        # so the copy is still opaque and __slots__-protected.
+        """Return a new Secret wrapping the same value.
+
+        copy.copy() calls __copy__ when available. We return a new Secret
+        so the copy is still opaque and __slots__-protected.
+
+        Returns:
+            A new Secret instance with the same underlying value.
+        """
         return Secret(object.__getattribute__(self, "_value"))
 
     def __deepcopy__(self, memo: dict) -> "Secret":
-        # copy.deepcopy() follows __deepcopy__.  Strings are immutable so a
-        # shallow copy of the value is always correct.
+        """Return a new Secret wrapping the same value (deep copy is shallow here).
+
+        copy.deepcopy() follows __deepcopy__. Strings are immutable, so a
+        shallow copy of the value is always correct and avoids any attempt
+        to recurse into the slot.
+
+        Args:
+            memo: The deepcopy memo dictionary (unused, but required by protocol).
+
+        Returns:
+            A new Secret instance with the same underlying value.
+        """
         return Secret(object.__getattribute__(self, "_value"))
 
 
@@ -132,6 +190,15 @@ class CliProcessError(Exception):
     """
 
     def __init__(self, cause: subprocess.CalledProcessError) -> None:
+        """Wrap a CalledProcessError with a human-readable message.
+
+        Extracts the fields callers care about (returncode, cmd, stderr) and
+        composes a single actionable message so that str(err) immediately
+        shows what failed and why, without needing to unwrap the cause chain.
+
+        Args:
+            cause: The original subprocess.CalledProcessError to wrap.
+        """
         # Store the fields we care about directly so callers don't have to
         # reach into the cause chain after catching this exception.
         self.returncode: int = cause.returncode

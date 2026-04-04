@@ -46,6 +46,15 @@ class LazyEntryPointCommand(click.Command):
     """
 
     def __init__(self, ep: importlib.metadata.EntryPoint) -> None:
+        """Create a lazy proxy for an entry point command.
+
+        Initialises with a stub callback and passthrough context settings so
+        Click can register this proxy in a group at startup without importing
+        the plugin module. The real command is loaded on first invocation.
+
+        Args:
+            ep: The entry point metadata object from importlib.metadata.
+        """
         # Initialize with a stub callback and passthrough context settings.
         # The real command takes over in invoke() before any callback runs.
         super().__init__(
@@ -62,7 +71,19 @@ class LazyEntryPointCommand(click.Command):
         self._loaded: click.BaseCommand | None = None
 
     def _load(self) -> click.BaseCommand:
-        """Load (and cache) the real command behind this entry point."""
+        """Import and cache the real Click command behind this entry point.
+
+        The result is cached in ``self._loaded`` so subsequent calls do not
+        re-import the plugin module. This is the single place where the lazy
+        load actually happens.
+
+        Returns:
+            The fully-initialised Click command or group from the plugin.
+
+        Raises:
+            TypeError: If the entry point loads successfully but the resulting
+                object is not a Click BaseCommand.
+        """
         if self._loaded is None:
             obj = self._entry_point.load()
             if not isinstance(obj, click.BaseCommand):
@@ -73,13 +94,30 @@ class LazyEntryPointCommand(click.Command):
         return self._loaded
 
     def _invoke_loaded(self, *args, **kwargs):
-        # This callback is never called directly; invoke() delegates to the
-        # real command before Click reaches the callback stage.
+        """Stub callback that should never be reached.
+
+        invoke() delegates to the real command before Click reaches the
+        callback stage, so this method is a safety net rather than a
+        normal execution path.
+
+        Raises:
+            RuntimeError: Always -- indicates a bug in the lazy-loading logic.
+        """
         raise RuntimeError("LazyEntryPointCommand callback should not be called directly")
 
     def invoke(self, ctx: click.Context):
-        # Delegate execution entirely to the real command, forwarding all
-        # already-parsed extra args from our passthrough context.
+        """Load the real command and delegate execution to it.
+
+        Forwards all already-parsed extra args from our passthrough context
+        so the real command sees the same argv that the user typed.
+
+        Args:
+            ctx: The Click context, whose ``ctx.args`` contains the
+                unparsed extra arguments collected by the proxy.
+
+        Returns:
+            Whatever the real command's ``main()`` returns.
+        """
         loaded = self._load()
         return loaded.main(
             args=list(ctx.args),
@@ -88,15 +126,46 @@ class LazyEntryPointCommand(click.Command):
         )
 
     def get_short_help_str(self, limit: int = 45) -> str:
-        # Called by Click when rendering the parent group's help listing.
+        """Return the short help string from the real command.
+
+        Called by Click when rendering the parent group's help listing, so
+        the lazy proxy shows the plugin's actual help text rather than a stub.
+
+        Args:
+            limit: Maximum character width for the short help string.
+
+        Returns:
+            The real command's short help string, truncated to limit chars.
+        """
         return self._load().get_short_help_str(limit)
 
     def get_help(self, ctx: click.Context) -> str:
-        # Called for `qbrd <cmd> --help` -- load the real command to get its docs.
+        """Return the full help text from the real command.
+
+        Called when the user runs ``qbrd <cmd> --help``. Loading the real
+        command here ensures the full docstring and option list are shown.
+
+        Args:
+            ctx: The current Click context.
+
+        Returns:
+            The real command's full formatted help string.
+        """
         return self._load().get_help(ctx)
 
     def get_params(self, ctx: click.Context) -> list[click.Parameter]:
-        # Called when Click parses arguments for this command.
+        """Return the parameter list from the real command.
+
+        Called by Click when it needs to parse arguments for this command,
+        so the proxy transparently exposes the real command's options and
+        arguments without requiring an eager import.
+
+        Args:
+            ctx: The current Click context.
+
+        Returns:
+            The list of Click Parameter objects declared by the real command.
+        """
         return self._load().get_params(ctx)
 
 
@@ -190,18 +259,20 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
 
 
 def discover_commands_from_entrypoints() -> dict[str, click.BaseCommand]:
-    """Discover commands from installed packages via entry points.
+    """Discover commands from installed packages via the entry points mechanism.
 
-    Reads the 'qbrd_tools.commands' entry point group. Each entry point
-    should reference a Click command or group. Entry points are wrapped in
-    lazy proxies so startup does not import every installed plugin.
+    Reads the ``qbrd_tools.commands`` entry point group from all installed
+    packages. Each entry point should reference a Click command or group.
+    Entry points are wrapped in ``LazyEntryPointCommand`` proxies so startup
+    does not trigger imports of every installed plugin.
 
     WHY entry points: This is the standard Python plugin mechanism. Plugin
-    authors declare their commands in pyproject.toml and pip handles wiring.
-    No config file or explicit registration needed.
+    authors declare their commands in ``pyproject.toml`` and pip handles the
+    wiring -- no config file or explicit registration is needed. Consumers
+    install a plugin package and its commands immediately appear in the CLI.
 
     Returns:
-        Dict mapping command name -> Click command/group.
+        Dict mapping command name to a lazy-loading Click command/group proxy.
     """
     commands: dict[str, click.BaseCommand] = {}
 

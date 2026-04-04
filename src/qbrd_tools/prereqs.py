@@ -26,21 +26,26 @@ AUTH_CHECKS: dict[str, list[str]] = {
 
 
 def require(binary: str, authenticated: bool = False) -> None:
-    """Ensure a binary is available on PATH, optionally checking auth.
+    """Ensure a binary is available on PATH, optionally checking authentication.
 
     Exits with code 1 (user error) and a descriptive message if the binary
     is not found or not authenticated. Commands call this at the top of
-    their function body:
+    their function body so failures surface before any work is done:
 
         def deploy(ctx):
             ctx.require("gh", authenticated=True)
             ...
 
     Args:
-        binary: The name of the binary to check (e.g., "docker", "gh").
-        authenticated: If True, also verify the tool is authenticated
-            using the command in AUTH_CHECKS. Tools without a known auth
-            check produce a warning but don't fail.
+        binary: The name of the binary to check (e.g., ``"docker"``, ``"gh"``).
+        authenticated: If True, also verify the tool is authenticated using
+            the command registered in AUTH_CHECKS. Tools without a known auth
+            check produce a warning but do not cause a hard failure.
+
+    Returns:
+        None. Exits the process with code 1 on failure instead of raising,
+        because missing prerequisites are a user configuration error, not a
+        programmer error.
     """
     if shutil.which(binary) is None:
         print(

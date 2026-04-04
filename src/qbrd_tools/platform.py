@@ -16,30 +16,50 @@ from pathlib import Path
 
 
 def is_linux() -> bool:
-    """True if running on Linux."""
+    """Return True if the current platform is Linux.
+
+    Returns:
+        True when sys.platform is ``"linux"``, False otherwise.
+    """
     return sys.platform == "linux"
 
 
 def is_macos() -> bool:
-    """True if running on macOS."""
+    """Return True if the current platform is macOS.
+
+    Returns:
+        True when sys.platform is ``"darwin"``, False otherwise.
+    """
     return sys.platform == "darwin"
 
 
 def is_windows() -> bool:
-    """True if running on Windows."""
+    """Return True if the current platform is Windows.
+
+    Returns:
+        True when sys.platform is ``"win32"``, False otherwise.
+    """
     return sys.platform == "win32"
 
 
 def find_repo_root(start: Path | None = None) -> Path | None:
-    """Walk up from start looking for a .git directory or file.
+    """Walk up the directory tree to locate the repository root.
 
-    Returns the repo root Path, or None if not found. Handles:
-    - Normal repos (.git is a directory)
-    - Worktrees (.git is a file containing 'gitdir: ...')
-    - Submodules (same as worktrees)
+    Searches for a ``.git`` entry (directory or file) starting from ``start``
+    and traversing toward the filesystem root. Handles:
 
-    Falls back to `git rev-parse --show-toplevel` if the walk doesn't
-    find .git, which handles edge cases like bare repos.
+    - Normal repos: ``.git`` is a directory.
+    - Worktrees and submodules: ``.git`` is a file containing ``gitdir: ...``.
+
+    Falls back to ``git rev-parse --show-toplevel`` if the directory walk
+    does not find ``.git``, which covers edge cases like bare repos.
+
+    Args:
+        start: Directory to begin the search from. Defaults to the current
+            working directory when None.
+
+    Returns:
+        The absolute Path to the repository root, or None if not found.
     """
     current = (start or Path.cwd()).resolve()
 

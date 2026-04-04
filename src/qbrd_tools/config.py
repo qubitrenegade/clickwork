@@ -35,29 +35,52 @@ class ConfigError(Exception):
 
 
 def _normalize_prefix(project_name: str) -> str:
-    """Convert a project name to an env var prefix.
+    """Convert a project name to a shell-safe environment variable prefix.
 
-    Hyphens become underscores, result is uppercased:
-    'orbit-admin' -> 'ORBIT_ADMIN'
+    Hyphens become underscores and the result is uppercased so the prefix
+    conforms to POSIX env var naming rules (e.g., ``orbit-admin`` ->
+    ``ORBIT_ADMIN``).
+
+    Args:
+        project_name: The CLI project name, possibly hyphenated.
+
+    Returns:
+        An uppercase, underscore-delimited prefix string.
     """
     return project_name.replace("-", "_").upper()
 
 
 def _key_to_env_suffix(key: str) -> str:
-    """Convert a config key to an env var suffix.
+    """Convert a dotted config key to an env var suffix.
 
-    Dots and hyphens become underscores, result is uppercased:
-    'cloudflare.account_id' -> 'CLOUDFLARE_ACCOUNT_ID'
+    Dots and hyphens become underscores and the result is uppercased so the
+    suffix can be appended to a prefix to form a valid env var name (e.g.,
+    ``cloudflare.account_id`` -> ``CLOUDFLARE_ACCOUNT_ID``).
+
+    Args:
+        key: A dotted config key, possibly containing hyphens.
+
+    Returns:
+        An uppercase, underscore-delimited env var suffix.
     """
     return key.replace(".", "_").replace("-", "_").upper()
 
 
 def _flatten_mapping(data: dict, prefix: str = "") -> dict[str, object]:
-    """Flatten nested TOML dicts into dotted-key config entries.
+    """Flatten nested TOML dicts into a single-level dotted-key mapping.
 
-    TOML dotted keys such as `cloudflare.account_id = "abc"` parse as nested
-    dicts (`{"cloudflare": {"account_id": "abc"}}`). Commands and schemas in
-    qbrd-tools use flat dotted keys, so we normalize TOML data into that shape.
+    TOML dotted keys such as ``cloudflare.account_id = "abc"`` parse as
+    nested dicts (``{"cloudflare": {"account_id": "abc"}}``). Commands and
+    schemas in qbrd-tools use flat dotted keys, so we normalize TOML data
+    into that shape before merging config layers.
+
+    Args:
+        data: A (possibly nested) dict as parsed from a TOML file.
+        prefix: Dotted key prefix accumulated during recursion. Should be
+            left as the default empty string by external callers.
+
+    Returns:
+        A flat dict mapping dotted-key strings to their leaf values.
     """
     flat: dict[str, object] = {}
     for key, value in data.items():
@@ -73,10 +96,18 @@ def _flatten_mapping(data: dict, prefix: str = "") -> dict[str, object]:
 
 
 def _load_toml(path: Path) -> dict:
-    """Load a TOML file, returning empty dict if it doesn't exist.
+    """Load a TOML file, returning an empty dict if the file does not exist.
 
-    Returns an empty dict instead of raising so callers can safely
-    call this for optional config paths without try/except noise.
+    Returning an empty dict instead of raising means callers can safely
+    invoke this for optional config paths without wrapping every call in
+    try/except, keeping the layered config logic in load_config() clean.
+
+    Args:
+        path: Filesystem path to the TOML file to load.
+
+    Returns:
+        Parsed TOML contents as a (possibly nested) dict, or an empty dict
+        if the file does not exist.
     """
     if not path.is_file():
         return {}
@@ -87,18 +118,25 @@ def _load_toml(path: Path) -> dict:
 
 
 def _check_user_config_permissions(path: Path) -> None:
-    """Refuse to load user config if readable by group or others.
+    """Refuse to load user config if it is readable by group or others.
 
-    User config may contain secrets, so it must be owner-only (0o600).
-    On Windows this check is skipped (Unix permission model doesn't apply).
+    User config may contain secrets (API tokens, personal credentials), so
+    it must be owner-only (mode ``0o600``). On Windows this check is skipped
+    because the Unix permission model does not apply.
 
-    We use fstat() on an already-open file descriptor instead of os.stat()
-    on the path to avoid a TOCTOU (time-of-check/time-of-use) race: between
-    stat() and open() an attacker could swap the file. Opening first and then
-    fstat()-ing the fd ensures we inspect the exact file we'll read.
+    We use ``fstat()`` on an already-open file descriptor instead of
+    ``os.stat()`` on the path to avoid a TOCTOU (time-of-check/time-of-use)
+    race: between stat() and open() an attacker could swap the file. Opening
+    first and then fstat()-ing the fd ensures we inspect the exact file we
+    will read.
+
+    Args:
+        path: Path to the user config file to check. If the file does not
+            exist the function returns immediately (missing config is fine).
 
     Raises:
-        ConfigError: If the file has unsafe permissions.
+        ConfigError: If the file exists and is readable by group or other
+            users (i.e., mode bits include S_IRGRP or S_IROTH).
     """
     if not path.is_file():
         # Nothing to check -- missing user config is fine (it's optional).

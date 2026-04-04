@@ -15,11 +15,15 @@ import sys
 
 
 def _is_tty() -> bool:
-    """Check if stdin is connected to a real terminal.
+    """Check whether stdin is connected to a real interactive terminal.
 
-    Returns False when input is piped (`echo y | orbit-admin deploy`)
+    Returns False when input is piped (``echo y | orbit-admin deploy``)
     or when running in CI without a terminal. This is the check that
     prevents confirmation prompts from hanging in automation.
+
+    Returns:
+        True if stdin has an ``isatty`` method and it returns True;
+        False otherwise.
     """
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
