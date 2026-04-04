@@ -1,0 +1,304 @@
+"""Layered TOML configuration with environment support.
+
+Config is loaded from multiple sources with cascading precedence
+(highest wins):
+
+    1. Environment variables (explicit mapping or auto-prefixed)
+    2. Env-specific section ([env.staging]) in repo config
+    3. [default] section in repo config (.{project-name}.toml)
+    4. User-level config (~/.config/{project-name}/config.toml)
+
+The env-specific section *overrides* [default] but doesn't *replace* it --
+keys not specified in the env section fall through to [default].
+
+Schema validation (optional) ensures required keys exist, types match,
+and secrets don't leak into repo config. User config with loose permissions
+is refused (not just warned) to prevent secret leakage.
+"""
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from pathlib import Path
+
+# tomllib is stdlib in Python 3.11+. No external dependency needed.
+import tomllib
+
+
+class ConfigError(Exception):
+    """Raised when config validation fails.
+
+    This is a user-facing error -- the message should be actionable,
+    telling them which key is missing/invalid and where to fix it.
+    """
+
+
+def _normalize_prefix(project_name: str) -> str:
+    """Convert a project name to an env var prefix.
+
+    Hyphens become underscores, result is uppercased:
+    'orbit-admin' -> 'ORBIT_ADMIN'
+    """
+    return project_name.replace("-", "_").upper()
+
+
+def _key_to_env_suffix(key: str) -> str:
+    """Convert a config key to an env var suffix.
+
+    Dots and hyphens become underscores, result is uppercased:
+    'cloudflare.account_id' -> 'CLOUDFLARE_ACCOUNT_ID'
+    """
+    return key.replace(".", "_").replace("-", "_").upper()
+
+
+def _flatten_mapping(data: dict, prefix: str = "") -> dict[str, object]:
+    """Flatten nested TOML dicts into dotted-key config entries.
+
+    TOML dotted keys such as `cloudflare.account_id = "abc"` parse as nested
+    dicts (`{"cloudflare": {"account_id": "abc"}}`). Commands and schemas in
+    qbrd-tools use flat dotted keys, so we normalize TOML data into that shape.
+    """
+    flat: dict[str, object] = {}
+    for key, value in data.items():
+        # Build the full dotted key: prepend parent prefix if one exists.
+        full_key = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            # Recurse into nested dicts, accumulating the dotted prefix so
+            # {'cloudflare': {'account_id': 'x'}} becomes 'cloudflare.account_id'.
+            flat.update(_flatten_mapping(value, prefix=full_key))
+        else:
+            flat[full_key] = value
+    return flat
+
+
+def _load_toml(path: Path) -> dict:
+    """Load a TOML file, returning empty dict if it doesn't exist.
+
+    Returns an empty dict instead of raising so callers can safely
+    call this for optional config paths without try/except noise.
+    """
+    if not path.is_file():
+        return {}
+    # tomllib requires binary mode ("rb") -- it reads raw bytes and
+    # handles UTF-8 decoding internally.
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+def _check_user_config_permissions(path: Path) -> None:
+    """Refuse to load user config if readable by group or others.
+
+    User config may contain secrets, so it must be owner-only (0o600).
+    On Windows this check is skipped (Unix permission model doesn't apply).
+
+    We use fstat() on an already-open file descriptor instead of os.stat()
+    on the path to avoid a TOCTOU (time-of-check/time-of-use) race: between
+    stat() and open() an attacker could swap the file. Opening first and then
+    fstat()-ing the fd ensures we inspect the exact file we'll read.
+
+    Raises:
+        ConfigError: If the file has unsafe permissions.
+    """
+    if not path.is_file():
+        # Nothing to check -- missing user config is fine (it's optional).
+        return
+
+    # Skip permission check on Windows where Unix permission bits
+    # are not meaningful.
+    if sys.platform == "win32":
+        return
+
+    # Open the file first, then stat the open fd (TOCTOU-safe).
+    fd = os.open(str(path), os.O_RDONLY)
+    try:
+        st = os.fstat(fd)
+        mode = stat.S_IMODE(st.st_mode)
+        # S_IRGRP = group-read bit, S_IROTH = other-read bit.
+        # Either being set means the file is too permissive for secrets.
+        if mode & (stat.S_IRGRP | stat.S_IROTH):
+            raise ConfigError(
+                f"User config {path} has unsafe permission {oct(mode)} "
+                f"(readable by group/others). Secrets may be exposed.\n"
+                f"Fix with: chmod 600 {path}"
+            )
+    finally:
+        # Always close the fd, even if an exception is raised above.
+        os.close(fd)
+
+
+def load_config(
+    project_name: str,
+    repo_config_path: Path | None = None,
+    user_config_path: Path | None = None,
+    env: str | None = None,
+    schema: dict | None = None,
+) -> dict:
+    """Load and merge config from all sources.
+
+    Args:
+        project_name: CLI project name (e.g., "orbit-admin"). Used for
+            env var prefix and default config file paths.
+        repo_config_path: Path to repo-level config (.orbit-admin.toml).
+            If None, looks for .{project_name}.toml in cwd.
+        user_config_path: Path to user-level config. If None, uses
+            ~/.config/{project_name}/config.toml.
+        env: Selected environment (e.g., "staging"). Overridden by
+            {PROJECT_NAME}_ENV env var if set.
+        schema: Optional config schema dict for validation.
+
+    Returns:
+        Merged config dict with all keys resolved.
+
+    Raises:
+        ConfigError: If schema validation fails (missing required key,
+            secret in repo config, type mismatch, unsafe permissions).
+    """
+    # Derive the env var prefix once; used throughout this function.
+    # 'test-cli' -> 'TEST_CLI'
+    prefix = _normalize_prefix(project_name)
+
+    # {PROJECT_NAME}_ENV overrides the --env flag so CI pipelines can set
+    # the environment without modifying every command invocation.
+    if env is None:
+        env = os.environ.get(f"{prefix}_ENV")
+
+    # -------------------------------------------------------------------------
+    # Layer 4 (lowest priority): User-level config
+    # -------------------------------------------------------------------------
+    # User config lives outside the repo and may contain secrets (API tokens,
+    # personal credentials). It is deliberately lowest priority so repo config
+    # can override it for shared settings like bucket names.
+    if user_config_path is None:
+        user_config_path = Path.home() / ".config" / project_name / "config.toml"
+
+    # Refuse to load user config if it's too permissive -- secrets must not
+    # be readable by group or other users on the same machine.
+    _check_user_config_permissions(user_config_path)
+    user_config = _flatten_mapping(_load_toml(user_config_path))
+
+    # -------------------------------------------------------------------------
+    # Layer 3: Repo [default] section
+    # -------------------------------------------------------------------------
+    # The repo config lives at .{project_name}.toml in the project root.
+    # It's checked into git and holds non-secret defaults shared by the team.
+    if repo_config_path is None:
+        repo_config_path = Path.cwd() / f".{project_name}.toml"
+
+    # Load the full TOML file once; we'll extract sections from it below.
+    repo_data = _load_toml(repo_config_path)
+
+    # The [default] section provides baseline values for all environments.
+    repo_default = _flatten_mapping(repo_data.get("default", {}))
+
+    # -------------------------------------------------------------------------
+    # Layer 2: Env-specific section
+    # -------------------------------------------------------------------------
+    # [env.production], [env.staging], etc. overlay [default] -- keys present
+    # in the env section override [default], but keys absent from the env
+    # section still fall through to [default].
+    repo_env: dict = {}
+    if env and "env" in repo_data and env in repo_data["env"]:
+        repo_env = _flatten_mapping(repo_data["env"][env])
+
+    # -------------------------------------------------------------------------
+    # Build the merged config dict: user < default < env-specific
+    # -------------------------------------------------------------------------
+    # dict.update() means the last write wins, so we apply layers in order
+    # from lowest to highest priority.
+    config: dict = {}
+    config.update(user_config)   # Layer 4: lowest priority
+    config.update(repo_default)  # Layer 3: overrides user
+    config.update(repo_env)      # Layer 2: overrides default
+
+    # Track which keys came from repo config so the secret check can
+    # identify values that should never live in a git-tracked file.
+    repo_keys = set(repo_default.keys()) | set(repo_env.keys())
+
+    # -------------------------------------------------------------------------
+    # Layer 1 (highest priority): Environment variables
+    # -------------------------------------------------------------------------
+    # Two mechanisms for env var resolution:
+    #   a) Explicit mapping: schema["key"]["env"] = "CF_ACCOUNT_ID"
+    #      Use this for third-party env var names that don't follow our prefix.
+    #   b) Auto-prefix: PROJECT_NAME_KEY (dots -> underscores, uppercased)
+    #      Use this for keys that follow our naming convention.
+    #
+    # Explicit wins over auto-prefix when both are set.
+
+    # Pass (a): Apply explicit env var mappings from schema.
+    if schema:
+        for key, key_schema in schema.items():
+            explicit_env = key_schema.get("env")
+            if explicit_env and explicit_env in os.environ:
+                # Explicit mapping wins -- set it now so the auto-prefix
+                # pass below skips this key.
+                config[key] = os.environ[explicit_env]
+
+    # Collect all keys to check for auto-prefixed env vars. We include schema
+    # keys even if they don't appear in any config file -- an env var can
+    # inject a value for a schema-declared key that has no file fallback.
+    all_keys = set(config.keys())
+    if schema:
+        all_keys |= set(schema.keys())
+
+    # Pass (b): Apply auto-prefixed env vars for all known keys.
+    for key in all_keys:
+        # 'test-cli' + 'cloudflare.account_id' -> 'TEST_CLI_CLOUDFLARE_ACCOUNT_ID'
+        auto_var = f"{prefix}_{_key_to_env_suffix(key)}"
+        if auto_var in os.environ:
+            # Only apply auto-prefix if no explicit mapping already set this key.
+            # An explicit mapping in the schema indicates the author prefers a
+            # specific env var name; we must not silently override their choice.
+            explicit_env = (schema or {}).get(key, {}).get("env")
+            if not (explicit_env and explicit_env in os.environ):
+                config[key] = os.environ[auto_var]
+
+    # -------------------------------------------------------------------------
+    # Schema validation
+    # -------------------------------------------------------------------------
+    # Validation runs after all layers are merged so it sees the final values.
+    # Order matters: secret check first (refuse dangerous configs early),
+    # then defaults (fill missing values), then type check, then required check.
+    if schema:
+        for key, key_schema in schema.items():
+
+            # Secret check: keys tagged secret=True must not appear in repo
+            # config. Repo config is checked into git and visible to anyone
+            # with repo access. Secrets must live in user config or env vars.
+            if key_schema.get("secret") and key in repo_keys:
+                raise ConfigError(
+                    f"Config key '{key}' is tagged as secret but appears in "
+                    f"repo config ({repo_config_path}). Move it to user config "
+                    f"({user_config_path}) or use an environment variable."
+                )
+
+            # Default fill: if the key is still absent after all layers,
+            # apply the schema default. This runs after env vars so that
+            # a live env var always beats the schema default.
+            if key not in config and "default" in key_schema:
+                config[key] = key_schema["default"]
+
+            # Type check: validate the resolved value matches the declared type.
+            # This catches mistakes like bucket = 42 in TOML when a string was
+            # expected, or a stale env var with the wrong format.
+            expected_type = key_schema.get("type")
+            if expected_type and key in config:
+                if not isinstance(config[key], expected_type):
+                    raise ConfigError(
+                        f"Config key '{key}' has type {type(config[key]).__name__}, "
+                        f"expected {expected_type.__name__}. "
+                        f"Check the value in {repo_config_path} or {user_config_path}."
+                    )
+
+            # Required check: if the key is still absent after defaults and
+            # env vars, raise so the user gets a clear error rather than a
+            # confusing KeyError later in command code.
+            if key_schema.get("required") and key not in config:
+                raise ConfigError(
+                    f"Required config key '{key}' is missing. "
+                    f"Set it in {repo_config_path}, {user_config_path}, "
+                    f"or via environment variable."
+                )
+
+    return config
