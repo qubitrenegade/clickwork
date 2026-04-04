@@ -45,10 +45,9 @@ def setup_logging(
     logger = logging.getLogger(name)
     logger.setLevel(level)
 
-    # Only add a handler if the logger doesn't already have one.
-    # This prevents duplicate output when setup_logging is called multiple
-    # times (e.g., in tests).
     if not logger.handlers:
+        # No handler yet -- create one and attach it.
+        # This is the common path on first call (e.g., a fresh CLI invocation).
         handler = logging.StreamHandler(sys.stderr)
         handler.setLevel(level)
 
@@ -61,5 +60,12 @@ def setup_logging(
 
         handler.setFormatter(logging.Formatter(fmt))
         logger.addHandler(handler)
+    else:
+        # Handler already exists (e.g., setup_logging called again with a
+        # different verbosity in the same process, or in tests).  Update the
+        # existing handler's level so the new verbosity takes effect rather
+        # than being silently ignored.
+        for handler in logger.handlers:
+            handler.setLevel(level)
 
     return logger

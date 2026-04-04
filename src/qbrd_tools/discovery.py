@@ -12,10 +12,14 @@ Two mechanisms find Click commands:
 The discovery_mode parameter controls which are active:
 - "dev": directory only
 - "installed": entry points only
-- "auto" (default): directory if commands_dir exists, else entry points
+- "auto" (default): entry points always, PLUS directory scanning when
+  commands_dir exists. Both mechanisms run concurrently; local (directory)
+  commands win on name conflicts and an info message is logged.
 
-When both are active (shouldn't normally happen), directory commands win
-on name conflicts, with a warning logged.
+In a typical dev workflow the package is pip-installed (editable or
+otherwise), so entry points exist AND a commands/ directory is present.
+Running both and letting local commands shadow installed ones is the most
+useful default.
 """
 from __future__ import annotations
 
@@ -109,20 +113,29 @@ class LazyEntryPointCommand(click.Command):
         """Load the real command and delegate execution to it.
 
         Forwards all already-parsed extra args from our passthrough context
-        so the real command sees the same argv that the user typed.
+        so the real command sees the same argv that the user typed.  We pass
+        ``obj=ctx.obj`` to ``loaded.main()`` so the CliContext built by
+        ``create_cli()`` is propagated into the real command's context --
+        without this, installed plugin commands would see a ``None`` obj and
+        any ``@pass_cli_context`` / ``@click.pass_obj`` decorator would fail.
 
         Args:
             ctx: The Click context, whose ``ctx.args`` contains the
-                unparsed extra arguments collected by the proxy.
+                unparsed extra arguments collected by the proxy and whose
+                ``ctx.obj`` holds the CliContext built by create_cli().
 
         Returns:
             Whatever the real command's ``main()`` returns.
         """
         loaded = self._load()
+        # Pass obj=ctx.obj so the new context created by loaded.main() carries
+        # the CliContext forward.  Click forwards **extra kwargs through
+        # make_context() -> Context(), and Context accepts obj as a keyword arg.
         return loaded.main(
             args=list(ctx.args),
             prog_name=ctx.command_path,
             standalone_mode=False,
+            obj=ctx.obj,
         )
 
     def get_short_help_str(self, limit: int = 45) -> str:

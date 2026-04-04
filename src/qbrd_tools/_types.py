@@ -288,7 +288,7 @@ class CliContext:
 
     # --- logging ---
 
-    logger: Any = field(default_factory=lambda: logging.getLogger("qbrd"))
+    logger: Any = field(default_factory=lambda: logging.getLogger("qbrd_tools"))
     """Configured logger instance.  Accepts Any to avoid coupling to Logger."""
 
     # --- injectable subprocess helpers ---
@@ -300,7 +300,7 @@ class CliContext:
     """Run a command, inheriting stdio.  Raises CliProcessError on failure."""
 
     capture: Optional[Callable] = field(default=None, repr=False, compare=False)
-    """Run a command and return (stdout, stderr) as strings."""
+    """Run a command and return stripped stdout as a string."""
 
     require: Optional[Callable] = field(default=None, repr=False, compare=False)
     """Assert that a binary exists on PATH, raising a clear error if not."""

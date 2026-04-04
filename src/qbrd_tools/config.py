@@ -117,7 +117,26 @@ def _load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
-def _check_user_config_permissions(path: Path) -> None:
+def _load_toml_from_bytes(data: bytes) -> dict:
+    """Parse TOML from an in-memory bytes buffer.
+
+    Used when the caller has already read the file bytes (e.g., from an
+    fd held open for TOCTOU-safe permission checking) and needs to parse
+    them without re-opening the file by path.
+
+    Args:
+        data: Raw TOML file contents as bytes.
+
+    Returns:
+        Parsed TOML contents as a (possibly nested) dict.
+    """
+    # tomllib.loads() requires a str, but tomllib.load() requires a binary
+    # IO object.  We use an in-memory BytesIO so no second open() is needed.
+    import io
+    return tomllib.load(io.BytesIO(data))
+
+
+def _check_user_config_permissions(path: Path) -> bytes | None:
     """Refuse to load user config if it is readable by group or others.
 
     User config may contain secrets (API tokens, personal credentials), so
@@ -130,9 +149,17 @@ def _check_user_config_permissions(path: Path) -> None:
     first and then fstat()-ing the fd ensures we inspect the exact file we
     will read.
 
+    After confirming the permissions are safe, the file contents are read from
+    the same open fd and returned so the caller can parse them without
+    re-opening the file by path (which would reintroduce the TOCTOU window).
+
     Args:
         path: Path to the user config file to check. If the file does not
-            exist the function returns immediately (missing config is fine).
+            exist the function returns None (missing config is fine).
+
+    Returns:
+        The raw bytes of the file if it exists and has safe permissions,
+        or None if the file does not exist.
 
     Raises:
         ConfigError: If the file exists and is readable by group or other
@@ -140,26 +167,29 @@ def _check_user_config_permissions(path: Path) -> None:
     """
     if not path.is_file():
         # Nothing to check -- missing user config is fine (it's optional).
-        return
-
-    # Skip permission check on Windows where Unix permission bits
-    # are not meaningful.
-    if sys.platform == "win32":
-        return
+        return None
 
     # Open the file first, then stat the open fd (TOCTOU-safe).
     fd = os.open(str(path), os.O_RDONLY)
     try:
-        st = os.fstat(fd)
-        mode = stat.S_IMODE(st.st_mode)
-        # S_IRGRP = group-read bit, S_IROTH = other-read bit.
-        # Either being set means the file is too permissive for secrets.
-        if mode & (stat.S_IRGRP | stat.S_IROTH):
-            raise ConfigError(
-                f"User config {path} has unsafe permission {oct(mode)} "
-                f"(readable by group/others). Secrets may be exposed.\n"
-                f"Fix with: chmod 600 {path}"
-            )
+        # Skip permission check on Windows where Unix permission bits
+        # are not meaningful.
+        if sys.platform != "win32":
+            st = os.fstat(fd)
+            mode = stat.S_IMODE(st.st_mode)
+            # S_IRGRP = group-read bit, S_IROTH = other-read bit.
+            # Either being set means the file is too permissive for secrets.
+            if mode & (stat.S_IRGRP | stat.S_IROTH):
+                raise ConfigError(
+                    f"User config {path} has unsafe permission {oct(mode)} "
+                    f"(readable by group/others). Secrets may be exposed.\n"
+                    f"Fix with: chmod 600 {path}"
+                )
+
+        # Read from the already-open fd so we don't reopen the file by path.
+        # This is the TOCTOU-safe read: we hold the fd across the permission
+        # check and the read, so no substitution can happen between them.
+        return os.read(fd, os.fstat(fd).st_size)
     finally:
         # Always close the fd, even if an exception is raised above.
         os.close(fd)
@@ -181,8 +211,8 @@ def load_config(
             If None, looks for .{project_name}.toml in cwd.
         user_config_path: Path to user-level config. If None, uses
             ~/.config/{project_name}/config.toml.
-        env: Selected environment (e.g., "staging"). Overridden by
-            {PROJECT_NAME}_ENV env var if set.
+        env: Selected environment (e.g., "staging"). Falls back to the
+            {PROJECT_NAME}_ENV env var when --env is omitted (i.e., env is None).
         schema: Optional config schema dict for validation.
 
     Returns:
@@ -196,8 +226,9 @@ def load_config(
     # 'test-cli' -> 'TEST_CLI'
     prefix = _normalize_prefix(project_name)
 
-    # {PROJECT_NAME}_ENV overrides the --env flag so CI pipelines can set
-    # the environment without modifying every command invocation.
+    # {PROJECT_NAME}_ENV is a fallback when --env is omitted (env is None).
+    # CI pipelines can set this env var to select an environment without
+    # modifying every command invocation.
     if env is None:
         env = os.environ.get(f"{prefix}_ENV")
 
@@ -212,8 +243,15 @@ def load_config(
 
     # Refuse to load user config if it's too permissive -- secrets must not
     # be readable by group or other users on the same machine.
-    _check_user_config_permissions(user_config_path)
-    user_config = _flatten_mapping(_load_toml(user_config_path))
+    # _check_user_config_permissions opens the file, checks permissions via
+    # fstat(), and returns the raw bytes read from the same fd.  We then parse
+    # those bytes directly, avoiding a second open() that would reintroduce a
+    # TOCTOU window between the permission check and the read.
+    user_config_bytes = _check_user_config_permissions(user_config_path)
+    if user_config_bytes is not None:
+        user_config = _flatten_mapping(_load_toml_from_bytes(user_config_bytes))
+    else:
+        user_config = {}
 
     # -------------------------------------------------------------------------
     # Layer 3: Repo [default] section

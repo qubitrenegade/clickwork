@@ -32,7 +32,6 @@ from qbrd_tools.process import (
 )
 from qbrd_tools.prereqs import require as _require
 from qbrd_tools.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
-import qbrd_tools.process as _process_module
 
 
 # Exit codes per spec:
@@ -301,17 +300,22 @@ def create_cli(
         # confirm() and confirm_destructive() close over yes so --yes propagates.
         cli_ctx.confirm = lambda msg: _confirm(msg, yes=cli_ctx.yes)
         cli_ctx.confirm_destructive = lambda msg: _confirm_destructive(msg, yes=cli_ctx.yes)
-        cli_ctx.run_with_confirm = lambda cmd, msg, env=None: _run_with_confirm(
-            cmd, msg, yes=cli_ctx.yes, dry_run=cli_ctx.dry_run, env=env,
-        )
 
-        # Wire the framework's confirm() into the process module so
-        # run_with_confirm() in process.py uses TTY-aware prompts.
-        # The module-level _confirm_fn is the pluggable slot that process.py
-        # checks when run_with_confirm() is called directly (not via ctx).
-        _process_module._confirm_fn = lambda msg, yes=False: _confirm(
-            msg, yes=yes or cli_ctx.yes,
-        )
+        # run_with_confirm on the context uses the framework's TTY-aware
+        # confirm() directly through the closure -- no module-level mutation
+        # needed.  This means multiple CLI instances in the same process each
+        # carry their own confirm function and never share state.
+        def _ctx_run_with_confirm(
+            cmd: list,
+            msg: str,
+            env: dict | None = None,
+        ):
+            """Confirm then run, using the framework's TTY-aware prompt."""
+            if not _confirm(msg, yes=cli_ctx.yes):
+                return None
+            return _run(cmd, dry_run=cli_ctx.dry_run, env=env)
+
+        cli_ctx.run_with_confirm = _ctx_run_with_confirm
 
         # Attach the CliContext to Click's ctx.obj so all subcommands can
         # receive it via @click.pass_obj or @pass_cli_context.
