@@ -23,7 +23,6 @@ import os
 import shlex
 import signal
 import subprocess
-import sys
 
 from qbrd_tools._types import CliProcessError
 
@@ -115,8 +114,17 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
         # User pressed Ctrl-C. Tell the child to stop gracefully via SIGINT
         # (the same signal the terminal sent us), then wait for it to exit
         # before propagating the interruption upward.
-        proc.send_signal(signal.SIGINT)
-        proc.wait()
+        try:
+            proc.send_signal(signal.SIGINT)
+        except (ProcessLookupError, OSError):
+            # The child may already have exited by the time we forward SIGINT.
+            pass
+        try:
+            proc.wait()
+        except (ProcessLookupError, OSError):
+            # If the process is already gone, the important part is that we
+            # still re-raise KeyboardInterrupt for the caller.
+            pass
         raise
 
 

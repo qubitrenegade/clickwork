@@ -23,12 +23,12 @@ useful default.
 """
 from __future__ import annotations
 
-import importlib
 import importlib.metadata
 import importlib.util
 import logging
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import click
 
@@ -112,12 +112,12 @@ class LazyEntryPointCommand(click.Command):
     def invoke(self, ctx: click.Context):
         """Load the real command and delegate execution to it.
 
-        Forwards all already-parsed extra args from our passthrough context
-        so the real command sees the same argv that the user typed.  We pass
-        ``obj=ctx.obj`` to ``loaded.main()`` so the CliContext built by
-        ``create_cli()`` is propagated into the real command's context --
-        without this, installed plugin commands would see a ``None`` obj and
-        any ``@pass_cli_context`` / ``@click.pass_obj`` decorator would fail.
+        The proxy deliberately does not pre-parse the real command's options.
+        That keeps installed-mode behavior aligned with the real command,
+        which then parses the original argv itself. We pass ``obj=ctx.obj``
+        so the CliContext built by ``create_cli()`` is propagated into the
+        real command's context and ``@pass_cli_context`` / ``@click.pass_obj``
+        keep working.
 
         Args:
             ctx: The Click context, whose ``ctx.args`` contains the
@@ -166,21 +166,6 @@ class LazyEntryPointCommand(click.Command):
         """
         return self._load().get_help(ctx)
 
-    def get_params(self, ctx: click.Context) -> list[click.Parameter]:
-        """Return the parameter list from the real command.
-
-        Called by Click when it needs to parse arguments for this command,
-        so the proxy transparently exposes the real command's options and
-        arguments without requiring an eager import.
-
-        Args:
-            ctx: The current Click context.
-
-        Returns:
-            The list of Click Parameter objects declared by the real command.
-        """
-        return self._load().get_params(ctx)
-
 
 def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseCommand]:
     """Scan a directory for .py files that export a 'cli' Click command.
@@ -208,6 +193,22 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
     if not commands_dir.is_dir():
         return commands
 
+    # Make the private discovery namespace behave like a real package so
+    # modules inside commands/ can use sibling-relative imports such as
+    # `from .helper import ...`.
+    package_name = "qbrd_tools._discovered"
+    package = sys.modules.get(package_name)
+    dir_path = str(commands_dir)
+    if package is None:
+        package = ModuleType(package_name)
+        package.__path__ = [dir_path]  # type: ignore[attr-defined]
+        sys.modules[package_name] = package
+    else:
+        package_path = list(getattr(package, "__path__", []))
+        if dir_path not in package_path:
+            package_path.append(dir_path)
+            package.__path__ = package_path  # type: ignore[attr-defined]
+
     for py_file in sorted(commands_dir.glob("*.py")):
         # Skip __init__.py, __main__.py, and any other dunder files.
         # These are package plumbing, not command entry points.
@@ -224,7 +225,8 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
             continue
 
         module = importlib.util.module_from_spec(spec)
-        # Register in sys.modules before exec so relative imports work.
+        # Register under the private discovery package before exec so
+        # relative imports can resolve sibling helper modules.
         sys.modules[module_name] = module
         try:
             spec.loader.exec_module(module)  # type: ignore[union-attr]
@@ -260,12 +262,10 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
             )
             continue
 
-        # Key the command by the filename stem, not by cli_attr.name.
-        # WHY: Click applies transformations to function names (e.g. strips
-        # trailing `_cmd`, replaces `_` with `-`). Using the filename as the
-        # canonical key gives predictable, filesystem-consistent naming and
-        # avoids surprises when Click silently mangles a function name.
-        cmd_name = py_file.stem
+        # Key by the exposed Click command name so discovery is consistent
+        # with installed entry points. Fall back to the filename only if the
+        # command object has no explicit name.
+        cmd_name = cli_attr.name or py_file.stem
         commands[cmd_name] = cli_attr
 
     return commands
@@ -327,7 +327,7 @@ def discover_commands(
         discovery_mode: Controls which mechanism(s) are used.
             "dev"       -- directory scanning only (ignores entry points)
             "installed" -- entry points only (ignores commands_dir)
-            "auto"      -- directory if commands_dir exists, else entry points
+            "auto"      -- entry points always, plus directory if commands_dir exists
 
     Returns:
         Dict mapping command name -> Click command/group.

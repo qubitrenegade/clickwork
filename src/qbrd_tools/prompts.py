@@ -28,6 +28,14 @@ def _is_tty() -> bool:
     return hasattr(sys.stdin, "isatty") and sys.stdin.isatty()
 
 
+def _read_response(prompt: str) -> str | None:
+    """Read a prompt response, returning None when input is interrupted."""
+    try:
+        return input(prompt)
+    except (EOFError, KeyboardInterrupt):
+        return None
+
+
 def confirm(message: str, yes: bool = False) -> bool:
     """Ask the user a yes/no question. Default is no.
 
@@ -43,7 +51,10 @@ def confirm(message: str, yes: bool = False) -> bool:
     if not _is_tty():
         return False
 
-    response = input(f"{message} [y/N] ").strip().lower()
+    response = _read_response(f"{message} [y/N] ")
+    if response is None:
+        return False
+    response = response.strip().lower()
     return response in ("y", "yes")
 
 
@@ -65,5 +76,8 @@ def confirm_destructive(message: str, yes: bool = False) -> bool:
     if not _is_tty():
         return False
 
-    response = input(f"{message}\nType 'yes' to confirm: ").strip().lower()
+    response = _read_response(f"{message}\nType 'yes' to confirm: ")
+    if response is None:
+        return False
+    response = response.strip().lower()
     return response == "yes"

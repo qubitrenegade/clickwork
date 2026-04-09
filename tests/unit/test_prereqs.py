@@ -16,11 +16,11 @@ class TestRequire:
     """require() checks that a binary exists on PATH."""
 
     def test_passes_for_existing_binary(self):
-        """'echo' exists on every system -- this should always pass."""
+        """A present binary should pass regardless of the host platform."""
         from qbrd_tools.prereqs import require
 
-        # Should not raise.
-        require("echo")
+        with patch("shutil.which", return_value="/usr/bin/fake"):
+            require("fake-tool")
 
     def test_raises_for_missing_binary(self):
         from qbrd_tools.prereqs import require

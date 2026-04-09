@@ -94,7 +94,7 @@ Two mechanisms, selected via `discovery_mode`:
 
 - **Auto mode (default):** Uses directory scanning if `commands_dir` exists
   on disk, plus entry points from installed packages. Local commands win on
-  name conflicts (with a warning).
+  name conflicts (with an info log).
 
 ### Layered Config
 

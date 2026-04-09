@@ -42,14 +42,9 @@ def setup_logging(
     else:
         level = logging.WARNING
 
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-
-    if not logger.handlers:
-        # No handler yet -- create one and attach it.
-        # This is the common path on first call (e.g., a fresh CLI invocation).
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setLevel(level)
+    def configure_logger(logger: logging.Logger) -> None:
+        """Attach or update a stderr handler with the requested verbosity."""
+        logger.setLevel(level)
 
         # Use color if stderr is a real terminal (not piped/redirected).
         use_color = hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
@@ -58,14 +53,29 @@ def setup_logging(
         else:
             fmt = "%(name)s %(message)s"
 
-        handler.setFormatter(logging.Formatter(fmt))
-        logger.addHandler(handler)
-    else:
-        # Handler already exists (e.g., setup_logging called again with a
-        # different verbosity in the same process, or in tests).  Update the
-        # existing handler's level so the new verbosity takes effect rather
-        # than being silently ignored.
-        for handler in logger.handlers:
-            handler.setLevel(level)
+        formatter = logging.Formatter(fmt)
+        handler = next(
+            (
+                existing_handler
+                for existing_handler in logger.handlers
+                if isinstance(existing_handler, logging.StreamHandler)
+                and getattr(existing_handler, "stream", None) is sys.stderr
+            ),
+            None,
+        )
+        if handler is None:
+            handler = logging.StreamHandler(sys.stderr)
+            logger.addHandler(handler)
+
+        handler.setLevel(level)
+        handler.setFormatter(formatter)
+
+    logger = logging.getLogger(name)
+    configure_logger(logger)
+
+    # Framework modules log to the shared qbrd_tools namespace, so keep that
+    # logger aligned with the CLI logger as well.
+    if name != "qbrd_tools":
+        configure_logger(logging.getLogger("qbrd_tools"))
 
     return logger

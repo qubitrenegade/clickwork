@@ -16,20 +16,15 @@ Plugin authors call this once in their entry point script:
 from __future__ import annotations
 
 import functools
-import sys
 from pathlib import Path
 
 import click
 
-from qbrd_tools._types import CliContext, CliProcessError
-from qbrd_tools.config import load_config, ConfigError
-from qbrd_tools.discovery import discover_commands
 from qbrd_tools._logging import setup_logging
-from qbrd_tools.process import (
-    run as _run,
-    capture as _capture,
-    run_with_confirm as _run_with_confirm,
-)
+from qbrd_tools._types import CliContext, CliProcessError
+from qbrd_tools.config import ConfigError, load_config
+from qbrd_tools.discovery import discover_commands
+from qbrd_tools.process import capture as _capture, run as _run
 from qbrd_tools.prereqs import require as _require
 from qbrd_tools.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
 
@@ -346,10 +341,10 @@ def create_cli(
         """Invoke the CLI group and classify any unhandled exceptions.
 
         Known exception types (CliProcessError, Click's Exit and Abort) are
-        re-raised so Click's normal handlers surface them with the correct
-        exit codes. Any other unexpected exception is treated as a framework
-        bug and exits with code 2 (EXIT_FRAMEWORK_ERROR) after printing a
-        short message to stderr.
+        handled explicitly so Click's normal handlers surface them with the
+        correct exit codes. Any other unexpected exception is treated as a
+        framework bug and exits with code 2 (EXIT_FRAMEWORK_ERROR) after
+        printing a short message to stderr.
 
         Args:
             ctx: The current Click context passed to the group's invoke().
@@ -359,11 +354,11 @@ def create_cli(
         """
         try:
             return original_invoke(ctx)
-        except CliProcessError:
+        except CliProcessError as e:
             # CliProcessError = a subprocess returned non-zero.
-            # This is a user/command error (exit 1), not a framework bug.
-            # Re-raise so Click's default handler surfaces it correctly.
-            raise
+            # Emit the human-readable message and exit 1 without a traceback.
+            click.echo(str(e), err=True)
+            ctx.exit(EXIT_USER_ERROR)
         except click.exceptions.Exit:
             # Normal Click exit (e.g., from ctx.exit(0) or ctx.exit(1)).
             # Don't intercept -- let Click propagate the requested code.

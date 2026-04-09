@@ -89,7 +89,7 @@ class Secret:
         but never includes the value itself.
 
         Returns:
-            The literal string ``"Secret(***)""``.
+            The literal string ``"Secret(***)"``.
         """
         return "Secret(***)"
 

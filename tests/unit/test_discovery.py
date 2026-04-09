@@ -7,7 +7,7 @@ Discovery finds Click commands from two sources:
 The discovery_mode parameter controls which mechanisms are active:
 - "dev": directory scanning only
 - "installed": entry points only
-- "auto": directory scanning if commands_dir exists, else entry points
+- "auto": entry points always, plus directory scanning when commands_dir exists
 
 Installed-mode discovery is intentionally lazy: entry points are wrapped in
 lightweight Click proxies so startup and unrelated commands don't import every
@@ -17,6 +17,7 @@ installed plugin up front. The real command object loads on invocation, and on
 from pathlib import Path
 
 import click
+from click.testing import CliRunner
 import pytest
 
 
@@ -93,6 +94,45 @@ class TestDirectoryScanning:
         assert "deploy" in commands
         assert isinstance(commands["deploy"], click.MultiCommand)
 
+    def test_supports_relative_imports_between_command_files(self, tmp_path: Path):
+        """Command modules should be able to import sibling helper modules."""
+        from qbrd_tools.discovery import discover_commands_from_dir
+
+        (tmp_path / "helper.py").write_text("VALUE = 'hello from helper'\n")
+        (tmp_path / "greet.py").write_text(
+            "import click\n"
+            "from .helper import VALUE\n\n"
+            "@click.command()\n"
+            "def greet():\n"
+            "    click.echo(VALUE)\n\n"
+            "cli = greet\n"
+        )
+
+        commands = discover_commands_from_dir(tmp_path)
+        assert "greet" in commands
+
+        runner = CliRunner()
+        result = runner.invoke(commands["greet"], [])
+        assert result.exit_code == 0
+        assert result.output.strip() == "hello from helper"
+
+    def test_uses_explicit_click_command_name(self, tmp_path: Path):
+        """The discovered command name should match the Click-exposed name."""
+        from qbrd_tools.discovery import discover_commands_from_dir
+
+        cmd_file = tmp_path / "deploy.py"
+        cmd_file.write_text(
+            "import click\n\n"
+            "@click.command(name='deploy-site')\n"
+            "def deploy():\n"
+            "    pass\n\n"
+            "cli = deploy\n"
+        )
+
+        commands = discover_commands_from_dir(tmp_path)
+        assert "deploy-site" in commands
+        assert "deploy" not in commands
+
     def test_handles_import_error_gracefully(self, tmp_path: Path, capsys):
         """A command file that fails to import should warn, not crash."""
         from qbrd_tools.discovery import discover_commands_from_dir
@@ -156,10 +196,10 @@ class TestDiscoveryMode:
             commands_dir=commands_dir,
             discovery_mode="auto",
         )
-        assert "test_cmd" in commands
+        assert "test-cmd" in commands
 
     def test_auto_mode_falls_back_to_entrypoints(self, tmp_path: Path):
-        """When commands_dir doesn't exist, auto mode uses entry points."""
+        """When commands_dir doesn't exist, auto mode still uses entry points."""
         from qbrd_tools.discovery import discover_commands
 
         # Point at a nonexistent directory -- should fall back gracefully.
@@ -195,6 +235,33 @@ class TestEntrypoints:
         assert "hello" in commands
         assert loaded["called"] is False
 
+    def test_lazy_proxy_forwards_options_and_arguments(self, monkeypatch):
+        from qbrd_tools.discovery import discover_commands_from_entrypoints
+
+        class FakeEntryPoint:
+            name = "hello"
+
+            def load(self):
+                @click.command(name="hello")
+                @click.option("--foo", required=True)
+                @click.argument("name")
+                def hello(foo: str, name: str):
+                    click.echo(f"{foo}:{name}")
+
+                return hello
+
+        monkeypatch.setattr(
+            "importlib.metadata.entry_points",
+            lambda group=None: [FakeEntryPoint()] if group == "qbrd_tools.commands" else [],
+        )
+
+        commands = discover_commands_from_entrypoints()
+        runner = CliRunner()
+        result = runner.invoke(commands["hello"], ["--foo", "bar", "alice"])
+
+        assert result.exit_code == 0
+        assert result.output.strip() == "bar:alice"
+
     def test_local_command_shadow_logs_at_info(self, tmp_path: Path, monkeypatch, caplog):
         from qbrd_tools.discovery import discover_commands
 
@@ -212,7 +279,7 @@ class TestEntrypoints:
             "cli = hello\n"
         )
 
-        with caplog.at_level("INFO"):
+        with caplog.at_level("INFO", logger="qbrd_tools"):
             commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
         assert "hello" in commands
         assert "shadows installed plugin command" in caplog.text

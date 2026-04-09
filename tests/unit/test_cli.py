@@ -11,6 +11,7 @@ Test structure:
 - TestPassCliContextDecorator: tests the @pass_cli_context decorator
 """
 from pathlib import Path
+import sys
 
 import click
 from click.testing import CliRunner
@@ -281,7 +282,7 @@ class TestConvenienceMethods:
         @click.command()
         @click.pass_obj
         def check(ctx):
-            result = ctx.run(["false"])  # would fail if actually run
+            result = ctx.run([sys.executable, "-c", "import sys; sys.exit(1)"])
             received["result"] = result
 
         cmd_dir = tmp_path / "commands"
