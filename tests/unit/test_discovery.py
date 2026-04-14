@@ -184,19 +184,19 @@ class TestDiscoveryMode:
 
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
-        (commands_dir / "test_cmd.py").write_text(
+        (commands_dir / "status.py").write_text(
             "import click\n\n"
             "@click.command()\n"
-            "def test_cmd():\n"
+            "def status():\n"
             "    pass\n\n"
-            "cli = test_cmd\n"
+            "cli = status\n"
         )
 
         commands = discover_commands(
             commands_dir=commands_dir,
             discovery_mode="auto",
         )
-        assert "test-cmd" in commands
+        assert "status" in commands
 
     def test_auto_mode_falls_back_to_entrypoints(self, tmp_path: Path):
         """When commands_dir doesn't exist, auto mode still uses entry points."""
