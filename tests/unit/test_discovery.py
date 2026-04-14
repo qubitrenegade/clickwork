@@ -210,6 +210,29 @@ class TestDiscoveryMode:
         # No entry points installed in test env, so should be empty.
         assert isinstance(commands, dict)
 
+    def test_installed_mode_ignores_directory(self, tmp_path: Path):
+        """In installed mode, commands_dir is ignored even if it exists."""
+        from qbrd_tools.discovery import discover_commands
+
+        # Create a commands dir with a real command file
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        (commands_dir / "local.py").write_text(
+            "import click\n\n"
+            "@click.command()\n"
+            "def local():\n"
+            "    pass\n\n"
+            "cli = local\n"
+        )
+
+        # In installed mode, the directory should be ignored
+        commands = discover_commands(
+            commands_dir=commands_dir,
+            discovery_mode="installed",
+        )
+        # "local" should NOT be discovered -- only entry points are used
+        assert "local" not in commands
+
 
 class TestEntrypoints:
     """Installed-mode discovery uses lazy entry-point proxies."""

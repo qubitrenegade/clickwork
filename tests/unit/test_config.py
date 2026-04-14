@@ -175,6 +175,25 @@ class TestEnvVarResolution:
         )
         assert config["account_id"] == "explicit-wins"
 
+    def test_project_env_var_fallback(self, tmp_path: Path, monkeypatch):
+        """When --env is omitted, {PROJECT_NAME}_ENV selects the environment."""
+        from qbrd_tools.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text(
+            '[default]\nbucket = "default-bucket"\n\n'
+            '[env.staging]\nbucket = "staging-bucket"\n'
+        )
+
+        monkeypatch.setenv("TEST_CLI_ENV", "staging")
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            env=None,  # --env not passed
+        )
+        assert config["bucket"] == "staging-bucket"
+
 
 class TestSchemaValidation:
     """Config schema validates required keys, types, and defaults."""
@@ -265,6 +284,27 @@ class TestSchemaValidation:
             schema=schema,
         )
         assert config["port"] == 8080
+
+    def test_description_field_is_ignored(self, tmp_path: Path):
+        """Schema 'description' field is for documentation only -- must not cause errors."""
+        from qbrd_tools.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text('[default]\naccount_id = "abc"\n')
+
+        schema = {
+            "account_id": {
+                "required": True,
+                "description": "The account ID for deployments",
+            },
+        }
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["account_id"] == "abc"
 
 
 class TestEnvVarDottedKeys:
