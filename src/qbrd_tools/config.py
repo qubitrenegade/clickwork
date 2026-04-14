@@ -390,7 +390,10 @@ def load_config(
             if key_schema.get("secret") and key in config:
                 value = config[key]
                 # Don't double-wrap if it's already a Secret (defensive).
+                # Secret wraps strings only -- coerce to str to satisfy the
+                # type contract. TOML values are always str/int/float/bool,
+                # and secrets should always be strings in practice.
                 if not isinstance(value, Secret):
-                    config[key] = Secret(value)
+                    config[key] = Secret(str(value))
 
     return config

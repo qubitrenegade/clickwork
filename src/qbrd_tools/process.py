@@ -38,14 +38,15 @@ def _validate_cmd(cmd: list[str] | str) -> None:
     list forces callers to be explicit about each argument boundary.
 
     Args:
-        cmd: The command to validate. Must be a list; raises if it is a str.
+        cmd: The command to validate. Must be a ``list[str]``; raises if it
+            is a string, tuple, or any other type.
 
     Raises:
-        TypeError: If cmd is a string instead of a list.
+        TypeError: If cmd is not a list.
     """
-    if isinstance(cmd, str):
+    if not isinstance(cmd, list):
         raise TypeError(
-            f"cmd must be a list, not a string. Got: {cmd!r}. "
+            f"cmd must be a list, not {type(cmd).__name__}. Got: {cmd!r}. "
             "Use ['echo', 'hello'] instead of 'echo hello' to prevent shell injection."
         )
 

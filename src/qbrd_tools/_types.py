@@ -94,11 +94,12 @@ class Secret:
         return "Secret(***)"
 
     def __format__(self, format_spec: str) -> str:
-        """Return a redacted placeholder for all format-spec paths.
+        """Return a redacted placeholder for ``format(secret, spec)`` and ``f"{secret}"``.
 
-        f"{secret}" calls __format__("") first, falling back to __str__ only
-        if __format__ is absent. We override it explicitly so that format
-        specs like f"{secret!r}" also return a safe string.
+        This covers calls such as ``format(secret, spec)``, ``f"{secret}"``,
+        and ``f"{secret:spec}"``. The ``!r`` f-string conversion is handled
+        by ``__repr__`` before formatting, so ``f"{secret!r}"`` is protected
+        by ``__repr__``, not by this method.
 
         Args:
             format_spec: The format specification string (ignored).
@@ -267,7 +268,7 @@ class CliContext:
     # --- core configuration ---
 
     config: dict = field(default_factory=dict)
-    """Merged config from layered TOML/YAML files, keyed by string."""
+    """Merged config from layered TOML files, keyed by string."""
 
     env: Optional[str] = None
     """Active deployment environment (e.g. "staging", "prod"), or None."""
