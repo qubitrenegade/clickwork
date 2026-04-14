@@ -79,6 +79,15 @@ python tools/my-tool.py deploy --help
 See the [sample plugin](tests/fixtures/sample-plugin/) for a complete
 working example with subcommand groups.
 
+## Documentation
+
+- **[Guide](docs/GUIDE.md)** -- Step-by-step tutorial: building a CLI,
+  adding config, using subprocess helpers, distributing as a package,
+  testing your commands.
+- **[Architecture](docs/ARCHITECTURE.md)** -- Design decisions, module
+  responsibilities, security model, and the reasoning behind non-obvious
+  choices.
+
 ## Features
 
 ### Plugin Discovery
