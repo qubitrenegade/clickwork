@@ -158,6 +158,56 @@ class TestDirectoryScanning:
         assert "bad_syntax.py" in captured.err
 
 
+class TestNamespaceIsolation:
+    """Discovery namespaces must not leak between different command dirs."""
+
+    def test_same_filename_in_two_dirs_gets_different_modules(self, tmp_path: Path):
+        """Two dirs with the same helper.py should yield independent modules.
+
+        WHY: discover_commands_from_dir() registers modules in sys.modules.
+        If the namespace is flat (qbrd_tools._discovered.helper), the second
+        scan gets the cached first helper from sys.modules -- silently
+        loading the wrong code.
+        """
+        from qbrd_tools.discovery import discover_commands_from_dir
+        from click.testing import CliRunner
+
+        # Create two directories each with a helper.py exporting 'cli'.
+        dir_a = tmp_path / "a"
+        dir_a.mkdir()
+        (dir_a / "helper.py").write_text(
+            "import click\n\n"
+            "@click.command()\n"
+            "def helper():\n"
+            "    click.echo('from-dir-a')\n\n"
+            "cli = helper\n"
+        )
+
+        dir_b = tmp_path / "b"
+        dir_b.mkdir()
+        (dir_b / "helper.py").write_text(
+            "import click\n\n"
+            "@click.command()\n"
+            "def helper():\n"
+            "    click.echo('from-dir-b')\n\n"
+            "cli = helper\n"
+        )
+
+        # Discover from both dirs.
+        cmds_a = discover_commands_from_dir(dir_a)
+        cmds_b = discover_commands_from_dir(dir_b)
+
+        assert "helper" in cmds_a
+        assert "helper" in cmds_b
+
+        # The two commands must be distinct objects producing different output.
+        runner = CliRunner()
+        result_a = runner.invoke(cmds_a["helper"], [])
+        result_b = runner.invoke(cmds_b["helper"], [])
+        assert result_a.output.strip() == "from-dir-a"
+        assert result_b.output.strip() == "from-dir-b"
+
+
 class TestDiscoveryMode:
     """discover_commands() selects mechanism based on discovery_mode."""
 

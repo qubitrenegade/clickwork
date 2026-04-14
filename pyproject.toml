@@ -28,3 +28,6 @@ pythonpath = ["src"]
 filterwarnings = [
     "error",
 ]
+markers = [
+    "network: requires network access (pip install, HTTP calls)",
+]

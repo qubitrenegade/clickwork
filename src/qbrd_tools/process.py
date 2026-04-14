@@ -25,6 +25,7 @@ import signal
 import subprocess
 
 from qbrd_tools._types import CliProcessError
+from qbrd_tools.prompts import confirm as _prompt_confirm
 
 logger = logging.getLogger("qbrd_tools")
 
@@ -128,24 +129,6 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
         raise
 
 
-# Pluggable confirmation function. Overridden by create_cli() to use the
-# framework's confirm() with TTY detection. Tests can patch this directly.
-def _confirm_fn(message: str, yes: bool = False) -> bool:
-    """Default confirmation stub: deny unless yes=True.
-
-    This safe default means un-patched calls never unexpectedly execute
-    destructive commands. create_cli() replaces this with an interactive
-    TTY-aware prompt so real CLI invocations ask the user.
-
-    Args:
-        message: The confirmation prompt text (unused in this stub).
-        yes: If True, return True immediately (simulates --yes flag).
-
-    Returns:
-        True only if yes=True; False in all other cases.
-    """
-    return yes
-
 
 def run(
     cmd: list[str],
@@ -244,8 +227,8 @@ def run_with_confirm(
     """Prompt for confirmation, then execute a destructive command.
 
     Combines confirmation + execution so command authors don't forget either
-    step. The confirmation function is pluggable (_confirm_fn) -- create_cli()
-    replaces it with the framework's TTY-aware confirm().
+    step. Uses prompts.confirm() directly for TTY-aware interactive prompts.
+    When yes=True the prompt is bypassed entirely (--yes flag behaviour).
 
     Args:
         cmd: Command as an argv list.
@@ -259,10 +242,10 @@ def run_with_confirm(
     """
     _validate_cmd(cmd)
 
-    # _confirm_fn is module-level so tests can patch it directly.
-    # When yes=True the default implementation returns True immediately,
-    # bypassing any interactive prompt that create_cli() might install.
-    if not _confirm_fn(message, yes=yes):
+    # Delegate to the framework's TTY-aware confirm() from prompts.py.
+    # When yes=True, confirm() returns True immediately and skips the prompt.
+    # When stdin is not a TTY (piped/CI), confirm() returns False (safe deny).
+    if not _prompt_confirm(message, yes=yes):
         logger.info("Cancelled: %s", _format_cmd(cmd))
         return None
 

@@ -25,6 +25,8 @@ from pathlib import Path
 # tomllib is stdlib in Python 3.11+. No external dependency needed.
 import tomllib
 
+from qbrd_tools._types import Secret
+
 
 class ConfigError(Exception):
     """Raised when config validation fails.
@@ -376,5 +378,19 @@ def load_config(
                     f"Set it in {repo_config_path}, {user_config_path}, "
                     f"or via environment variable."
                 )
+
+        # -------------------------------------------------------------------------
+        # Secret wrapping
+        # -------------------------------------------------------------------------
+        # After all merging and validation, wrap any value whose schema entry
+        # has ``secret: True`` in a Secret() instance.  This prevents accidental
+        # leakage via logging, repr, or f-strings -- callers must use
+        # ``config["key"].get()`` to access the real value.
+        for key, key_schema in schema.items():
+            if key_schema.get("secret") and key in config:
+                value = config[key]
+                # Don't double-wrap if it's already a Secret (defensive).
+                if not isinstance(value, Secret):
+                    config[key] = Secret(value)
 
     return config

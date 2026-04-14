@@ -145,6 +145,36 @@ class TestCreateCli:
         assert result.exit_code == 0
         assert received_env["env"] == "staging"
 
+    def test_env_var_fallback_sets_ctx_env(self, tmp_path: Path, monkeypatch):
+        """When --env is omitted, {PROJECT_NAME}_ENV env var should set ctx.env.
+
+        WHY: CI pipelines set TEST_CLI_ENV=staging to select an environment
+        without modifying every command invocation. If ctx.env stays None
+        while config values come from [env.staging], commands that branch
+        on ctx.env would take the wrong path.
+        """
+        from qbrd_tools.cli import create_cli
+
+        monkeypatch.setenv("TEST_CLI_ENV", "staging")
+
+        received_env = {}
+
+        @click.command()
+        @click.pass_obj
+        def check(ctx):
+            received_env["env"] = ctx.env
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(check)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["check"])
+        assert result.exit_code == 0
+        assert received_env["env"] == "staging"
+
     def test_dry_run_flag_sets_context(self, tmp_path: Path):
         """--dry-run should set ctx.obj.dry_run = True.
 

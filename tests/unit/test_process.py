@@ -133,7 +133,9 @@ class TestRunWithConfirm:
         from qbrd_tools.process import run_with_confirm
         from unittest.mock import patch
 
-        with patch("qbrd_tools.process._confirm_fn", return_value=True):
+        # Patch the imported binding in the process module so the already-
+        # resolved _prompt_confirm name is replaced for this test.
+        with patch("qbrd_tools.process._prompt_confirm", return_value=True):
             result = run_with_confirm(
                 [sys.executable, "-c", "print('hello')"],
                 "Delete everything?",
@@ -145,7 +147,9 @@ class TestRunWithConfirm:
         from qbrd_tools.process import run_with_confirm
         from unittest.mock import patch
 
-        with patch("qbrd_tools.process._confirm_fn", return_value=False):
+        # Patch the imported binding in the process module so the already-
+        # resolved _prompt_confirm name is replaced for this test.
+        with patch("qbrd_tools.process._prompt_confirm", return_value=False):
             result = run_with_confirm(
                 [sys.executable, "-c", "print('hello')"],
                 "Delete everything?",

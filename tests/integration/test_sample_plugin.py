@@ -3,14 +3,21 @@
 Installs the sample plugin into the test environment and verifies it's
 discoverable via entry points. This test is slower (subprocess pip install)
 but catches real packaging issues.
+
+Marked ``network`` because pip install needs to download build dependencies
+(hatchling) from PyPI. Skip with ``pytest -m "not network"`` in sandboxed
+or offline environments.
 """
 import subprocess
 import sys
+
+import pytest
 
 
 class TestSamplePlugin:
     """Verify sample-plugin commands work when installed via entry points."""
 
+    @pytest.mark.network
     def test_hello_greet_via_installed_entrypoint(self, tmp_path):
         """Install the fixture into a temp venv and invoke it via installed mode."""
         from pathlib import Path
@@ -46,6 +53,7 @@ raise SystemExit(result.exit_code)
         )
         assert "Hello, World!" in result.stdout
 
+    @pytest.mark.network
     def test_installed_help_lists_sample_plugin_command(self, tmp_path):
         from pathlib import Path
 

@@ -22,7 +22,7 @@ import click
 
 from qbrd_tools._logging import setup_logging
 from qbrd_tools._types import CliContext, CliProcessError
-from qbrd_tools.config import ConfigError, load_config
+from qbrd_tools.config import ConfigError, _normalize_prefix, load_config
 from qbrd_tools.discovery import discover_commands
 from qbrd_tools.process import capture as _capture, run as _run
 from qbrd_tools.prereqs import require as _require
@@ -247,6 +247,16 @@ def create_cli(
         # setup_logging() configures both the log level and output format
         # based on the --verbose / --quiet flags.
         logger = setup_logging(verbose=verbose, quiet=quiet, name=name)
+
+        # Resolve the env var fallback BEFORE constructing CliContext so
+        # ctx.env reflects the actual environment in use -- not just the
+        # --env flag value.  Without this, ctx.env stays None when the env
+        # is selected via {PROJECT_NAME}_ENV, even though load_config()
+        # applies the env-specific config section correctly.
+        if env is None:
+            import os
+            prefix = _normalize_prefix(name)
+            env = os.environ.get(f"{prefix}_ENV")
 
         # Load config from layered sources (user config, repo config, env vars).
         # If loading fails due to a schema violation or bad permissions, we exit

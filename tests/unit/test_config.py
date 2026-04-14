@@ -307,6 +307,86 @@ class TestSchemaValidation:
         assert config["account_id"] == "abc"
 
 
+class TestSecretWrapping:
+    """Secret-tagged config values are wrapped in Secret() instances."""
+
+    def test_secret_from_env_var_is_wrapped(self, tmp_path: Path, monkeypatch):
+        """A secret-tagged value loaded from an env var should be a Secret.
+
+        WHY: plain strings leak in logs via f-strings, repr, and %-formatting.
+        Wrapping in Secret() ensures str(value) returns '***' so accidental
+        logging of ctx.config['api_token'] never exposes the real credential.
+        """
+        from qbrd_tools.config import load_config
+        from qbrd_tools._types import Secret
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_API_TOKEN", "super-secret-value")
+
+        schema = {
+            "api_token": {"secret": True},
+        }
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert isinstance(config["api_token"], Secret)
+        assert config["api_token"].get() == "super-secret-value"
+        # str() must redact the value.
+        assert str(config["api_token"]) == "***"
+
+    def test_secret_from_user_config_is_wrapped(self, tmp_path: Path):
+        """A secret-tagged value from user config should also be a Secret."""
+        import os
+        from qbrd_tools.config import load_config
+        from qbrd_tools._types import Secret
+
+        repo_config = tmp_path / ".test-cli.toml"
+        repo_config.write_text("[default]\n")
+
+        user_config = tmp_path / "user" / "config.toml"
+        user_config.parent.mkdir()
+        user_config.write_text('api_token = "from-user-config"\n')
+        os.chmod(user_config, 0o600)
+
+        schema = {
+            "api_token": {"secret": True},
+        }
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=repo_config,
+            user_config_path=user_config,
+            schema=schema,
+        )
+        assert isinstance(config["api_token"], Secret)
+        assert config["api_token"].get() == "from-user-config"
+
+    def test_non_secret_value_stays_plain_string(self, tmp_path: Path):
+        """Values without secret: True should remain plain strings."""
+        from qbrd_tools.config import load_config
+        from qbrd_tools._types import Secret
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text('[default]\nbucket = "my-bucket"\n')
+
+        schema = {
+            "bucket": {"type": str},
+        }
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert not isinstance(config["bucket"], Secret)
+        assert config["bucket"] == "my-bucket"
+
+
 class TestEnvVarDottedKeys:
     """Auto-prefix env var resolution handles dotted keys correctly."""
 

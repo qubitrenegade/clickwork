@@ -23,6 +23,7 @@ useful default.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import importlib.util
 import logging
@@ -196,9 +197,14 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
     # Make the private discovery namespace behave like a real package so
     # modules inside commands/ can use sibling-relative imports such as
     # `from .helper import ...`.
-    package_name = "qbrd_tools._discovered"
+    #
+    # Include a hash of the directory path in the package name so that two
+    # different command directories with identically-named files get separate
+    # module objects instead of colliding in sys.modules.
+    dir_path = str(commands_dir.resolve())
+    dir_hash = hashlib.sha256(dir_path.encode()).hexdigest()[:12]
+    package_name = f"qbrd_tools._discovered_{dir_hash}"
     package = sys.modules.get(package_name)
-    dir_path = str(commands_dir)
     if package is None:
         package = ModuleType(package_name)
         package.__path__ = [dir_path]  # type: ignore[attr-defined]
@@ -216,9 +222,9 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
             continue
 
         # Build a unique module name to avoid collisions in sys.modules.
-        # Using a private sub-namespace means these never clash with real
-        # installed packages, even if the filename matches one.
-        module_name = f"qbrd_tools._discovered.{py_file.stem}"
+        # The directory hash ensures that identically-named files in
+        # different command dirs get separate module entries.
+        module_name = f"{package_name}.{py_file.stem}"
         spec = importlib.util.spec_from_file_location(module_name, py_file)
         if spec is None or spec.loader is None:
             # spec is None for paths Python can't interpret as modules.
