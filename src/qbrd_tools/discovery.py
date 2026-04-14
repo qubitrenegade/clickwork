@@ -87,7 +87,7 @@ class LazyEntryPointCommand(click.Command):
 
         Raises:
             TypeError: If the entry point loads successfully but the resulting
-                object is not a Click BaseCommand.
+                object is not a Click Command.
         """
         if self._loaded is None:
             obj = self._entry_point.load()
@@ -173,13 +173,13 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
 
     Only top-level .py files are checked -- subdirectories are skipped.
     __init__.py files are skipped (they start with '_'). Files without a
-    'cli' attribute produce a stderr warning (they probably shouldn't be
-    in commands/). Import errors also produce a stderr warning so the CLI
-    remains usable even if one plugin is broken.
+    'cli' attribute produce a log warning (they probably shouldn't be in
+    commands/). Import errors also produce a log warning so the CLI remains
+    usable even if one plugin is broken.
 
-    WHY stderr warnings instead of exceptions: A broken or incomplete command
-    file should not prevent the rest of the CLI from loading. Users get a
-    clear signal without a hard crash.
+    WHY warnings instead of exceptions: A broken or incomplete command file
+    should not prevent the rest of the CLI from loading. Users get a clear
+    signal without a hard crash.
 
     Args:
         commands_dir: Path to the commands directory.
@@ -239,32 +239,28 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
         except Exception as e:
             # Covers ImportError, SyntaxError, and any runtime error at
             # module-top-level. Keep going so other commands still load.
-            print(
-                f"Warning: failed to import {py_file.name}: {e}",
-                file=sys.stderr,
-            )
+            logger.warning("Failed to import %s: %s", py_file.name, e)
             # Clean up the partial entry to avoid stale modules in sys.modules.
             sys.modules.pop(module_name, None)
             continue
 
         cli_attr = getattr(module, "cli", None)
         if cli_attr is None:
-            # Warn: the file is in the commands dir but doesn't export 'cli'.
+            # The file is in the commands dir but doesn't export 'cli'.
             # This is likely a helper that should live in lib/ instead.
-            print(
-                f"Warning: {py_file.name} has no 'cli' attribute. "
-                f"Command files must export a Click command or group as 'cli'. "
-                f"If this is a helper module, move it to lib/.",
-                file=sys.stderr,
+            logger.warning(
+                "%s has no 'cli' attribute. Command files must export a "
+                "Click command or group as 'cli'. If this is a helper "
+                "module, move it to lib/.",
+                py_file.name,
             )
             continue
 
         if not isinstance(cli_attr, click.Command):
-            # Warn: the file has a 'cli' attribute but it's not a Click command.
-            print(
-                f"Warning: {py_file.name} 'cli' attribute is not a Click command "
-                f"(got {type(cli_attr).__name__}). Skipping.",
-                file=sys.stderr,
+            logger.warning(
+                "%s 'cli' attribute is not a Click command (got %s). Skipping.",
+                py_file.name,
+                type(cli_attr).__name__,
             )
             continue
 

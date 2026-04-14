@@ -21,7 +21,7 @@ from pathlib import Path
 import click
 
 from qbrd_tools._logging import setup_logging
-from qbrd_tools._types import CliContext, CliProcessError
+from qbrd_tools._types import CliContext, CliProcessError, PrerequisiteError
 from qbrd_tools.config import ConfigError, _normalize_prefix, load_config
 from qbrd_tools.discovery import discover_commands
 from qbrd_tools.process import capture as _capture, run as _run
@@ -364,9 +364,10 @@ def create_cli(
         """
         try:
             return original_invoke(ctx)
-        except CliProcessError as e:
+        except (CliProcessError, PrerequisiteError) as e:
             # CliProcessError = a subprocess returned non-zero.
-            # Emit the human-readable message and exit 1 without a traceback.
+            # PrerequisiteError = a required tool is missing or not authenticated.
+            # Both are user errors: emit the message and exit 1 without a traceback.
             click.echo(str(e), err=True)
             ctx.exit(EXIT_USER_ERROR)
         except click.exceptions.Exit:

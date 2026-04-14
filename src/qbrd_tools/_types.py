@@ -3,17 +3,18 @@
 This module is the foundation every other module imports from.  Keep it
 dependency-free (stdlib only) so it can be safely imported anywhere.
 
-Three types are defined here:
-  - Secret      : wraps a sensitive string and redacts it in every repr path
-  - CliProcessError : converts subprocess.CalledProcessError into a rich exception
-  - CliContext  : dataclass threaded through Click's ctx.obj to every command
+Four types are defined here:
+  - Secret            : wraps a sensitive string and redacts it in every repr path
+  - CliProcessError   : converts subprocess.CalledProcessError into a rich exception
+  - PrerequisiteError : raised when a required tool is missing or not authenticated
+  - CliContext        : dataclass threaded through Click's ctx.obj to every command
 """
 from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -41,8 +42,8 @@ class Secret:
         logging.info("request headers: %s", headers)          # *** in logs
     """
 
-    # __slots__ prevents a __dict__ from being created for instances.
-    # Without __dict__ there is no attribute-bag that could leak _value.
+    # __slots__ prevents __dict__ from being created, so vars(secret) raises
+    # TypeError and there is no attribute bag that could leak the value.
     __slots__ = ("_value",)
 
     def __init__(self, value: str) -> None:
@@ -51,10 +52,7 @@ class Secret:
         Args:
             value: The raw secret string (e.g., an API token or password).
         """
-        # Store the real value under a name-mangled-ish private slot.
-        # The leading underscore is a convention; the slots guard is the
-        # real protection.
-        object.__setattr__(self, "_value", value)
+        self._value = value
 
     # --- intentional public API ---
 
@@ -67,7 +65,7 @@ class Secret:
         Returns:
             The unwrapped secret string.
         """
-        return object.__getattribute__(self, "_value")
+        return self._value
 
     # --- redacted repr paths ---
 
@@ -120,7 +118,7 @@ class Secret:
         Returns:
             True if the wrapped value is non-empty, False otherwise.
         """
-        return bool(object.__getattribute__(self, "_value"))
+        return bool(self._value)
 
     # --- serialisation block ---
 
@@ -150,7 +148,7 @@ class Secret:
         Returns:
             A new Secret instance with the same underlying value.
         """
-        return Secret(object.__getattribute__(self, "_value"))
+        return Secret(self._value)
 
     def __deepcopy__(self, memo: dict) -> "Secret":
         """Return a new Secret wrapping the same value (deep copy is shallow here).
@@ -165,7 +163,7 @@ class Secret:
         Returns:
             A new Secret instance with the same underlying value.
         """
-        return Secret(object.__getattribute__(self, "_value"))
+        return Secret(self._value)
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +214,24 @@ class CliProcessError(Exception):
         # Pass the composed message to Exception so str(err) and repr(err)
         # both show the full context without extra unwrapping.
         super().__init__(message)
+
+
+# ---------------------------------------------------------------------------
+# PrerequisiteError
+# ---------------------------------------------------------------------------
+
+class PrerequisiteError(Exception):
+    """Raised when a required tool is missing or not authenticated.
+
+    Commands call ctx.require("docker") at the top of their function body.
+    If the binary is missing or not authenticated, require() raises this
+    exception. The framework's error handler catches it and exits with
+    code 1 (user error) -- the same as CliProcessError.
+
+    Raising instead of sys.exit() lets callers catch and recover if they
+    want to (e.g., fall back to an alternative tool), and keeps require()
+    composable and testable.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +286,7 @@ class CliContext:
     config: dict = field(default_factory=dict)
     """Merged config from layered TOML files, keyed by string."""
 
-    env: Optional[str] = None
+    env: str | None = None
     """Active deployment environment (e.g. "staging", "prod"), or None."""
 
     # --- global flags ---
@@ -289,28 +305,40 @@ class CliContext:
 
     # --- logging ---
 
-    logger: Any = field(default_factory=lambda: logging.getLogger("qbrd_tools"))
-    """Configured logger instance.  Accepts Any to avoid coupling to Logger."""
+    logger: logging.Logger = field(default_factory=lambda: logging.getLogger("qbrd_tools"))
+    """Configured logger instance."""
 
     # --- injectable subprocess helpers ---
     # These are None by default so CliContext can be constructed in tests
     # without wiring up a full subprocess harness.  The CLI harness injects
     # concrete implementations before dispatching to command handlers.
 
-    run: Optional[Callable] = field(default=None, repr=False, compare=False)
-    """Run a command, inheriting stdio.  Raises CliProcessError on failure."""
+    run: Callable[..., subprocess.CompletedProcess | None] | None = field(
+        default=None, repr=False, compare=False,
+    )
+    """Run a command, inheriting stdio. Raises CliProcessError on failure."""
 
-    capture: Optional[Callable] = field(default=None, repr=False, compare=False)
+    capture: Callable[..., str] | None = field(
+        default=None, repr=False, compare=False,
+    )
     """Run a command and return stripped stdout as a string."""
 
-    require: Optional[Callable] = field(default=None, repr=False, compare=False)
-    """Assert that a binary exists on PATH, raising a clear error if not."""
+    require: Callable[..., None] | None = field(
+        default=None, repr=False, compare=False,
+    )
+    """Assert that a binary exists on PATH, raising PrerequisiteError if not."""
 
-    confirm: Optional[Callable] = field(default=None, repr=False, compare=False)
+    confirm: Callable[..., bool] | None = field(
+        default=None, repr=False, compare=False,
+    )
     """Prompt the user for confirmation unless --yes is set."""
 
-    confirm_destructive: Optional[Callable] = field(default=None, repr=False, compare=False)
+    confirm_destructive: Callable[..., bool] | None = field(
+        default=None, repr=False, compare=False,
+    )
     """Like confirm, but adds extra warnings for irreversible operations."""
 
-    run_with_confirm: Optional[Callable] = field(default=None, repr=False, compare=False)
+    run_with_confirm: Callable[..., subprocess.CompletedProcess | None] | None = field(
+        default=None, repr=False, compare=False,
+    )
     """Confirm then run: wraps confirm() + run() in a single call."""

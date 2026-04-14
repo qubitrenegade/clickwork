@@ -42,17 +42,17 @@ class TestDirectoryScanning:
         assert "greet" in commands
         assert isinstance(commands["greet"], click.Command)
 
-    def test_skips_files_without_cli_export(self, tmp_path: Path, capsys):
+    def test_skips_files_without_cli_export(self, tmp_path: Path, caplog):
         """Files without 'cli' attribute produce a warning, not an error."""
         from qbrd_tools.discovery import discover_commands_from_dir
 
         helper = tmp_path / "utils.py"
         helper.write_text("# Just a helper module\nHELPER = True\n")
 
-        commands = discover_commands_from_dir(tmp_path)
+        with caplog.at_level("WARNING", logger="qbrd_tools"):
+            commands = discover_commands_from_dir(tmp_path)
         assert commands == {}
-        captured = capsys.readouterr()
-        assert "utils.py" in captured.err
+        assert "utils.py" in caplog.text
 
     def test_skips_subdirectories(self, tmp_path: Path):
         """Subdirectories (like lib/) should not be scanned."""
@@ -133,29 +133,29 @@ class TestDirectoryScanning:
         assert "deploy-site" in commands
         assert "deploy" not in commands
 
-    def test_handles_import_error_gracefully(self, tmp_path: Path, capsys):
+    def test_handles_import_error_gracefully(self, tmp_path: Path, caplog):
         """A command file that fails to import should warn, not crash."""
         from qbrd_tools.discovery import discover_commands_from_dir
 
         broken = tmp_path / "broken.py"
         broken.write_text("import nonexistent_module_xyz123\n")
 
-        commands = discover_commands_from_dir(tmp_path)
+        with caplog.at_level("WARNING", logger="qbrd_tools"):
+            commands = discover_commands_from_dir(tmp_path)
         assert commands == {}
-        captured = capsys.readouterr()
-        assert "broken.py" in captured.err
+        assert "broken.py" in caplog.text
 
-    def test_handles_syntax_error_gracefully(self, tmp_path: Path, capsys):
+    def test_handles_syntax_error_gracefully(self, tmp_path: Path, caplog):
         """A command file with syntax errors should warn, not crash."""
         from qbrd_tools.discovery import discover_commands_from_dir
 
         broken = tmp_path / "bad_syntax.py"
         broken.write_text("def broken(\n")
 
-        commands = discover_commands_from_dir(tmp_path)
+        with caplog.at_level("WARNING", logger="qbrd_tools"):
+            commands = discover_commands_from_dir(tmp_path)
         assert commands == {}
-        captured = capsys.readouterr()
-        assert "bad_syntax.py" in captured.err
+        assert "bad_syntax.py" in caplog.text
 
 
 class TestNamespaceIsolation:

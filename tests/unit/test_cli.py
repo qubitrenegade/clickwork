@@ -355,6 +355,32 @@ class TestFrameworkErrorHandling:
         result = runner.invoke(cli, ["broken"])
         assert result.exit_code == 2
 
+    def test_prerequisite_error_exits_with_code_1(self, tmp_path: Path):
+        """PrerequisiteError (missing tool) should exit with code 1, not 2.
+
+        WHY: a missing binary is the user's environment problem, not a
+        framework bug. Exit code 1 tells CI it's a fixable configuration
+        error, not an internal failure.
+        """
+        from qbrd_tools.cli import create_cli
+        from qbrd_tools._types import PrerequisiteError
+
+        @click.command()
+        @click.pass_obj
+        def needs_docker(ctx):
+            raise PrerequisiteError("Required tool 'docker' is not on PATH")
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(needs_docker)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["needs-docker"])
+        assert result.exit_code == 1
+        assert "docker" in result.output
+
 
 class TestPassCliContextDecorator:
     """@pass_cli_context injects a CliContext into the command function."""

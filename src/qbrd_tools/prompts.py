@@ -29,10 +29,16 @@ def _is_tty() -> bool:
 
 
 def _read_response(prompt: str) -> str | None:
-    """Read a prompt response, returning None when input is interrupted."""
+    """Read a prompt response, returning None on EOF.
+
+    EOFError (piped input ended) returns None so the caller treats it as
+    a denial. KeyboardInterrupt is NOT caught here -- Ctrl-C should abort
+    the entire operation, not silently answer "no" to the current prompt.
+    Click's Abort handler will produce a clean "Aborted!" message.
+    """
     try:
         return input(prompt)
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
         return None
 
 

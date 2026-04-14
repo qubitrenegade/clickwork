@@ -113,8 +113,6 @@ def _load_toml(path: Path) -> dict:
     """
     if not path.is_file():
         return {}
-    # tomllib requires binary mode ("rb") -- it reads raw bytes and
-    # handles UTF-8 decoding internally.
     with open(path, "rb") as f:
         return tomllib.load(f)
 

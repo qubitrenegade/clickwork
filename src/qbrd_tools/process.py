@@ -66,7 +66,7 @@ def _build_env(env: dict[str, str] | None) -> dict[str, str] | None:
         A merged dict of os.environ plus any caller-supplied vars, or None
         if no extra vars were provided.
     """
-    if env:
+    if env is not None:
         # Spread os.environ first so caller-supplied vars win on conflict.
         # This is the safest default: commands see all the usual env vars
         # plus whatever secrets the caller injected.
@@ -198,10 +198,7 @@ def capture(
     """
     _validate_cmd(cmd)
 
-    # dry_run is intentionally unused: capturing output is a read-only
-    # operation, so it is always safe to execute even in dry-run mode.
-    # The parameter exists purely for call-site ergonomics.
-    _ = dry_run
+    _ = dry_run  # accepted for API consistency; capture always executes
 
     full_env = _build_env(env)
 
@@ -210,9 +207,6 @@ def capture(
             cmd, capture_output=True, text=True, check=True, env=full_env,
             shell=False,
         )
-        # strip() removes trailing newlines from commands like `echo` as well
-        # as any leading/trailing whitespace that the calling code shouldn't
-        # have to clean up itself.
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
         raise CliProcessError(e) from e

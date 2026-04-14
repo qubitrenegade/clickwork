@@ -5,7 +5,6 @@ Optionally require("gh", authenticated=True) to also verify auth status.
 The framework checks before the command runs and fails fast with a clear
 message if something is missing or not authenticated.
 """
-import shutil
 import subprocess
 from unittest.mock import patch
 
@@ -24,19 +23,17 @@ class TestRequire:
 
     def test_raises_for_missing_binary(self):
         from qbrd_tools.prereqs import require
+        from qbrd_tools._types import PrerequisiteError
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(PrerequisiteError):
             require("definitely-not-a-real-binary-xyz123")
-        # Exit code 1 = user error (missing prereq, fixable).
-        assert exc_info.value.code == 1
 
-    def test_error_message_names_the_binary(self, capsys):
+    def test_error_message_names_the_binary(self):
         from qbrd_tools.prereqs import require
+        from qbrd_tools._types import PrerequisiteError
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(PrerequisiteError, match="missing-tool-abc"):
             require("missing-tool-abc")
-        captured = capsys.readouterr()
-        assert "missing-tool-abc" in captured.err
 
 
 class TestRequireAuthenticated:
@@ -56,27 +53,25 @@ class TestRequireAuthenticated:
             finally:
                 del AUTH_CHECKS["fake-tool"]
 
-    def test_auth_check_fails_when_command_errors(self, capsys):
-        """When the auth check command fails, require() should exit."""
+    def test_auth_check_fails_when_command_errors(self):
+        """When the auth check command fails, require() should raise."""
         from qbrd_tools.prereqs import require, AUTH_CHECKS
+        from qbrd_tools._types import PrerequisiteError
 
         with patch("shutil.which", return_value="/usr/bin/fake"), \
              patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, ["fake"])):
             AUTH_CHECKS["fake-tool"] = ["fake-tool", "auth", "status"]
             try:
-                with pytest.raises(SystemExit) as exc_info:
+                with pytest.raises(PrerequisiteError, match="not authenticated"):
                     require("fake-tool", authenticated=True)
-                assert exc_info.value.code == 1
-                captured = capsys.readouterr()
-                assert "not authenticated" in captured.err
             finally:
                 del AUTH_CHECKS["fake-tool"]
 
-    def test_unknown_binary_skips_auth_check_with_warning(self, capsys):
+    def test_unknown_binary_skips_auth_check_with_warning(self, caplog):
         """Binaries without a known auth check should warn but not fail."""
         from qbrd_tools.prereqs import require
 
         with patch("shutil.which", return_value="/usr/bin/unknown"):
-            require("unknown-tool", authenticated=True)
-            captured = capsys.readouterr()
-            assert "no auth check" in captured.err.lower()
+            with caplog.at_level("WARNING", logger="qbrd_tools"):
+                require("unknown-tool", authenticated=True)
+            assert "no auth check" in caplog.text.lower()
