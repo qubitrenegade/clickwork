@@ -16,15 +16,16 @@ Plugin authors call this once in their entry point script:
 from __future__ import annotations
 
 import functools
+import os
 from pathlib import Path
 
 import click
 
 from qbrd_tools._logging import setup_logging
 from qbrd_tools._types import CliContext, CliProcessError, PrerequisiteError
-from qbrd_tools.config import ConfigError, _normalize_prefix, load_config
+from qbrd_tools.config import ConfigError, load_config
 from qbrd_tools.discovery import discover_commands
-from qbrd_tools.process import capture as _capture, run as _run
+from qbrd_tools.process import capture as _capture, run as _run, run_with_confirm as _run_with_confirm
 from qbrd_tools.prereqs import require as _require
 from qbrd_tools.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
 
@@ -35,6 +36,11 @@ from qbrd_tools.prompts import confirm as _confirm, confirm_destructive as _conf
 # 2 = framework internal error (unhandled exception)
 EXIT_USER_ERROR = 1
 EXIT_FRAMEWORK_ERROR = 2
+
+
+def _normalize_env_prefix(name: str) -> str:
+    """Convert a CLI name to an env-var prefix (orbit-admin -> ORBIT_ADMIN)."""
+    return name.replace("-", "_").upper()
 
 
 class MutuallyExclusive(click.Option):
@@ -227,7 +233,14 @@ def create_cli(
         help="Skip confirmation prompts.",
     )
     @click.pass_context
-    def cli_group(ctx: click.Context, verbose: int, quiet: bool, dry_run: bool, env: str | None, yes: bool) -> None:
+    def cli_group(
+        ctx: click.Context,
+        verbose: int,
+        quiet: bool,
+        dry_run: bool,
+        env: str | None,
+        yes: bool,
+    ) -> None:
         """CLI entry point -- configure logging, load config, and build CliContext.
 
         Runs before every subcommand. Sets up the logger, loads layered config
@@ -254,8 +267,7 @@ def create_cli(
         # is selected via {PROJECT_NAME}_ENV, even though load_config()
         # applies the env-specific config section correctly.
         if env is None:
-            import os
-            prefix = _normalize_prefix(name)
+            prefix = _normalize_env_prefix(name)
             env = os.environ.get(f"{prefix}_ENV")
 
         # Load config from layered sources (user config, repo config, env vars).
@@ -271,7 +283,6 @@ def create_cli(
         except ConfigError as e:
             logger.error("Config error: %s", e)
             ctx.exit(EXIT_USER_ERROR)
-            return
 
         # Build the CliContext with all resolved state from this invocation.
         # CliContext is a dataclass; all fields have defaults so we only
@@ -306,21 +317,13 @@ def create_cli(
         cli_ctx.confirm = lambda msg: _confirm(msg, yes=cli_ctx.yes)
         cli_ctx.confirm_destructive = lambda msg: _confirm_destructive(msg, yes=cli_ctx.yes)
 
-        # run_with_confirm on the context uses the framework's TTY-aware
-        # confirm() directly through the closure -- no module-level mutation
-        # needed.  This means multiple CLI instances in the same process each
-        # carry their own confirm function and never share state.
-        def _ctx_run_with_confirm(
-            cmd: list,
-            msg: str,
-            env: dict | None = None,
-        ):
-            """Confirm then run, using the framework's TTY-aware prompt."""
-            if not _confirm(msg, yes=cli_ctx.yes):
-                return None
-            return _run(cmd, dry_run=cli_ctx.dry_run, env=env)
-
-        cli_ctx.run_with_confirm = _ctx_run_with_confirm
+        # Thin wrapper around the standalone run_with_confirm() that supplies
+        # cli_ctx's flags. This keeps the logic single-sourced in process.py
+        # (confirmation + execution + dry-run + signal forwarding) while still
+        # letting ctx.run_with_confirm(cmd, msg) work without extra args.
+        cli_ctx.run_with_confirm = lambda cmd, msg, env=None: _run_with_confirm(
+            cmd, msg, yes=cli_ctx.yes, dry_run=cli_ctx.dry_run, env=env,
+        )
 
         # Attach the CliContext to Click's ctx.obj so all subcommands can
         # receive it via @click.pass_obj or @pass_cli_context.

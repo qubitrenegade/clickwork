@@ -248,6 +248,35 @@ class TestDiscoveryMode:
         )
         assert "status" in commands
 
+    def test_auto_mode_does_not_query_entrypoints_when_dir_exists(self, tmp_path: Path, monkeypatch):
+        """Auto mode should use directory-only discovery when commands_dir exists."""
+        from qbrd_tools.discovery import discover_commands
+
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        (commands_dir / "status.py").write_text(
+            "import click\n\n"
+            "@click.command()\n"
+            "def status():\n"
+            "    pass\n\n"
+            "cli = status\n"
+        )
+
+        called = {"entry_points": False}
+
+        def _fake_entry_points(*, group=None):
+            called["entry_points"] = True
+            return []
+
+        monkeypatch.setattr("importlib.metadata.entry_points", _fake_entry_points)
+
+        commands = discover_commands(
+            commands_dir=commands_dir,
+            discovery_mode="auto",
+        )
+        assert "status" in commands
+        assert called["entry_points"] is False
+
     def test_auto_mode_falls_back_to_entrypoints(self, tmp_path: Path):
         """When commands_dir doesn't exist, auto mode still uses entry points."""
         from qbrd_tools.discovery import discover_commands
@@ -335,13 +364,18 @@ class TestEntrypoints:
         assert result.exit_code == 0
         assert result.output.strip() == "bar:alice"
 
-    def test_local_command_shadow_logs_at_info(self, tmp_path: Path, monkeypatch, caplog):
+    def test_auto_mode_prefers_directory_without_entrypoints(self, tmp_path: Path, monkeypatch):
         from qbrd_tools.discovery import discover_commands
 
-        installed = click.command(name="hello")(lambda: None)
+        called = {"entrypoints": False}
+
+        def _fake_discover_entrypoints():
+            called["entrypoints"] = True
+            return {"hello": click.command(name="hello")(lambda: None)}
+
         monkeypatch.setattr(
             "qbrd_tools.discovery.discover_commands_from_entrypoints",
-            lambda: {"hello": installed},
+            _fake_discover_entrypoints,
         )
 
         (tmp_path / "hello.py").write_text(
@@ -352,7 +386,6 @@ class TestEntrypoints:
             "cli = hello\n"
         )
 
-        with caplog.at_level("INFO", logger="qbrd_tools"):
-            commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
+        commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
         assert "hello" in commands
-        assert "shadows installed plugin command" in caplog.text
+        assert called["entrypoints"] is False

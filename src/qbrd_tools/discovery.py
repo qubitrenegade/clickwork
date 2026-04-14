@@ -12,14 +12,8 @@ Two mechanisms find Click commands:
 The discovery_mode parameter controls which are active:
 - "dev": directory only
 - "installed": entry points only
-- "auto" (default): entry points always, PLUS directory scanning when
-  commands_dir exists. Both mechanisms run concurrently; local (directory)
-  commands win on name conflicts and an info message is logged.
-
-In a typical dev workflow the package is pip-installed (editable or
-otherwise), so entry points exist AND a commands/ directory is present.
-Running both and letting local commands shadow installed ones is the most
-useful default.
+- "auto" (default): directory scanning when commands_dir exists,
+    otherwise entry points (fallback)
 """
 from __future__ import annotations
 
@@ -291,13 +285,9 @@ def discover_commands_from_entrypoints() -> dict[str, click.Command]:
     """
     commands: dict[str, click.Command] = {}
 
-    try:
-        # Python 3.12+ API: entry_points(group=...) returns a sequence.
-        eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
-    except TypeError:
-        # Python 3.9 compat: older API signature returns a dict of lists.
-        all_eps = importlib.metadata.entry_points()
-        eps = all_eps.get(ENTRY_POINT_GROUP, [])  # type: ignore[union-attr]
+    # The group keyword has been stable since Python 3.10; this project
+    # requires 3.11+ (see pyproject.toml), so no compat fallback is needed.
+    eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
 
     for ep in eps:
         try:
@@ -329,7 +319,7 @@ def discover_commands(
         discovery_mode: Controls which mechanism(s) are used.
             "dev"       -- directory scanning only (ignores entry points)
             "installed" -- entry points only (ignores commands_dir)
-            "auto"      -- entry points always, plus directory if commands_dir exists
+            "auto"      -- directory if commands_dir exists, else entry points
 
     Returns:
         Dict mapping command name -> Click command/group.
@@ -352,15 +342,10 @@ def discover_commands(
         # a commands/ directory doesn't exist on the file system.
         use_ep = True
     elif discovery_mode == "auto":
-        # Auto mode: always check entry points, and ALSO scan the directory
-        # when it exists. This lets local commands shadow installed ones with
-        # a conflict warning -- the primary use case for the shadow log.
-        # WHY both: In a typical dev workflow the package is also pip-installed
-        # (editable or otherwise), so entry points exist AND the commands/ dir
-        # exists. Running both and logging conflicts is the most useful behavior.
-        use_ep = True
         if commands_dir and commands_dir.is_dir():
             use_dir = True
+        else:
+            use_ep = True
     else:
         raise ValueError(f"Invalid discovery_mode: {discovery_mode!r}")
 
