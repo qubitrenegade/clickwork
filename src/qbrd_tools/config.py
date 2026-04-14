@@ -25,7 +25,7 @@ from pathlib import Path
 # tomllib is stdlib in Python 3.11+. No external dependency needed.
 import tomllib
 
-from qbrd_tools._types import Secret
+from qbrd_tools._types import Secret, normalize_prefix
 
 
 class ConfigError(Exception):
@@ -34,22 +34,6 @@ class ConfigError(Exception):
     This is a user-facing error -- the message should be actionable,
     telling them which key is missing/invalid and where to fix it.
     """
-
-
-def _normalize_prefix(project_name: str) -> str:
-    """Convert a project name to a shell-safe environment variable prefix.
-
-    Hyphens become underscores and the result is uppercased so the prefix
-    conforms to POSIX env var naming rules (e.g., ``orbit-admin`` ->
-    ``ORBIT_ADMIN``).
-
-    Args:
-        project_name: The CLI project name, possibly hyphenated.
-
-    Returns:
-        An uppercase, underscore-delimited prefix string.
-    """
-    return project_name.replace("-", "_").upper()
 
 
 def _key_to_env_suffix(key: str) -> str:
@@ -136,25 +120,21 @@ def _load_toml_from_bytes(data: bytes) -> dict:
     return tomllib.load(io.BytesIO(data))
 
 
-def _check_user_config_permissions(path: Path) -> bytes | None:
-    """Refuse to load user config if it is readable by group or others.
+def _read_checked_user_config(path: Path) -> bytes | None:
+    """Open, permission-check, and read a user config file in one operation.
 
     User config may contain secrets (API tokens, personal credentials), so
     it must be owner-only (mode ``0o600``). On Windows this check is skipped
     because the Unix permission model does not apply.
 
-    We use ``fstat()`` on an already-open file descriptor instead of
-    ``os.stat()`` on the path to avoid a TOCTOU (time-of-check/time-of-use)
-    race: between stat() and open() an attacker could swap the file. Opening
-    first and then fstat()-ing the fd ensures we inspect the exact file we
-    will read.
-
-    After confirming the permissions are safe, the file contents are read from
-    the same open fd and returned so the caller can parse them without
-    re-opening the file by path (which would reintroduce the TOCTOU window).
+    The entire open-check-read sequence uses a single file descriptor to
+    avoid TOCTOU (time-of-check/time-of-use) races: we open first, then
+    ``fstat()`` the fd (not the path), then read from the same fd. No
+    second open is needed, so no substitution can happen between the
+    permission check and the read.
 
     Args:
-        path: Path to the user config file to check. If the file does not
+        path: Path to the user config file to read. If the file does not
             exist the function returns None (missing config is fine).
 
     Returns:
@@ -165,12 +145,14 @@ def _check_user_config_permissions(path: Path) -> bytes | None:
         ConfigError: If the file exists and is readable by group or other
             users (i.e., mode bits include S_IRGRP or S_IROTH).
     """
-    if not path.is_file():
-        # Nothing to check -- missing user config is fine (it's optional).
-        return None
-
     # Open the file first, then stat the open fd (TOCTOU-safe).
-    fd = os.open(str(path), os.O_RDONLY)
+    # FileNotFoundError is caught instead of a pre-check with path.is_file()
+    # to avoid a TOCTOU race between the existence check and the open.
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except FileNotFoundError:
+        # Missing user config is fine -- it's optional.
+        return None
     try:
         # Skip permission check on Windows where Unix permission bits
         # are not meaningful.
@@ -224,7 +206,7 @@ def load_config(
     """
     # Derive the env var prefix once; used throughout this function.
     # 'test-cli' -> 'TEST_CLI'
-    prefix = _normalize_prefix(project_name)
+    prefix = normalize_prefix(project_name)
 
     # {PROJECT_NAME}_ENV is a fallback when --env is omitted (env is None).
     # CI pipelines can set this env var to select an environment without
@@ -243,11 +225,11 @@ def load_config(
 
     # Refuse to load user config if it's too permissive -- secrets must not
     # be readable by group or other users on the same machine.
-    # _check_user_config_permissions opens the file, checks permissions via
+    # _read_checked_user_config opens the file, checks permissions via
     # fstat(), and returns the raw bytes read from the same fd.  We then parse
     # those bytes directly, avoiding a second open() that would reintroduce a
     # TOCTOU window between the permission check and the read.
-    user_config_bytes = _check_user_config_permissions(user_config_path)
+    user_config_bytes = _read_checked_user_config(user_config_path)
     if user_config_bytes is not None:
         user_config = _flatten_mapping(_load_toml_from_bytes(user_config_bytes))
     else:

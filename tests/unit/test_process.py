@@ -87,6 +87,40 @@ class TestRun:
         proc.send_signal.assert_called_once_with(signal.SIGINT)
         assert proc.wait.call_count == 2
 
+    def test_missing_binary_raises_cli_process_error(self):
+        """A nonexistent binary should raise CliProcessError (exit 1), not FileNotFoundError (exit 2).
+
+        WHY: a missing binary is a user/environment error, not a framework bug.
+        Without this catch, the framework's wrapped_invoke handler classifies it
+        as an unhandled exception and exits with code 2, which is misleading.
+        """
+        from qbrd_tools.process import run
+        from qbrd_tools._types import CliProcessError
+
+        with pytest.raises(CliProcessError, match="Command not found"):
+            run(["definitely-not-a-real-binary-xyz123"])
+
+
+class TestFormatCmd:
+    """_format_cmd() renders an argv list as a display string."""
+
+    def test_posix_uses_shlex_quote(self):
+        """On POSIX, shlex.quote wraps args with spaces in single quotes."""
+        from qbrd_tools.process import _format_cmd
+
+        with patch("os.name", "posix"):
+            result = _format_cmd(["echo", "hello world"])
+        assert result == "echo 'hello world'"
+
+    def test_windows_uses_list2cmdline(self):
+        """On Windows, subprocess.list2cmdline handles quoting."""
+        from qbrd_tools.process import _format_cmd
+
+        with patch("os.name", "nt"):
+            result = _format_cmd(["echo", "hello world"])
+        # list2cmdline wraps args with spaces in double quotes.
+        assert result == 'echo "hello world"'
+
 
 class TestCapture:
     """capture() runs a command and returns its stdout."""

@@ -248,8 +248,13 @@ class TestDiscoveryMode:
         )
         assert "status" in commands
 
-    def test_auto_mode_does_not_query_entrypoints_when_dir_exists(self, tmp_path: Path, monkeypatch):
-        """Auto mode should use directory-only discovery when commands_dir exists."""
+    def test_auto_mode_queries_entrypoints_even_when_dir_exists(self, tmp_path: Path, monkeypatch):
+        """Auto mode should use BOTH mechanisms when commands_dir exists.
+
+        WHY: installed plugin commands should always be visible during dev.
+        If auto mode only used directory scanning, plugins from other packages
+        would vanish just because a commands/ directory is present.
+        """
         from qbrd_tools.discovery import discover_commands
 
         commands_dir = tmp_path / "commands"
@@ -275,7 +280,7 @@ class TestDiscoveryMode:
             discovery_mode="auto",
         )
         assert "status" in commands
-        assert called["entry_points"] is False
+        assert called["entry_points"] is True
 
     def test_auto_mode_falls_back_to_entrypoints(self, tmp_path: Path):
         """When commands_dir doesn't exist, auto mode still uses entry points."""
@@ -364,18 +369,19 @@ class TestEntrypoints:
         assert result.exit_code == 0
         assert result.output.strip() == "bar:alice"
 
-    def test_auto_mode_prefers_directory_without_entrypoints(self, tmp_path: Path, monkeypatch):
+    def test_local_command_shadows_installed_with_info_log(self, tmp_path: Path, monkeypatch, caplog):
+        """When auto mode finds the same name in both sources, local wins.
+
+        WHY: during dev you want to iterate on a local copy of a command
+        without uninstalling the plugin. The INFO log tells you shadowing
+        happened so stale local files don't silently hide installed plugins.
+        """
         from qbrd_tools.discovery import discover_commands
 
-        called = {"entrypoints": False}
-
-        def _fake_discover_entrypoints():
-            called["entrypoints"] = True
-            return {"hello": click.command(name="hello")(lambda: None)}
-
+        installed = click.command(name="hello")(lambda: None)
         monkeypatch.setattr(
             "qbrd_tools.discovery.discover_commands_from_entrypoints",
-            _fake_discover_entrypoints,
+            lambda: {"hello": installed},
         )
 
         (tmp_path / "hello.py").write_text(
@@ -386,6 +392,8 @@ class TestEntrypoints:
             "cli = hello\n"
         )
 
-        commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
+        with caplog.at_level("INFO", logger="qbrd_tools"):
+            commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
         assert "hello" in commands
-        assert called["entrypoints"] is False
+        assert commands["hello"] is not installed
+        assert "shadows installed plugin command" in caplog.text

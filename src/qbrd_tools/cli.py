@@ -22,7 +22,7 @@ from pathlib import Path
 import click
 
 from qbrd_tools._logging import setup_logging
-from qbrd_tools._types import CliContext, CliProcessError, PrerequisiteError
+from qbrd_tools._types import CliContext, CliProcessError, PrerequisiteError, normalize_prefix
 from qbrd_tools.config import ConfigError, load_config
 from qbrd_tools.discovery import discover_commands
 from qbrd_tools.process import capture as _capture, run as _run, run_with_confirm as _run_with_confirm
@@ -36,11 +36,6 @@ from qbrd_tools.prompts import confirm as _confirm, confirm_destructive as _conf
 # 2 = framework internal error (unhandled exception)
 EXIT_USER_ERROR = 1
 EXIT_FRAMEWORK_ERROR = 2
-
-
-def _normalize_env_prefix(name: str) -> str:
-    """Convert a CLI name to an env-var prefix (orbit-admin -> ORBIT_ADMIN)."""
-    return name.replace("-", "_").upper()
 
 
 class MutuallyExclusive(click.Option):
@@ -267,7 +262,7 @@ def create_cli(
         # is selected via {PROJECT_NAME}_ENV, even though load_config()
         # applies the env-specific config section correctly.
         if env is None:
-            prefix = _normalize_env_prefix(name)
+            prefix = normalize_prefix(name)
             env = os.environ.get(f"{prefix}_ENV")
 
         # Load config from layered sources (user config, repo config, env vars).

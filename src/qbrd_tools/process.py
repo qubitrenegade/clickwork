@@ -29,6 +29,12 @@ from qbrd_tools.prompts import confirm as _prompt_confirm
 
 logger = logging.getLogger("qbrd_tools")
 
+# How long to wait for a child process to exit after forwarding SIGINT
+# before escalating to SIGKILL. Long enough for graceful shutdown of most
+# deploy/build commands, short enough to not leave the user staring at a
+# frozen terminal.
+SIGINT_TIMEOUT_SECONDS = 10
+
 
 def _validate_cmd(cmd: list[str] | str) -> None:
     """Reject string commands to prevent shell injection.
@@ -75,18 +81,20 @@ def _build_env(env: dict[str, str] | None) -> dict[str, str] | None:
 
 
 def _format_cmd(cmd: list[str]) -> str:
-    """Format a command list as a properly shell-quoted string for display.
+    """Format a command list as a shell-ready string for display.
 
-    shlex.quote wraps each argument in single quotes if it contains spaces or
-    special characters, so the printed command can be pasted into a shell and
-    reproduce the same invocation.
+    On POSIX platforms, uses ``shlex.quote`` so each argument is rendered
+    in a form suitable for pasting into a POSIX shell.  On Windows, uses
+    ``subprocess.list2cmdline`` which follows cmd.exe quoting conventions.
 
     Args:
         cmd: The command as an argv list.
 
     Returns:
-        A single shell-safe string suitable for logging or dry-run output.
+        A single string suitable for logging or dry-run output.
     """
+    if os.name == "nt":
+        return subprocess.list2cmdline(cmd)
     return " ".join(shlex.quote(arg) for arg in cmd)
 
 
@@ -97,6 +105,10 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
     the child gets a chance to handle SIGINT and clean up before the parent
     aborts. Without this, Python would raise KeyboardInterrupt immediately and
     leave the child running in the background as an orphan.
+
+    If the child does not exit within SIGINT_TIMEOUT_SECONDS after receiving
+    SIGINT, the framework escalates to SIGKILL to prevent indefinite hangs
+    (e.g., a child that catches and ignores SIGINT).
 
     Args:
         proc: The running subprocess to wait on.
@@ -122,6 +134,11 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
             # The child may already have exited by the time we forward SIGINT.
             pass
         try:
+            proc.wait(timeout=SIGINT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            # The child ignored SIGINT for too long. Escalate to SIGKILL so
+            # we don't hang forever waiting for a process that won't exit.
+            proc.kill()
             proc.wait()
         except (ProcessLookupError, OSError):
             # If the process is already gone, the important part is that we
@@ -163,7 +180,17 @@ def run(
     # Use Popen instead of subprocess.run so we can explicitly forward SIGINT
     # to the child and wait for it before propagating KeyboardInterrupt.
     # subprocess.run() has no hook for signal interception.
-    proc = subprocess.Popen(cmd, env=full_env, shell=False)
+    try:
+        proc = subprocess.Popen(cmd, env=full_env, shell=False)
+    except FileNotFoundError:
+        # The binary doesn't exist. This is a user/environment error (like
+        # PrerequisiteError), not a framework bug. Surface it as exit code 1
+        # via CliProcessError with an actionable message.
+        raise CliProcessError(
+            subprocess.CalledProcessError(
+                returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
+            )
+        )
     returncode = _wait_with_signal_forwarding(proc)
     if returncode != 0:
         raise CliProcessError(

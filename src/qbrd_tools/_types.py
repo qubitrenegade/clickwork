@@ -235,6 +235,27 @@ class PrerequisiteError(Exception):
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def normalize_prefix(name: str) -> str:
+    """Convert a project/CLI name to a shell-safe env-var prefix.
+
+    Hyphens become underscores and the result is uppercased so the prefix
+    conforms to POSIX env-var naming rules (e.g., ``orbit-admin`` ->
+    ``ORBIT_ADMIN``).  Used by both the CLI harness (for ``{PREFIX}_ENV``
+    resolution) and the config loader (for auto-prefixed env vars).
+
+    Args:
+        name: A project or CLI name, possibly containing hyphens.
+
+    Returns:
+        An uppercase, underscore-delimited prefix string.
+    """
+    return name.replace("-", "_").upper()
+
+
+# ---------------------------------------------------------------------------
 # CliContext
 # ---------------------------------------------------------------------------
 

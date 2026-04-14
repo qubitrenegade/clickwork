@@ -12,8 +12,9 @@ Two mechanisms find Click commands:
 The discovery_mode parameter controls which are active:
 - "dev": directory only
 - "installed": entry points only
-- "auto" (default): directory scanning when commands_dir exists,
-    otherwise entry points (fallback)
+- "auto" (default): entry points always, PLUS directory scanning when
+  commands_dir exists. Local commands shadow installed ones on name
+  conflicts (with an info log).
 """
 from __future__ import annotations
 
@@ -319,7 +320,9 @@ def discover_commands(
         discovery_mode: Controls which mechanism(s) are used.
             "dev"       -- directory scanning only (ignores entry points)
             "installed" -- entry points only (ignores commands_dir)
-            "auto"      -- directory if commands_dir exists, else entry points
+            "auto"      -- entry points always, plus directory scanning when
+                           commands_dir exists; local commands shadow installed
+                           ones on name conflicts (with an info log)
 
     Returns:
         Dict mapping command name -> Click command/group.
@@ -342,10 +345,13 @@ def discover_commands(
         # a commands/ directory doesn't exist on the file system.
         use_ep = True
     elif discovery_mode == "auto":
+        # Auto mode: always check entry points so installed plugins are
+        # visible, and ALSO scan the directory when it exists. Local
+        # commands shadow installed ones on name conflicts, with an INFO
+        # log so stale local files don't silently hide installed plugins.
+        use_ep = True
         if commands_dir and commands_dir.is_dir():
             use_dir = True
-        else:
-            use_ep = True
     else:
         raise ValueError(f"Invalid discovery_mode: {discovery_mode!r}")
 

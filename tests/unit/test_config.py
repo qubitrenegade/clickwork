@@ -12,6 +12,7 @@ Key behaviors tested:
 - Schema validation (required keys, types, defaults)
 - Secret safety (refuse secrets in repo config)
 """
+import sys
 from pathlib import Path
 
 import pytest
@@ -426,6 +427,7 @@ class TestEnvVarDottedKeys:
         assert config["new_key"] == "from-env"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix permission model does not apply on Windows")
 class TestUserConfigPermissions:
     """User config file permissions are checked for safety."""
 
