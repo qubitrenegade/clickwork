@@ -25,3 +25,6 @@ packages = ["src/qbrd_tools"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+filterwarnings = [
+    "error",
+]

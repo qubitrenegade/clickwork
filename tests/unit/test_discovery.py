@@ -40,7 +40,7 @@ class TestDirectoryScanning:
 
         commands = discover_commands_from_dir(tmp_path)
         assert "greet" in commands
-        assert isinstance(commands["greet"], click.BaseCommand)
+        assert isinstance(commands["greet"], click.Command)
 
     def test_skips_files_without_cli_export(self, tmp_path: Path, capsys):
         """Files without 'cli' attribute produce a warning, not an error."""
@@ -92,7 +92,7 @@ class TestDirectoryScanning:
 
         commands = discover_commands_from_dir(tmp_path)
         assert "deploy" in commands
-        assert isinstance(commands["deploy"], click.MultiCommand)
+        assert isinstance(commands["deploy"], click.Group)
 
     def test_supports_relative_imports_between_command_files(self, tmp_path: Path):
         """Command modules should be able to import sibling helper modules."""

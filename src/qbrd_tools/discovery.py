@@ -72,9 +72,9 @@ class LazyEntryPointCommand(click.Command):
         )
         self._entry_point = ep
         # Cache the loaded command so we only import it once per process.
-        self._loaded: click.BaseCommand | None = None
+        self._loaded: click.Command | None = None
 
-    def _load(self) -> click.BaseCommand:
+    def _load(self) -> click.Command:
         """Import and cache the real Click command behind this entry point.
 
         The result is cached in ``self._loaded`` so subsequent calls do not
@@ -90,7 +90,7 @@ class LazyEntryPointCommand(click.Command):
         """
         if self._loaded is None:
             obj = self._entry_point.load()
-            if not isinstance(obj, click.BaseCommand):
+            if not isinstance(obj, click.Command):
                 raise TypeError(
                     f"Entry point '{self._entry_point.name}' did not load a Click command"
                 )
@@ -167,7 +167,7 @@ class LazyEntryPointCommand(click.Command):
         return self._load().get_help(ctx)
 
 
-def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseCommand]:
+def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
     """Scan a directory for .py files that export a 'cli' Click command.
 
     Only top-level .py files are checked -- subdirectories are skipped.
@@ -186,7 +186,7 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
     Returns:
         Dict mapping command name -> Click command/group.
     """
-    commands: dict[str, click.BaseCommand] = {}
+    commands: dict[str, click.Command] = {}
 
     # Guard: if the directory doesn't exist, return empty without error.
     # discover_commands() already handles the "auto" fallback logic.
@@ -253,7 +253,7 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
             )
             continue
 
-        if not isinstance(cli_attr, click.BaseCommand):
+        if not isinstance(cli_attr, click.Command):
             # Warn: the file has a 'cli' attribute but it's not a Click command.
             print(
                 f"Warning: {py_file.name} 'cli' attribute is not a Click command "
@@ -271,7 +271,7 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.BaseComman
     return commands
 
 
-def discover_commands_from_entrypoints() -> dict[str, click.BaseCommand]:
+def discover_commands_from_entrypoints() -> dict[str, click.Command]:
     """Discover commands from installed packages via the entry points mechanism.
 
     Reads the ``qbrd_tools.commands`` entry point group from all installed
@@ -287,7 +287,7 @@ def discover_commands_from_entrypoints() -> dict[str, click.BaseCommand]:
     Returns:
         Dict mapping command name to a lazy-loading Click command/group proxy.
     """
-    commands: dict[str, click.BaseCommand] = {}
+    commands: dict[str, click.Command] = {}
 
     try:
         # Python 3.12+ API: entry_points(group=...) returns a sequence.
@@ -310,7 +310,7 @@ def discover_commands_from_entrypoints() -> dict[str, click.BaseCommand]:
 def discover_commands(
     commands_dir: Path | None = None,
     discovery_mode: str = "auto",
-) -> dict[str, click.BaseCommand]:
+) -> dict[str, click.Command]:
     """Discover commands using the selected mechanism.
 
     This is the main entry point for the discovery system. It orchestrates
@@ -335,7 +335,7 @@ def discover_commands(
     Raises:
         ValueError: If discovery_mode is not one of the accepted values.
     """
-    commands: dict[str, click.BaseCommand] = {}
+    commands: dict[str, click.Command] = {}
 
     # Resolve which mechanisms to activate before doing any I/O.
     use_dir = False
