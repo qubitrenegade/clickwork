@@ -25,3 +25,9 @@ packages = ["src/qbrd_tools"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+filterwarnings = [
+    "error",
+]
+markers = [
+    "network: requires network access (pip install, HTTP calls)",
+]

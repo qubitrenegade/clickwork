@@ -1,0 +1,56 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests should describe the problem you're trying to
+        solve, not just the solution you want. This helps us understand
+        your use case and potentially find a better approach.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that the framework doesn't support?
+      placeholder: |
+        I'm building a CLI that needs to deploy to multiple cloud
+        providers, and I need a way to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work? Code examples are helpful.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or alternative approaches have you tried?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which part of the framework does this affect?
+      options:
+        - CLI / global flags
+        - Plugin discovery
+        - Config system
+        - Subprocess helpers
+        - Prerequisite checking
+        - Prompts / user interaction
+        - Logging
+        - Platform detection
+        - Testing utilities
+        - Documentation
+        - Other
+    validations:
+      required: true
