@@ -153,7 +153,11 @@ def _read_checked_user_config(path: Path) -> bytes | None:
     except FileNotFoundError:
         # Missing user config is fine -- it's optional.
         return None
-    try:
+    # Wrap the raw fd in a Python file object immediately so we get
+    # automatic cleanup (no manual os.close needed) and .read() handles
+    # short reads internally -- os.read() can return fewer bytes than
+    # requested. closefd=True means the file object owns the fd.
+    with os.fdopen(fd, "rb") as f:
         # Skip permission check on Windows where Unix permission bits
         # are not meaningful.
         if sys.platform != "win32":
@@ -168,13 +172,7 @@ def _read_checked_user_config(path: Path) -> bytes | None:
                     f"Fix with: chmod 600 {path}"
                 )
 
-        # Read from the already-open fd so we don't reopen the file by path.
-        # This is the TOCTOU-safe read: we hold the fd across the permission
-        # check and the read, so no substitution can happen between them.
-        return os.read(fd, os.fstat(fd).st_size)
-    finally:
-        # Always close the fd, even if an exception is raised above.
-        os.close(fd)
+        return f.read()
 
 
 def load_config(

@@ -159,6 +159,18 @@ class TestCapture:
         with pytest.raises(TypeError):
             capture("echo hello")  # type: ignore
 
+    def test_missing_binary_raises_cli_process_error(self):
+        """A nonexistent binary should raise CliProcessError, not FileNotFoundError.
+
+        Same policy as run(): missing binary is exit 1 (user error), not
+        exit 2 (framework bug).
+        """
+        from qbrd_tools.process import capture
+        from qbrd_tools._types import CliProcessError
+
+        with pytest.raises(CliProcessError, match="Command not found"):
+            capture(["definitely-not-a-real-binary-xyz123"])
+
 
 class TestRunWithConfirm:
     """run_with_confirm() prompts before executing destructive commands."""

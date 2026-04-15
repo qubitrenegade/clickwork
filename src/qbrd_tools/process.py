@@ -235,6 +235,14 @@ def capture(
             shell=False,
         )
         return result.stdout.strip()
+    except FileNotFoundError:
+        # Same treatment as run(): missing binary is a user/environment
+        # error (exit 1), not a framework bug (exit 2).
+        raise CliProcessError(
+            subprocess.CalledProcessError(
+                returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
+            )
+        )
     except subprocess.CalledProcessError as e:
         raise CliProcessError(e) from e
 
