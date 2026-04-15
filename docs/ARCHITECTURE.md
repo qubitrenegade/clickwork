@@ -1,11 +1,11 @@
 # Architecture
 
-This document explains the design decisions behind qbrd-tools: why the
+This document explains the design decisions behind clickwork: why the
 framework exists, how the pieces fit together, and the reasoning behind
 the non-obvious choices. Read this before contributing to the framework
 or making architectural decisions in a project built on it.
 
-For a practical guide to building CLIs with qbrd-tools, see
+For a practical guide to building CLIs with clickwork, see
 [GUIDE.md](GUIDE.md).
 
 ## Problem
@@ -16,7 +16,7 @@ the Windows CI. Eventually you have 20+ scripts across bash, Python, and
 PowerShell with no shared infrastructure for repo root detection, error
 handling, prerequisite checks, or configuration management.
 
-qbrd-tools extracts the common scaffolding into a reusable framework so
+clickwork extracts the common scaffolding into a reusable framework so
 each new project starts with plugin discovery, layered config, subprocess
 helpers, and consistent CLI flags -- and command authors only write the
 business logic.
@@ -51,20 +51,20 @@ The framework is split into two packages across two repositories:
 
 | Package | Repository | Purpose |
 |---------|-----------|---------|
-| **qbrd-tools** | `qubitrenegade/qbrd-tools` | Generic CLI framework. Zero business logic. |
-| **orbit-admin** | `qubitrenegade/qbrd-orbit-widener` | Orbit Widener-specific commands built on qbrd-tools. |
+| **clickwork** | `qubitrenegade/clickwork` | Generic CLI framework. Zero business logic. |
+| **orbit-admin** | `qubitrenegade/qbrd-orbit-widener` | Orbit Widener-specific commands built on clickwork. |
 
 This separation exists so other projects can depend on the framework
 without pulling in Orbit Widener's commands or config. The tradeoff is
 cross-repo coordination during development: framework API changes require
 coordinated commits and a dependency pin update. This friction is managed
-with editable local installs (`uv pip install -e ../qbrd-tools`) during
+with editable local installs (`uv pip install -e ../clickwork`) during
 development and SHA-pinned `requirements-ci.txt` for CI.
 
 ## Module Architecture
 
 ```
-src/qbrd_tools/
+src/clickwork/
   __init__.py       Public API re-exports
   _types.py         CliContext, Secret, CliProcessError, PrerequisiteError
   cli.py            create_cli() factory, global flags, context wiring
@@ -105,11 +105,11 @@ between command files in the same directory (`from .helper import VALUE`).
 
 ### Entry Points (installed mode)
 
-Reads the `qbrd_tools.commands` entry point group from installed packages.
+Reads the `clickwork.commands` entry point group from installed packages.
 Plugin authors declare their commands in `pyproject.toml`:
 
 ```toml
-[project.entry-points."qbrd_tools.commands"]
+[project.entry-points."clickwork.commands"]
 hello = "my_plugin.commands.hello:cli"
 ```
 
@@ -277,7 +277,7 @@ Three exit codes:
 |------|---------|---------|
 | 0 | Success | Command completed normally |
 | 1 | User/environment error | Missing prerequisite, bad config, subprocess failure |
-| 2 | Framework internal error | Unhandled exception (bug in qbrd-tools) |
+| 2 | Framework internal error | Unhandled exception (bug in clickwork) |
 
 The exception hierarchy:
 

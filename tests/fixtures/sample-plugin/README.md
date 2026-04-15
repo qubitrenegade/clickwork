@@ -1,12 +1,12 @@
 # sample-commands
 
-A minimal but complete plugin for [qbrd-tools](https://github.com/qubitrenegade/qbrd-tools).
+A minimal but complete plugin for [clickwork](https://github.com/qubitrenegade/clickwork).
 This serves triple duty:
 
 1. **Test fixture** -- integration tests install this plugin and verify
    entry point discovery works end-to-end
 2. **Reference implementation** -- shows the patterns for building your own
-   CLI commands on top of qbrd-tools
+   CLI commands on top of clickwork
 3. **Tutorial** -- walk through this code to understand how the framework works
 
 ## Structure
@@ -27,7 +27,7 @@ sample-plugin/
 In `pyproject.toml`, declare which Click commands your package provides:
 
 ```toml
-[project.entry-points."qbrd_tools.commands"]
+[project.entry-points."clickwork.commands"]
 hello = "sample_commands.hello:cli"
 ```
 
@@ -76,7 +76,7 @@ Key points:
 
 ```bash
 # Install the framework and this plugin into the same venv
-uv pip install -e /path/to/qbrd-tools
+uv pip install -e /path/to/clickwork
 uv pip install -e /path/to/sample-plugin
 
 # Now 'hello' is available as a subcommand
@@ -90,7 +90,7 @@ For **dev mode** (no install needed), just put your command files in a
 
 ```python
 from pathlib import Path
-from qbrd_tools import create_cli
+from clickwork import create_cli
 
 cli = create_cli(name="my-tool", commands_dir=Path(__file__).parent / "commands")
 ```
@@ -101,4 +101,4 @@ cli = create_cli(name="my-tool", commands_dir=Path(__file__).parent / "commands"
 2. Rename `sample_commands` to your package name
 3. Replace `hello.py` with your actual commands
 4. Update `pyproject.toml` entry points
-5. Install alongside `qbrd-tools` -- your commands appear automatically
+5. Install alongside `clickwork` -- your commands appear automatically

@@ -1,4 +1,4 @@
-"""Core data structures for the qbrd-tools CLI framework.
+"""Core data structures for the clickwork CLI framework.
 
 This module is the foundation every other module imports from.  Keep it
 dependency-free (stdlib only) so it can be safely imported anywhere.
@@ -326,7 +326,7 @@ class CliContext:
 
     # --- logging ---
 
-    logger: logging.Logger = field(default_factory=lambda: logging.getLogger("qbrd_tools"))
+    logger: logging.Logger = field(default_factory=lambda: logging.getLogger("clickwork"))
     """Configured logger instance."""
 
     # --- injectable subprocess helpers ---

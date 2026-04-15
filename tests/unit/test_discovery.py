@@ -2,7 +2,7 @@
 
 Discovery finds Click commands from two sources:
 1. Directory scanning: imports .py files from a commands/ dir, looks for 'cli' export
-2. Entry points: reads the 'qbrd_tools.commands' entry point group
+2. Entry points: reads the 'clickwork.commands' entry point group
 
 The discovery_mode parameter controls which mechanisms are active:
 - "dev": directory scanning only
@@ -26,7 +26,7 @@ class TestDirectoryScanning:
 
     def test_discovers_command_from_file(self, tmp_path: Path):
         """A .py file with a 'cli' attribute should be discovered."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         cmd_file = tmp_path / "greet.py"
         cmd_file.write_text(
@@ -44,19 +44,19 @@ class TestDirectoryScanning:
 
     def test_skips_files_without_cli_export(self, tmp_path: Path, caplog):
         """Files without 'cli' attribute produce a warning, not an error."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         helper = tmp_path / "utils.py"
         helper.write_text("# Just a helper module\nHELPER = True\n")
 
-        with caplog.at_level("WARNING", logger="qbrd_tools"):
+        with caplog.at_level("WARNING", logger="clickwork"):
             commands = discover_commands_from_dir(tmp_path)
         assert commands == {}
         assert "utils.py" in caplog.text
 
     def test_skips_subdirectories(self, tmp_path: Path):
         """Subdirectories (like lib/) should not be scanned."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         lib_dir = tmp_path / "lib"
         lib_dir.mkdir()
@@ -66,7 +66,7 @@ class TestDirectoryScanning:
         assert "helper" not in commands
 
     def test_skips_init_files(self, tmp_path: Path):
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         (tmp_path / "__init__.py").write_text("")
 
@@ -75,7 +75,7 @@ class TestDirectoryScanning:
 
     def test_discovers_click_group(self, tmp_path: Path):
         """A file exporting a click.Group should become a subcommand group."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         cmd_file = tmp_path / "deploy.py"
         cmd_file.write_text(
@@ -96,7 +96,7 @@ class TestDirectoryScanning:
 
     def test_supports_relative_imports_between_command_files(self, tmp_path: Path):
         """Command modules should be able to import sibling helper modules."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         (tmp_path / "helper.py").write_text("VALUE = 'hello from helper'\n")
         (tmp_path / "greet.py").write_text(
@@ -118,7 +118,7 @@ class TestDirectoryScanning:
 
     def test_uses_explicit_click_command_name(self, tmp_path: Path):
         """The discovered command name should match the Click-exposed name."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         cmd_file = tmp_path / "deploy.py"
         cmd_file.write_text(
@@ -135,24 +135,24 @@ class TestDirectoryScanning:
 
     def test_handles_import_error_gracefully(self, tmp_path: Path, caplog):
         """A command file that fails to import should warn, not crash."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         broken = tmp_path / "broken.py"
         broken.write_text("import nonexistent_module_xyz123\n")
 
-        with caplog.at_level("WARNING", logger="qbrd_tools"):
+        with caplog.at_level("WARNING", logger="clickwork"):
             commands = discover_commands_from_dir(tmp_path)
         assert commands == {}
         assert "broken.py" in caplog.text
 
     def test_handles_syntax_error_gracefully(self, tmp_path: Path, caplog):
         """A command file with syntax errors should warn, not crash."""
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
 
         broken = tmp_path / "bad_syntax.py"
         broken.write_text("def broken(\n")
 
-        with caplog.at_level("WARNING", logger="qbrd_tools"):
+        with caplog.at_level("WARNING", logger="clickwork"):
             commands = discover_commands_from_dir(tmp_path)
         assert commands == {}
         assert "bad_syntax.py" in caplog.text
@@ -165,11 +165,11 @@ class TestNamespaceIsolation:
         """Two dirs with the same helper.py should yield independent modules.
 
         WHY: discover_commands_from_dir() registers modules in sys.modules.
-        If the namespace is flat (qbrd_tools._discovered.helper), the second
+        If the namespace is flat (clickwork._discovered.helper), the second
         scan gets the cached first helper from sys.modules -- silently
         loading the wrong code.
         """
-        from qbrd_tools.discovery import discover_commands_from_dir
+        from clickwork.discovery import discover_commands_from_dir
         from click.testing import CliRunner
 
         # Create two directories each with a helper.py exporting 'cli'.
@@ -212,7 +212,7 @@ class TestDiscoveryMode:
     """discover_commands() selects mechanism based on discovery_mode."""
 
     def test_dev_mode_uses_directory(self, tmp_path: Path):
-        from qbrd_tools.discovery import discover_commands
+        from clickwork.discovery import discover_commands
 
         cmd_file = tmp_path / "hello.py"
         cmd_file.write_text(
@@ -230,7 +230,7 @@ class TestDiscoveryMode:
         assert "hello" in commands
 
     def test_auto_mode_uses_dir_when_exists(self, tmp_path: Path):
-        from qbrd_tools.discovery import discover_commands
+        from clickwork.discovery import discover_commands
 
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
@@ -255,7 +255,7 @@ class TestDiscoveryMode:
         If auto mode only used directory scanning, plugins from other packages
         would vanish just because a commands/ directory is present.
         """
-        from qbrd_tools.discovery import discover_commands
+        from clickwork.discovery import discover_commands
 
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
@@ -284,7 +284,7 @@ class TestDiscoveryMode:
 
     def test_auto_mode_falls_back_to_entrypoints(self, tmp_path: Path):
         """When commands_dir doesn't exist, auto mode still uses entry points."""
-        from qbrd_tools.discovery import discover_commands
+        from clickwork.discovery import discover_commands
 
         # Point at a nonexistent directory -- should fall back gracefully.
         commands = discover_commands(
@@ -296,7 +296,7 @@ class TestDiscoveryMode:
 
     def test_installed_mode_ignores_directory(self, tmp_path: Path):
         """In installed mode, commands_dir is ignored even if it exists."""
-        from qbrd_tools.discovery import discover_commands
+        from clickwork.discovery import discover_commands
 
         # Create a commands dir with a real command file
         commands_dir = tmp_path / "commands"
@@ -322,7 +322,7 @@ class TestEntrypoints:
     """Installed-mode discovery uses lazy entry-point proxies."""
 
     def test_discovers_entrypoint_without_loading_it(self, monkeypatch):
-        from qbrd_tools.discovery import discover_commands_from_entrypoints
+        from clickwork.discovery import discover_commands_from_entrypoints
 
         loaded = {"called": False}
 
@@ -335,7 +335,7 @@ class TestEntrypoints:
 
         monkeypatch.setattr(
             "importlib.metadata.entry_points",
-            lambda group=None: [FakeEntryPoint()] if group == "qbrd_tools.commands" else [],
+            lambda group=None: [FakeEntryPoint()] if group == "clickwork.commands" else [],
         )
 
         commands = discover_commands_from_entrypoints()
@@ -343,7 +343,7 @@ class TestEntrypoints:
         assert loaded["called"] is False
 
     def test_lazy_proxy_forwards_options_and_arguments(self, monkeypatch):
-        from qbrd_tools.discovery import discover_commands_from_entrypoints
+        from clickwork.discovery import discover_commands_from_entrypoints
 
         class FakeEntryPoint:
             name = "hello"
@@ -359,7 +359,7 @@ class TestEntrypoints:
 
         monkeypatch.setattr(
             "importlib.metadata.entry_points",
-            lambda group=None: [FakeEntryPoint()] if group == "qbrd_tools.commands" else [],
+            lambda group=None: [FakeEntryPoint()] if group == "clickwork.commands" else [],
         )
 
         commands = discover_commands_from_entrypoints()
@@ -376,11 +376,11 @@ class TestEntrypoints:
         without uninstalling the plugin. The INFO log tells you shadowing
         happened so stale local files don't silently hide installed plugins.
         """
-        from qbrd_tools.discovery import discover_commands
+        from clickwork.discovery import discover_commands
 
         installed = click.command(name="hello")(lambda: None)
         monkeypatch.setattr(
-            "qbrd_tools.discovery.discover_commands_from_entrypoints",
+            "clickwork.discovery.discover_commands_from_entrypoints",
             lambda: {"hello": installed},
         )
 
@@ -392,7 +392,7 @@ class TestEntrypoints:
             "cli = hello\n"
         )
 
-        with caplog.at_level("INFO", logger="qbrd_tools"):
+        with caplog.at_level("INFO", logger="clickwork"):
             commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
         assert "hello" in commands
         assert commands["hello"] is not installed

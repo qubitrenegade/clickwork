@@ -25,7 +25,7 @@ from pathlib import Path
 # tomllib is stdlib in Python 3.11+. No external dependency needed.
 import tomllib
 
-from qbrd_tools._types import Secret, normalize_prefix
+from clickwork._types import Secret, normalize_prefix
 
 
 class ConfigError(Exception):
@@ -57,7 +57,7 @@ def _flatten_mapping(data: dict, prefix: str = "") -> dict[str, object]:
 
     TOML dotted keys such as ``cloudflare.account_id = "abc"`` parse as
     nested dicts (``{"cloudflare": {"account_id": "abc"}}``). Commands and
-    schemas in qbrd-tools use flat dotted keys, so we normalize TOML data
+    schemas in clickwork use flat dotted keys, so we normalize TOML data
     into that shape before merging config layers.
 
     Args:

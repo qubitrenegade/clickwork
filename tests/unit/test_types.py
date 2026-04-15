@@ -1,4 +1,4 @@
-"""Unit tests for qbrd_tools._types.
+"""Unit tests for clickwork._types.
 
 Tests are written before the implementation (TDD / Red phase).
 Each test class covers one exported type: Secret, CliProcessError, CliContext.
@@ -23,7 +23,7 @@ class TestSecret:
     def test_str_is_redacted(self):
         # str() must never reveal the actual value -- callers log context objects
         # and accidentally leaking a token via str(ctx) is a hard-to-audit bug.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("super-secret")
         assert str(s) == "***"
@@ -31,7 +31,7 @@ class TestSecret:
     def test_repr_is_redacted(self):
         # repr() is used by debuggers, pytest output, and dataclass __repr__.
         # The type name is allowed (helps debugging), but the value must not appear.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("super-secret")
         r = repr(s)
@@ -41,14 +41,14 @@ class TestSecret:
     def test_get_returns_actual_value(self):
         # .get() is the intentional, explicit escape hatch to retrieve the value.
         # Using it at a call site signals to reviewers that secrets are in play.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("my-token")
         assert s.get() == "my-token"
 
     def test_fstring_is_redacted(self):
         # f-strings call __format__ which delegates to __str__ -- verify the chain.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("tok-abc123")
         formatted = f"token={s}"
@@ -57,7 +57,7 @@ class TestSecret:
 
     def test_bool_is_true_when_nonempty(self):
         # Allow `if ctx.token:` guards without exposing the value.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         assert bool(Secret("x")) is True
         assert bool(Secret("")) is False
@@ -65,7 +65,7 @@ class TestSecret:
     def test_vars_does_not_leak_value(self):
         # vars() / __dict__ is the most common accidental leak.  __slots__ removes
         # __dict__ entirely; accessing vars() on a slotted object raises TypeError.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("secret-value")
         with pytest.raises(TypeError):
@@ -73,7 +73,7 @@ class TestSecret:
 
     def test_pickle_raises(self):
         # Pickling would write the value to disk/network.  We block it explicitly.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("cannot-pickle-me")
         with pytest.raises(TypeError):
@@ -82,7 +82,7 @@ class TestSecret:
     def test_copy_returns_redacted(self):
         # copy.copy() should produce a new Secret wrapping the same value.
         # The internal attribute must not be reachable via normal dict access.
-        from qbrd_tools._types import Secret
+        from clickwork._types import Secret
 
         s = Secret("clone-me")
         s2 = copy.copy(s)
@@ -113,7 +113,7 @@ class TestCliProcessError:
     def test_wraps_called_process_error(self):
         # CliProcessError must surface the three most useful fields from the
         # underlying CalledProcessError without callers having to unwrap it.
-        from qbrd_tools._types import CliProcessError
+        from clickwork._types import CliProcessError
 
         cpe = self._make_cpe(returncode=128, cmd="git push", stderr="permission denied")
         err = CliProcessError(cpe)
@@ -124,7 +124,7 @@ class TestCliProcessError:
 
     def test_is_exception(self):
         # Must be raise-able as a normal Python exception.
-        from qbrd_tools._types import CliProcessError
+        from clickwork._types import CliProcessError
 
         cpe = self._make_cpe()
         err = CliProcessError(cpe)
@@ -133,7 +133,7 @@ class TestCliProcessError:
     def test_message_includes_command_and_exit_code(self):
         # str(err) surfaces in logs and pytest output -- include the command and
         # exit code so the failure is immediately actionable without a traceback.
-        from qbrd_tools._types import CliProcessError
+        from clickwork._types import CliProcessError
 
         cpe = self._make_cpe(returncode=2, cmd="npm test", stderr="")
         err = CliProcessError(cpe)

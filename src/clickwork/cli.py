@@ -1,4 +1,4 @@
-"""CLI factory for qbrd-tools.
+"""CLI factory for clickwork.
 
 create_cli() is the single entry point for building a CLI. It:
 1. Creates a Click group with global flags (--verbose, --quiet, --dry-run, --env, --yes)
@@ -10,7 +10,7 @@ create_cli() is the single entry point for building a CLI. It:
 
 Plugin authors call this once in their entry point script:
 
-    from qbrd_tools import create_cli
+    from clickwork import create_cli
     cli = create_cli(name="orbit-admin", commands_dir=Path(__file__).parent / "commands")
 """
 from __future__ import annotations
@@ -21,13 +21,13 @@ from pathlib import Path
 
 import click
 
-from qbrd_tools._logging import setup_logging
-from qbrd_tools._types import CliContext, CliProcessError, PrerequisiteError, normalize_prefix
-from qbrd_tools.config import ConfigError, load_config
-from qbrd_tools.discovery import discover_commands
-from qbrd_tools.process import capture as _capture, run as _run, run_with_confirm as _run_with_confirm
-from qbrd_tools.prereqs import require as _require
-from qbrd_tools.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
+from clickwork._logging import setup_logging
+from clickwork._types import CliContext, CliProcessError, PrerequisiteError, normalize_prefix
+from clickwork.config import ConfigError, load_config
+from clickwork.discovery import discover_commands
+from clickwork.process import capture as _capture, run as _run, run_with_confirm as _run_with_confirm
+from clickwork.prereqs import require as _require
+from clickwork.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
 
 
 # Exit codes per spec:
@@ -149,7 +149,7 @@ def pass_cli_context(f):
         if cli_ctx is None:
             raise click.UsageError(
                 "CliContext is missing. Ensure the command is running under "
-                "a CLI created by qbrd_tools.create_cli()."
+                "a CLI created by clickwork.create_cli()."
             )
         return f(cli_ctx, *args, **kwargs)
     return wrapper
@@ -164,7 +164,7 @@ def create_cli(
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
-    This is the main entry point for building a qbrd-tools CLI. It returns
+    This is the main entry point for building a clickwork CLI. It returns
     a Click group that can be invoked directly or used as a console_scripts
     entry point.
 

@@ -1,4 +1,4 @@
-"""qbrd-tools: Reusable CLI framework for project automation.
+"""clickwork: Reusable CLI framework for project automation.
 
 This package provides the building blocks for project-specific CLI tools.
 It handles plugin discovery, layered config, subprocess management, and
@@ -17,9 +17,9 @@ Public API:
 
 __version__ = "0.1.0"
 
-from qbrd_tools._types import CliContext, CliProcessError, PrerequisiteError, Secret, normalize_prefix
-from qbrd_tools.cli import create_cli, pass_cli_context
-from qbrd_tools.config import ConfigError, load_config
+from clickwork._types import CliContext, CliProcessError, PrerequisiteError, Secret, normalize_prefix
+from clickwork.cli import create_cli, pass_cli_context
+from clickwork.config import ConfigError, load_config
 
 __all__ = [
     "create_cli",

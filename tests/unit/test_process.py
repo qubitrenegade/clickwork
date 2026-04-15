@@ -26,14 +26,14 @@ class TestRun:
     """run() executes a command, streams output, raises on failure."""
 
     def test_runs_command_and_returns_completed_process(self):
-        from qbrd_tools.process import run
+        from clickwork.process import run
 
         result = run([sys.executable, "-c", "print('hello')"])
         assert result.returncode == 0
 
     def test_raises_cli_process_error_on_failure(self):
-        from qbrd_tools.process import run
-        from qbrd_tools._types import CliProcessError
+        from clickwork.process import run
+        from clickwork._types import CliProcessError
 
         with pytest.raises(CliProcessError) as exc_info:
             run([sys.executable, "-c", "import sys; sys.exit(1)"])
@@ -41,7 +41,7 @@ class TestRun:
 
     def test_dry_run_does_not_execute(self):
         """In dry-run mode, run() should print what it would do but not run it."""
-        from qbrd_tools.process import run
+        from clickwork.process import run
 
         # This would fail if actually executed.
         result = run([sys.executable, "-c", "import sys; sys.exit(1)"], dry_run=True)
@@ -49,7 +49,7 @@ class TestRun:
 
     def test_passes_extra_env_vars(self):
         """Secrets should be passable as env vars, not argv."""
-        from qbrd_tools.process import run
+        from clickwork.process import run
 
         proc = MagicMock()
         proc.wait.return_value = 0
@@ -65,14 +65,14 @@ class TestRun:
 
     def test_accepts_only_lists_not_strings(self):
         """Prevent shell injection by rejecting string commands."""
-        from qbrd_tools.process import run
+        from clickwork.process import run
 
         with pytest.raises(TypeError):
             run("echo hello")  # type: ignore
 
     def test_forwards_sigint_to_child_and_waits(self):
         """Ctrl-C should be forwarded to the child before bubbling up."""
-        from qbrd_tools.process import run
+        from clickwork.process import run
 
         proc = MagicMock()
         proc.send_signal.side_effect = ProcessLookupError()
@@ -94,8 +94,8 @@ class TestRun:
         Without this catch, the framework's wrapped_invoke handler classifies it
         as an unhandled exception and exits with code 2, which is misleading.
         """
-        from qbrd_tools.process import run
-        from qbrd_tools._types import CliProcessError
+        from clickwork.process import run
+        from clickwork._types import CliProcessError
 
         with pytest.raises(CliProcessError, match="Command not found"):
             run(["definitely-not-a-real-binary-xyz123"])
@@ -106,7 +106,7 @@ class TestFormatCmd:
 
     def test_posix_uses_shlex_quote(self):
         """On POSIX, shlex.quote wraps args with spaces in single quotes."""
-        from qbrd_tools.process import _format_cmd
+        from clickwork.process import _format_cmd
 
         with patch("os.name", "posix"):
             result = _format_cmd(["echo", "hello world"])
@@ -114,7 +114,7 @@ class TestFormatCmd:
 
     def test_windows_uses_list2cmdline(self):
         """On Windows, subprocess.list2cmdline handles quoting."""
-        from qbrd_tools.process import _format_cmd
+        from clickwork.process import _format_cmd
 
         with patch("os.name", "nt"):
             result = _format_cmd(["echo", "hello world"])
@@ -126,35 +126,35 @@ class TestCapture:
     """capture() runs a command and returns its stdout."""
 
     def test_captures_stdout(self):
-        from qbrd_tools.process import capture
+        from clickwork.process import capture
 
         output = capture([sys.executable, "-c", "print('hello world')"])
         assert output.strip() == "hello world"
 
     def test_raises_on_failure(self):
-        from qbrd_tools.process import capture
-        from qbrd_tools._types import CliProcessError
+        from clickwork.process import capture
+        from clickwork._types import CliProcessError
 
         with pytest.raises(CliProcessError):
             capture([sys.executable, "-c", "import sys; sys.exit(1)"])
 
     def test_always_executes_in_dry_run(self):
         """capture() is read-only, so it runs even in dry-run mode."""
-        from qbrd_tools.process import capture
+        from clickwork.process import capture
 
         output = capture([sys.executable, "-c", "print('data')"], dry_run=True)
         assert output == "data"
 
     def test_returns_stripped_output(self):
         """capture() strips trailing whitespace/newlines from stdout."""
-        from qbrd_tools.process import capture
+        from clickwork.process import capture
 
         output = capture([sys.executable, "-c", "print('  hello  ')"])
         assert output == "hello"
 
     def test_accepts_only_lists_not_strings(self):
         """Prevent shell injection by rejecting string commands."""
-        from qbrd_tools.process import capture
+        from clickwork.process import capture
 
         with pytest.raises(TypeError):
             capture("echo hello")  # type: ignore
@@ -165,8 +165,8 @@ class TestCapture:
         Same policy as run(): missing binary is exit 1 (user error), not
         exit 2 (framework bug).
         """
-        from qbrd_tools.process import capture
-        from qbrd_tools._types import CliProcessError
+        from clickwork.process import capture
+        from clickwork._types import CliProcessError
 
         with pytest.raises(CliProcessError, match="Command not found"):
             capture(["definitely-not-a-real-binary-xyz123"])
@@ -176,12 +176,12 @@ class TestRunWithConfirm:
     """run_with_confirm() prompts before executing destructive commands."""
 
     def test_executes_when_confirmed(self):
-        from qbrd_tools.process import run_with_confirm
+        from clickwork.process import run_with_confirm
         from unittest.mock import patch
 
         # Patch the imported binding in the process module so the already-
         # resolved _prompt_confirm name is replaced for this test.
-        with patch("qbrd_tools.process._prompt_confirm", return_value=True):
+        with patch("clickwork.process._prompt_confirm", return_value=True):
             result = run_with_confirm(
                 [sys.executable, "-c", "print('hello')"],
                 "Delete everything?",
@@ -190,12 +190,12 @@ class TestRunWithConfirm:
             assert result.returncode == 0
 
     def test_skips_when_denied(self):
-        from qbrd_tools.process import run_with_confirm
+        from clickwork.process import run_with_confirm
         from unittest.mock import patch
 
         # Patch the imported binding in the process module so the already-
         # resolved _prompt_confirm name is replaced for this test.
-        with patch("qbrd_tools.process._prompt_confirm", return_value=False):
+        with patch("clickwork.process._prompt_confirm", return_value=False):
             result = run_with_confirm(
                 [sys.executable, "-c", "print('hello')"],
                 "Delete everything?",
@@ -203,14 +203,14 @@ class TestRunWithConfirm:
             assert result is None
 
     def test_yes_flag_bypasses_prompt(self):
-        from qbrd_tools.process import run_with_confirm
+        from clickwork.process import run_with_confirm
 
         result = run_with_confirm([sys.executable, "-c", "print('hello')"], "Delete?", yes=True)
         assert result is not None
         assert result.returncode == 0
 
     def test_dry_run_skips_execution(self):
-        from qbrd_tools.process import run_with_confirm
+        from clickwork.process import run_with_confirm
 
         result = run_with_confirm(
             [sys.executable, "-c", "import sys; sys.exit(1)"],

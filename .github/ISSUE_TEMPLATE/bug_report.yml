@@ -44,8 +44,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: qbrd-tools version
-      description: Output of `python -c "import qbrd_tools; print(qbrd_tools.__version__)"`
+      label: clickwork version
+      description: Output of `python -c "import clickwork; print(clickwork.__version__)"`
       placeholder: "0.1.0"
     validations:
       required: true

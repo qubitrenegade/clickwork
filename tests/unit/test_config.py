@@ -22,7 +22,7 @@ class TestLoadTomlConfig:
     """load_config() reads and merges TOML files."""
 
     def test_loads_default_section(self, tmp_path: Path):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\nbucket = "releases-staging"\n')
@@ -34,7 +34,7 @@ class TestLoadTomlConfig:
         assert config["bucket"] == "releases-staging"
 
     def test_env_overrides_default(self, tmp_path: Path):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
@@ -51,7 +51,7 @@ class TestLoadTomlConfig:
 
     def test_env_falls_through_to_default(self, tmp_path: Path):
         """Keys not in the env section should come from [default]."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
@@ -68,7 +68,7 @@ class TestLoadTomlConfig:
         assert config["region"] == "us-east-1"
 
     def test_missing_config_file_returns_empty(self, tmp_path: Path):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config = load_config(
             project_name="test-cli",
@@ -79,7 +79,7 @@ class TestLoadTomlConfig:
     def test_user_config_merged_below_repo(self, tmp_path: Path):
         """User config has lowest priority -- repo config overrides it."""
         import os
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         repo_config = tmp_path / "repo" / ".test-cli.toml"
         repo_config.parent.mkdir()
@@ -102,7 +102,7 @@ class TestLoadTomlConfig:
 
     def test_spec_style_dotted_toml_keys_are_flattened(self, tmp_path: Path):
         """TOML dotted keys become flat config keys used by command authors."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
@@ -123,7 +123,7 @@ class TestEnvVarResolution:
     """Environment variables have highest priority in config resolution."""
 
     def test_explicit_env_var_mapping(self, tmp_path: Path, monkeypatch):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\naccount_id = "from-file"\n')
@@ -143,7 +143,7 @@ class TestEnvVarResolution:
 
     def test_auto_prefix_env_var(self, tmp_path: Path, monkeypatch):
         """Auto-prefixed: TEST_CLI_BUCKET reads from env if no explicit mapping."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\nbucket = "from-file"\n')
@@ -157,7 +157,7 @@ class TestEnvVarResolution:
         assert config["bucket"] == "from-auto-env"
 
     def test_explicit_mapping_wins_over_auto_prefix(self, tmp_path: Path, monkeypatch):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\naccount_id = "from-file"\n')
@@ -178,7 +178,7 @@ class TestEnvVarResolution:
 
     def test_project_env_var_fallback(self, tmp_path: Path, monkeypatch):
         """When --env is omitted, {PROJECT_NAME}_ENV selects the environment."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
@@ -200,7 +200,7 @@ class TestSchemaValidation:
     """Config schema validates required keys, types, and defaults."""
 
     def test_required_key_missing_raises(self, tmp_path: Path):
-        from qbrd_tools.config import load_config, ConfigError
+        from clickwork.config import load_config, ConfigError
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -217,7 +217,7 @@ class TestSchemaValidation:
             )
 
     def test_default_fills_missing_key(self, tmp_path: Path):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -235,7 +235,7 @@ class TestSchemaValidation:
 
     def test_secret_in_repo_config_raises(self, tmp_path: Path):
         """Keys tagged secret=True must not appear in repo config."""
-        from qbrd_tools.config import load_config, ConfigError
+        from clickwork.config import load_config, ConfigError
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\napi_token = "should-not-be-here"\n')
@@ -253,7 +253,7 @@ class TestSchemaValidation:
 
     def test_type_mismatch_raises(self, tmp_path: Path):
         """Values that don't match the declared type should raise ConfigError."""
-        from qbrd_tools.config import load_config, ConfigError
+        from clickwork.config import load_config, ConfigError
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\nport = "not-a-number"\n')
@@ -270,7 +270,7 @@ class TestSchemaValidation:
             )
 
     def test_type_match_passes(self, tmp_path: Path):
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\nport = 8080\n")
@@ -288,7 +288,7 @@ class TestSchemaValidation:
 
     def test_description_field_is_ignored(self, tmp_path: Path):
         """Schema 'description' field is for documentation only -- must not cause errors."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\naccount_id = "abc"\n')
@@ -318,8 +318,8 @@ class TestSecretWrapping:
         Wrapping in Secret() ensures str(value) returns '***' so accidental
         logging of ctx.config['api_token'] never exposes the real credential.
         """
-        from qbrd_tools.config import load_config
-        from qbrd_tools._types import Secret
+        from clickwork.config import load_config
+        from clickwork._types import Secret
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -343,8 +343,8 @@ class TestSecretWrapping:
     def test_secret_from_user_config_is_wrapped(self, tmp_path: Path):
         """A secret-tagged value from user config should also be a Secret."""
         import os
-        from qbrd_tools.config import load_config
-        from qbrd_tools._types import Secret
+        from clickwork.config import load_config
+        from clickwork._types import Secret
 
         repo_config = tmp_path / ".test-cli.toml"
         repo_config.write_text("[default]\n")
@@ -369,8 +369,8 @@ class TestSecretWrapping:
 
     def test_non_secret_value_stays_plain_string(self, tmp_path: Path):
         """Values without secret: True should remain plain strings."""
-        from qbrd_tools.config import load_config
-        from qbrd_tools._types import Secret
+        from clickwork.config import load_config
+        from clickwork._types import Secret
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\nbucket = "my-bucket"\n')
@@ -393,7 +393,7 @@ class TestEnvVarDottedKeys:
 
     def test_dotted_key_converts_dots_to_underscores(self, tmp_path: Path, monkeypatch):
         """'cloudflare.account_id' -> TEST_CLI_CLOUDFLARE_ACCOUNT_ID."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\ncloudflare.account_id = "from-file"\n')
@@ -408,7 +408,7 @@ class TestEnvVarDottedKeys:
 
     def test_schema_only_key_resolved_from_env(self, tmp_path: Path, monkeypatch):
         """Keys in schema but not in any config file should still resolve from env."""
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -434,7 +434,7 @@ class TestUserConfigPermissions:
     def test_world_readable_config_is_refused(self, tmp_path: Path):
         """User config readable by others should raise ConfigError."""
         import os
-        from qbrd_tools.config import load_config, ConfigError
+        from clickwork.config import load_config, ConfigError
 
         user_config = tmp_path / "config.toml"
         user_config.write_text('token = "secret"\n')
@@ -453,7 +453,7 @@ class TestUserConfigPermissions:
     def test_owner_only_config_passes(self, tmp_path: Path):
         """User config with 0o600 permissions should load fine."""
         import os
-        from qbrd_tools.config import load_config
+        from clickwork.config import load_config
 
         user_config = tmp_path / "config.toml"
         user_config.write_text('region = "us-east-1"\n')

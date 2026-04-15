@@ -1,14 +1,14 @@
 [project]
 name = "sample-commands"
 version = "0.1.0"
-description = "Sample plugin for qbrd-tools -- test fixture and reference implementation"
+description = "Sample plugin for clickwork -- test fixture and reference implementation"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
-    "qbrd-tools",
+    "clickwork",
 ]
 
-[project.entry-points."qbrd_tools.commands"]
+[project.entry-points."clickwork.commands"]
 hello = "sample_commands.hello:cli"
 
 [build-system]
