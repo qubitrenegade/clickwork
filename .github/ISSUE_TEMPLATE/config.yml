@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/qubitrenegade/qbrd-tools/blob/main/docs/GUIDE.md
+    about: Check the guide before opening an issue -- your question may already be answered.
