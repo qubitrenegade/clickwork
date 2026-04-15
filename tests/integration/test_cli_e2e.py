@@ -9,7 +9,7 @@ from pathlib import Path
 from click.testing import CliRunner
 import pytest
 
-from qbrd_tools.cli import create_cli
+from clickwork.cli import create_cli
 
 
 class TestCliEndToEnd:

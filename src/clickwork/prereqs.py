@@ -16,9 +16,9 @@ import logging
 import shutil
 import subprocess
 
-from qbrd_tools._types import PrerequisiteError
+from clickwork._types import PrerequisiteError
 
-logger = logging.getLogger("qbrd_tools")
+logger = logging.getLogger("clickwork")
 
 # Known auth-check commands for common tools. Maps binary name to the
 # argv that returns exit 0 when authenticated. Extensible by consumers.

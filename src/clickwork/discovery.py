@@ -1,4 +1,4 @@
-"""Plugin discovery for qbrd-tools CLIs.
+"""Plugin discovery for clickwork CLIs.
 
 Two mechanisms find Click commands:
 
@@ -6,7 +6,7 @@ Two mechanisms find Click commands:
    look for a 'cli' attribute (Click command or group). Non-recursive --
    subdirectories like lib/ are skipped. Files without 'cli' produce a warning.
 
-2. **Entry points (installed mode):** Read the 'qbrd_tools.commands' entry
+2. **Entry points (installed mode):** Read the 'clickwork.commands' entry
    point group from installed packages.
 
 The discovery_mode parameter controls which are active:
@@ -28,11 +28,11 @@ from types import ModuleType
 
 import click
 
-logger = logging.getLogger("qbrd_tools")
+logger = logging.getLogger("clickwork")
 
 # The entry point group name that plugin packages use to register commands.
 # Plugin authors add this to their pyproject.toml [project.entry-points] table.
-ENTRY_POINT_GROUP = "qbrd_tools.commands"
+ENTRY_POINT_GROUP = "clickwork.commands"
 
 
 class LazyEntryPointCommand(click.Command):
@@ -151,7 +151,7 @@ class LazyEntryPointCommand(click.Command):
     def get_help(self, ctx: click.Context) -> str:
         """Return the full help text from the real command.
 
-        Called when the user runs ``qbrd <cmd> --help``. Loading the real
+        Called when the user runs ``<cli> <cmd> --help``. Loading the real
         command here ensures the full docstring and option list are shown.
 
         Args:
@@ -198,7 +198,7 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
     # module objects instead of colliding in sys.modules.
     dir_path = str(commands_dir.resolve())
     dir_hash = hashlib.sha256(dir_path.encode()).hexdigest()[:12]
-    package_name = f"qbrd_tools._discovered_{dir_hash}"
+    package_name = f"clickwork._discovered_{dir_hash}"
     package = sys.modules.get(package_name)
     if package is None:
         package = ModuleType(package_name)
@@ -271,7 +271,7 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
 def discover_commands_from_entrypoints() -> dict[str, click.Command]:
     """Discover commands from installed packages via the entry points mechanism.
 
-    Reads the ``qbrd_tools.commands`` entry point group from all installed
+    Reads the ``clickwork.commands`` entry point group from all installed
     packages. Each entry point should reference a Click command or group.
     Entry points are wrapped in ``LazyEntryPointCommand`` proxies so startup
     does not trigger imports of every installed plugin.

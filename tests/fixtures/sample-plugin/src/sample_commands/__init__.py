@@ -1,6 +1,6 @@
-"""Sample commands plugin for qbrd-tools.
+"""Sample commands plugin for clickwork.
 
 This is both a test fixture and a reference implementation showing how to
-build commands on top of qbrd-tools. Each function demonstrates a different
+build commands on top of clickwork. Each function demonstrates a different
 framework feature.
 """

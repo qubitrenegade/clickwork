@@ -1,4 +1,4 @@
-"""Subprocess helpers for qbrd-tools commands.
+"""Subprocess helpers for clickwork commands.
 
 Three main functions:
 - run(cmd): Execute a mutating command (deploy, build, push). Streams output
@@ -24,10 +24,10 @@ import shlex
 import signal
 import subprocess
 
-from qbrd_tools._types import CliProcessError
-from qbrd_tools.prompts import confirm as _prompt_confirm
+from clickwork._types import CliProcessError
+from clickwork.prompts import confirm as _prompt_confirm
 
-logger = logging.getLogger("qbrd_tools")
+logger = logging.getLogger("clickwork")
 
 # How long to wait for a child process to exit after forwarding SIGINT
 # before escalating to SIGKILL. Long enough for graceful shutdown of most

@@ -1,6 +1,6 @@
 # Guide
 
-A step-by-step guide to building project automation CLIs with qbrd-tools.
+A step-by-step guide to building project automation CLIs with clickwork.
 Each section builds on the last, starting from a single command and
 progressing to a full-featured CLI with config, environments, and
 distributed plugins.
@@ -16,7 +16,7 @@ these live in scattered bash scripts, maybe they are ad-hoc commands you
 run from memory. You want to unify them into a single CLI with consistent
 flags, configuration, and error handling.
 
-qbrd-tools gives you the scaffolding. You write the commands.
+clickwork gives you the scaffolding. You write the commands.
 
 ## Prerequisites
 
@@ -26,15 +26,15 @@ qbrd-tools gives you the scaffolding. You write the commands.
 ## Installation
 
 ```bash
-uv pip install "git+https://github.com/qubitrenegade/qbrd-tools.git@v0.1.0"
+uv pip install "git+https://github.com/qubitrenegade/clickwork.git@v0.1.0"
 ```
 
 For local development alongside your project:
 
 ```bash
-git clone https://github.com/qubitrenegade/qbrd-tools.git
+git clone https://github.com/qubitrenegade/clickwork.git
 cd your-project
-uv pip install -e ../qbrd-tools
+uv pip install -e ../clickwork
 ```
 
 ## Your First CLI
@@ -48,7 +48,7 @@ boilerplate -- everything else is commands.
 #!/usr/bin/env python3
 """my-tool: Project automation CLI."""
 from pathlib import Path
-from qbrd_tools import create_cli
+from clickwork import create_cli
 
 # Resolve commands_dir relative to this script so it works
 # regardless of the current working directory.
@@ -107,7 +107,7 @@ receive it:
 ```python
 # commands/deploy.py
 import click
-from qbrd_tools import pass_cli_context, CliContext
+from clickwork import pass_cli_context, CliContext
 
 @click.command()
 @click.argument("target")
@@ -146,7 +146,7 @@ it becomes a subcommand group:
 ```python
 # commands/runner.py
 import click
-from qbrd_tools import pass_cli_context
+from clickwork import pass_cli_context
 
 @click.group()
 def runner():
@@ -382,7 +382,7 @@ a command, not halfway through a deploy.
 Built-in auth checks exist for `gh`, `gcloud`, and `aws`. Add your own:
 
 ```python
-from qbrd_tools.prereqs import AUTH_CHECKS
+from clickwork.prereqs import AUTH_CHECKS
 AUTH_CHECKS["my-tool"] = ["my-tool", "auth", "verify"]
 ```
 
@@ -427,12 +427,12 @@ my-tool/
 ```toml
 [project]
 name = "my-tool"
-dependencies = ["qbrd-tools"]
+dependencies = ["clickwork"]
 
 [project.scripts]
 my-tool = "my_tool:cli"
 
-[project.entry-points."qbrd_tools.commands"]
+[project.entry-points."clickwork.commands"]
 deploy = "my_tool.commands.deploy:cli"
 runner = "my_tool.commands.runner:cli"
 
@@ -445,7 +445,7 @@ build-backend = "hatchling.build"
 
 ```python
 # src/my_tool/__init__.py
-from qbrd_tools import create_cli
+from clickwork import create_cli
 cli = create_cli(name="my-tool", discovery_mode="installed")
 ```
 
@@ -462,7 +462,7 @@ subprocess:
 
 ```python
 from click.testing import CliRunner
-from qbrd_tools import create_cli
+from clickwork import create_cli
 
 def test_deploy_dry_run(tmp_path):
     cmd_dir = tmp_path / "commands"
@@ -489,7 +489,7 @@ For testing command logic without the CLI harness, construct a
 `CliContext` directly:
 
 ```python
-from qbrd_tools import CliContext
+from clickwork import CliContext
 
 def test_deploy_logic():
     commands_run = []
@@ -551,10 +551,10 @@ Highest priority wins:
 
 ### Public API
 
-Everything you need is re-exported from `qbrd_tools`:
+Everything you need is re-exported from `clickwork`:
 
 ```python
-from qbrd_tools import (
+from clickwork import (
     create_cli,          # Build a CLI with global flags and discovery
     load_config,         # Load layered TOML config directly
     CliContext,          # Typed context passed to every command

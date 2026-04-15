@@ -1,4 +1,4 @@
-# qbrd-tools
+# clickwork
 
 Reusable CLI framework for project automation. Build project-specific CLIs
 with plugin discovery, layered config, subprocess helpers, and common
@@ -12,15 +12,15 @@ utilities -- so your commands focus on business logic, not boilerplate.
 
 ```bash
 # Pin to a tag or SHA for reproducibility
-uv pip install "git+https://github.com/qubitrenegade/qbrd-tools.git@v0.1.0"
+uv pip install "git+https://github.com/qubitrenegade/clickwork.git@v0.1.0"
 ```
 
 For local development alongside a consumer project:
 
 ```bash
-git clone https://github.com/qubitrenegade/qbrd-tools.git
+git clone https://github.com/qubitrenegade/clickwork.git
 cd your-project
-uv pip install -e ../qbrd-tools
+uv pip install -e ../clickwork
 ```
 
 ## Quick Start
@@ -31,7 +31,7 @@ uv pip install -e ../qbrd-tools
 #!/usr/bin/env python3
 """my-tool: Project automation CLI."""
 from pathlib import Path
-from qbrd_tools import create_cli
+from clickwork import create_cli
 
 commands_dir = Path(__file__).resolve().parent / "commands"
 cli = create_cli(name="my-tool", commands_dir=commands_dir)
@@ -48,7 +48,7 @@ group as `cli`:
 ```python
 # commands/deploy.py
 import click
-from qbrd_tools import pass_cli_context, CliContext
+from clickwork import pass_cli_context, CliContext
 
 @click.command()
 @click.argument("target")
@@ -98,7 +98,7 @@ Two mechanisms, selected via `discovery_mode`:
   registers any that export a `cli` attribute (Click command or group).
   Subdirectories like `lib/` are skipped. Used for local development.
 
-- **Entry points (`installed`):** Reads the `qbrd_tools.commands` entry point
+- **Entry points (`installed`):** Reads the `clickwork.commands` entry point
   group from installed packages. Used for distributed plugins.
 
 - **Auto mode (default):** Uses directory scanning if `commands_dir` exists
@@ -210,7 +210,7 @@ ctx.require("gh", authenticated=True)    # Is it on PATH AND authenticated?
 ```
 
 Known auth checks are built in for `gh`, `gcloud`, and `aws`. Extensible via
-`qbrd_tools.prereqs.AUTH_CHECKS`.
+`clickwork.prereqs.AUTH_CHECKS`.
 
 ## Architecture
 
@@ -226,7 +226,7 @@ your-project/
     .my-tool.toml       # Repo-level config
 ```
 
-The framework (`qbrd-tools`) provides:
+The framework (`clickwork`) provides:
 
 | Module | Responsibility |
 |--------|---------------|
@@ -243,8 +243,8 @@ The framework (`qbrd-tools`) provides:
 ## Development
 
 ```bash
-git clone https://github.com/qubitrenegade/qbrd-tools.git
-cd qbrd-tools
+git clone https://github.com/qubitrenegade/clickwork.git
+cd clickwork
 uv venv && uv pip install -e ".[dev]"
 
 # Run tests

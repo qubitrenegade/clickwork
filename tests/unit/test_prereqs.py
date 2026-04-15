@@ -16,21 +16,21 @@ class TestRequire:
 
     def test_passes_for_existing_binary(self):
         """A present binary should pass regardless of the host platform."""
-        from qbrd_tools.prereqs import require
+        from clickwork.prereqs import require
 
         with patch("shutil.which", return_value="/usr/bin/fake"):
             require("fake-tool")
 
     def test_raises_for_missing_binary(self):
-        from qbrd_tools.prereqs import require
-        from qbrd_tools._types import PrerequisiteError
+        from clickwork.prereqs import require
+        from clickwork._types import PrerequisiteError
 
         with pytest.raises(PrerequisiteError):
             require("definitely-not-a-real-binary-xyz123")
 
     def test_error_message_names_the_binary(self):
-        from qbrd_tools.prereqs import require
-        from qbrd_tools._types import PrerequisiteError
+        from clickwork.prereqs import require
+        from clickwork._types import PrerequisiteError
 
         with pytest.raises(PrerequisiteError, match="missing-tool-abc"):
             require("missing-tool-abc")
@@ -41,7 +41,7 @@ class TestRequireAuthenticated:
 
     def test_auth_check_passes_when_command_succeeds(self):
         """When the auth check command exits 0, require() should pass."""
-        from qbrd_tools.prereqs import require, AUTH_CHECKS
+        from clickwork.prereqs import require, AUTH_CHECKS
 
         with patch("shutil.which", return_value="/usr/bin/fake"), \
              patch("subprocess.run") as mock_run:
@@ -55,8 +55,8 @@ class TestRequireAuthenticated:
 
     def test_auth_check_fails_when_command_errors(self):
         """When the auth check command fails, require() should raise."""
-        from qbrd_tools.prereqs import require, AUTH_CHECKS
-        from qbrd_tools._types import PrerequisiteError
+        from clickwork.prereqs import require, AUTH_CHECKS
+        from clickwork._types import PrerequisiteError
 
         with patch("shutil.which", return_value="/usr/bin/fake"), \
              patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, ["fake"])):
@@ -69,9 +69,9 @@ class TestRequireAuthenticated:
 
     def test_unknown_binary_skips_auth_check_with_warning(self, caplog):
         """Binaries without a known auth check should warn but not fail."""
-        from qbrd_tools.prereqs import require
+        from clickwork.prereqs import require
 
         with patch("shutil.which", return_value="/usr/bin/unknown"):
-            with caplog.at_level("WARNING", logger="qbrd_tools"):
+            with caplog.at_level("WARNING", logger="clickwork"):
                 require("unknown-tool", authenticated=True)
             assert "no auth check" in caplog.text.lower()

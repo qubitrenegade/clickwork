@@ -38,7 +38,7 @@ class TestSamplePlugin:
 
         script = """
 from click.testing import CliRunner
-from qbrd_tools.cli import create_cli
+from clickwork.cli import create_cli
 
 cli = create_cli(name="test-cli", discovery_mode="installed")
 result = CliRunner().invoke(cli, ["hello", "greet", "World"])
@@ -72,7 +72,7 @@ raise SystemExit(result.exit_code)
 
         script = """
 from click.testing import CliRunner
-from qbrd_tools.cli import create_cli
+from clickwork.cli import create_cli
 
 cli = create_cli(name="test-cli", discovery_mode="installed")
 result = CliRunner().invoke(cli, ["--help"])

@@ -28,7 +28,7 @@ class TestCreateCli:
         global flags (--dry-run, --env) that must be parsed before dispatch.
         Only a Group supports that structure.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         cli = create_cli(name="test-cli", commands_dir=tmp_path)
         assert isinstance(cli, click.Group)
@@ -39,7 +39,7 @@ class TestCreateCli:
         WHY this matters: if the group is misconfigured (wrong name, missing
         help text) users see confusing output and can't discover subcommands.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         cli = create_cli(name="test-cli", commands_dir=tmp_path)
         runner = CliRunner()
@@ -54,7 +54,7 @@ class TestCreateCli:
         WHY: the whole point of create_cli() is to wire up discovery so plugin
         authors don't have to manually register each command file.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         cmd_dir = tmp_path / "commands"
         cmd_dir.mkdir()
@@ -80,7 +80,7 @@ class TestCreateCli:
         WHY: these flags have opposite effects on log output. Silently picking
         one would surprise the user; a clear error is better.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         cli = create_cli(name="test-cli", commands_dir=tmp_path)
         runner = CliRunner()
@@ -95,8 +95,8 @@ class TestCreateCli:
         without re-declaring the same Click options on every subcommand.
         The CliContext carries all of that from the group callback.
         """
-        from qbrd_tools.cli import create_cli
-        from qbrd_tools._types import CliContext
+        from clickwork.cli import create_cli
+        from clickwork._types import CliContext
 
         received_ctx = {}
 
@@ -125,7 +125,7 @@ class TestCreateCli:
         'staging' vs 'production'). If the flag doesn't reach ctx.obj,
         commands can't branch on the selected environment.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         received_env = {}
 
@@ -153,7 +153,7 @@ class TestCreateCli:
         while config values come from [env.staging], commands that branch
         on ctx.env would take the wrong path.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         monkeypatch.setenv("TEST_CLI_ENV", "staging")
 
@@ -182,7 +182,7 @@ class TestCreateCli:
         commands calling ctx.run() would execute destructive operations
         even when the user explicitly asked for a preview.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -209,7 +209,7 @@ class TestCreateCli:
         interactive prompts. If the flag doesn't reach ctx.obj, --yes
         would have no effect and CI pipelines would hang.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -236,7 +236,7 @@ class TestCreateCli:
         their own config files. If create_cli() doesn't load config, every
         command would need its own loading logic -- defeating the harness.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -274,7 +274,7 @@ class TestConvenienceMethods:
         raises TypeError: 'NoneType' is not callable, which is very confusing
         for plugin authors.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -305,7 +305,7 @@ class TestConvenienceMethods:
         ctx.run() ignores dry_run, passing --dry-run at the CLI level has no
         effect on commands that use ctx.run() -- a critical safety regression.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -338,7 +338,7 @@ class TestFrameworkErrorHandling:
         and shell scripts know whether a failure was the user's fault or
         a bug in the framework itself.
         """
-        from qbrd_tools.cli import create_cli
+        from clickwork.cli import create_cli
 
         @click.command()
         @click.pass_obj
@@ -362,8 +362,8 @@ class TestFrameworkErrorHandling:
         framework bug. Exit code 1 tells CI it's a fixable configuration
         error, not an internal failure.
         """
-        from qbrd_tools.cli import create_cli
-        from qbrd_tools._types import PrerequisiteError
+        from clickwork.cli import create_cli
+        from clickwork._types import PrerequisiteError
 
         @click.command()
         @click.pass_obj
@@ -393,8 +393,8 @@ class TestPassCliContextDecorator:
         remembering to call ensure_object(). It also gives a clear error
         if the command is somehow invoked outside a create_cli() harness.
         """
-        from qbrd_tools.cli import create_cli, pass_cli_context
-        from qbrd_tools._types import CliContext
+        from clickwork.cli import create_cli, pass_cli_context
+        from clickwork._types import CliContext
 
         received = {}
 

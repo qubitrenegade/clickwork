@@ -16,7 +16,7 @@ class TestPlatformDetection:
     """Platform helpers return booleans based on sys.platform."""
 
     def test_is_linux(self):
-        from qbrd_tools.platform import is_linux
+        from clickwork.platform import is_linux
 
         with patch.object(sys, "platform", "linux"):
             assert is_linux() is True
@@ -24,7 +24,7 @@ class TestPlatformDetection:
             assert is_linux() is False
 
     def test_is_macos(self):
-        from qbrd_tools.platform import is_macos
+        from clickwork.platform import is_macos
 
         with patch.object(sys, "platform", "darwin"):
             assert is_macos() is True
@@ -32,7 +32,7 @@ class TestPlatformDetection:
             assert is_macos() is False
 
     def test_is_windows(self):
-        from qbrd_tools.platform import is_windows
+        from clickwork.platform import is_windows
 
         with patch.object(sys, "platform", "win32"):
             assert is_windows() is True
@@ -45,7 +45,7 @@ class TestFindRepoRoot:
 
     def test_finds_git_directory(self, tmp_path: Path):
         """Standard case: .git is a directory at the repo root."""
-        from qbrd_tools.platform import find_repo_root
+        from clickwork.platform import find_repo_root
 
         (tmp_path / ".git").mkdir()
         subdir = tmp_path / "src" / "deep"
@@ -54,14 +54,14 @@ class TestFindRepoRoot:
 
     def test_finds_git_file_for_worktrees(self, tmp_path: Path):
         """Worktree case: .git is a file containing 'gitdir: /path/to/...'."""
-        from qbrd_tools.platform import find_repo_root
+        from clickwork.platform import find_repo_root
 
         (tmp_path / ".git").write_text("gitdir: /some/other/path")
         assert find_repo_root(tmp_path) == tmp_path
 
     def test_returns_none_when_no_git(self, tmp_path: Path):
         """When there's no .git anywhere in the hierarchy, return None."""
-        from qbrd_tools.platform import find_repo_root
+        from clickwork.platform import find_repo_root
 
         subdir = tmp_path / "not" / "a" / "repo"
         subdir.mkdir(parents=True)

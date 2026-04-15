@@ -1,4 +1,4 @@
-"""Sample 'hello' command group demonstrating qbrd-tools framework features.
+"""Sample 'hello' command group demonstrating clickwork framework features.
 
 This command group shows:
 - Basic command registration (just export cli = ...)

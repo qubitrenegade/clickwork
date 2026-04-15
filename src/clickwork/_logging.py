@@ -1,4 +1,4 @@
-"""Logging setup for qbrd-tools CLIs.
+"""Logging setup for clickwork CLIs.
 
 Provides a single setup_logging() function that configures a named logger
 with the correct verbosity level and a consistent output format. Color
@@ -19,7 +19,7 @@ import sys
 def setup_logging(
     verbose: int = 0,
     quiet: bool = False,
-    name: str = "qbrd_tools",
+    name: str = "clickwork",
 ) -> logging.Logger:
     """Configure and return a logger with the appropriate verbosity level.
 
@@ -73,9 +73,9 @@ def setup_logging(
     logger = logging.getLogger(name)
     configure_logger(logger)
 
-    # Framework modules log to the shared qbrd_tools namespace, so keep that
+    # Framework modules log to the shared clickwork namespace, so keep that
     # logger aligned with the CLI logger as well.
-    if name != "qbrd_tools":
-        configure_logger(logging.getLogger("qbrd_tools"))
+    if name != "clickwork":
+        configure_logger(logging.getLogger("clickwork"))
 
     return logger
