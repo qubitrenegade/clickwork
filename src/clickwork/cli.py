@@ -157,6 +157,7 @@ def pass_cli_context(f):
 
 def create_cli(
     name: str,
+    description: str | None = None,
     commands_dir: Path | None = None,
     discovery_mode: str = "auto",
     config_schema: dict | None = None,
@@ -177,6 +178,12 @@ def create_cli(
 
     Args:
         name: CLI name (e.g., "orbit-admin"). Used for config paths and logging.
+        description: Short help summary shown at the top of ``<cli> --help``.
+            When omitted (None), an empty string is passed to Click so it
+            does NOT fall back to the inner cli_group callback's docstring,
+            which is a developer-only implementation detail. Plugin authors
+            should pass something like "Admin CLI for orbit" to give users
+            a one-line summary of what the CLI does.
         commands_dir: Path to the commands directory for dev-mode discovery.
         discovery_mode: "dev", "installed", or "auto".
         config_schema: Optional config schema dict for validation.
@@ -186,10 +193,20 @@ def create_cli(
         A configured Click group with all discovered commands registered.
     """
 
+    # Resolve the help text shown by ``<cli> --help``.
+    #
+    # WHY an explicit fallback to "": Click's @click.group() decorator falls
+    # back to the callback function's __doc__ when ``help=`` is None. That
+    # behaviour would leak the inner cli_group() docstring -- which documents
+    # internal callback args like ctx/verbose/quiet -- to end users. Passing
+    # an empty string forces Click to render no description at all, instead
+    # of scraping the developer-facing docstring (issue #4).
+    group_help = description if description is not None else ""
+
     # Define the group callback as a local function so that 'name', 'config_schema',
     # and 'repo_config_path' from the outer scope are captured in the closure.
     # This is the standard Click pattern for parameterised group factories.
-    @click.group(name=name)
+    @click.group(name=name, help=group_help)
     @click.option(
         "--verbose", "-v",
         count=True,

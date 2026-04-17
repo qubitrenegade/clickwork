@@ -229,6 +229,58 @@ class TestCreateCli:
         assert result.exit_code == 0
         assert received["yes"] is True
 
+    def test_help_does_not_leak_internal_docstring(self, tmp_path: Path):
+        """--help must NOT expose the internal cli_group callback's docstring.
+
+        WHY this matters: the inner cli_group() function has a developer-facing
+        docstring documenting its callback args (ctx, verbose, quiet, etc.).
+        Click's @click.group() decorator falls back to the callback's __doc__
+        when no explicit ``help=`` is provided, so a plain create_cli() leaks
+        that internal docstring into user-visible --help output.
+
+        End users should never see phrases like "CLI entry point" or "Runs
+        before every subcommand" or a raw "Args:" block -- that's an
+        implementation detail of clickwork's factory, not the CLI they're
+        using. This test pins the regression fix for issue #4.
+        """
+        from clickwork.cli import create_cli
+
+        cli = create_cli(name="test-cli", commands_dir=tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        # These phrases come verbatim from cli_group's docstring. If any of
+        # them appear in --help, Click is still falling back to __doc__.
+        assert "CLI entry point" not in result.output
+        assert "Runs before every subcommand" not in result.output
+        assert "configure logging, load config" not in result.output
+        # The docstring also contains a Google-style "Args:" section with
+        # parameter descriptions; none of that should reach the user.
+        assert "Args:" not in result.output
+
+    def test_help_shows_description_when_provided(self, tmp_path: Path):
+        """When description= is passed, --help should display it.
+
+        WHY: plugin authors want the ability to provide a short summary of
+        what their CLI does (e.g., "Admin CLI for orbit"). Accepting a
+        description parameter gives them that lever without forcing them
+        to subclass or monkey-patch the Click group.
+        """
+        from clickwork.cli import create_cli
+
+        cli = create_cli(
+            name="test-cli",
+            description="My awesome CLI for testing",
+            commands_dir=tmp_path,
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--help"])
+        assert result.exit_code == 0
+        assert "My awesome CLI for testing" in result.output
+        # Regression guard: providing a description must still suppress
+        # the internal docstring, not append to it.
+        assert "CLI entry point" not in result.output
+
     def test_config_loaded_into_context(self, tmp_path: Path):
         """Config from a TOML file should be accessible as ctx.obj.config.
 
