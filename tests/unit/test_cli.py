@@ -315,6 +315,108 @@ class TestCreateCli:
         assert received["bucket"] == "from-config"
 
 
+class TestAddParentToPath:
+    """create_cli(add_parent_to_path=True) inserts commands_dir.parent into sys.path.
+
+    WHY this feature exists: plugin authors want their command files to be able
+    to ``from tools.lib.X import Y`` without having to add sys.path boilerplate
+    in their CLI entry script. When ``add_parent_to_path=True`` (opt-in), the
+    factory prepends the resolved parent of ``commands_dir`` to ``sys.path`` so
+    command modules discovered under it can import sibling packages that live
+    alongside the commands/ directory.
+
+    sys.path isolation: each test snapshots and restores ``sys.path`` via
+    ``monkeypatch.setattr`` to avoid leaking mutations across the suite.
+    monkeypatch auto-restores when the test finishes, which is the cleanest
+    reader pattern available in pytest.
+    """
+
+    def test_add_parent_to_path_false_by_default_does_not_modify_sys_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Default behaviour must leave sys.path untouched.
+
+        WHY: existing consumers of create_cli() rely on sys.path staying
+        exactly as they configured it. The new kwarg is opt-in (defaults to
+        False) so we don't change import resolution for anyone unless they
+        explicitly ask for the auto-insertion behaviour.
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch so any mutation is auto-restored.
+        # list(sys.path) copies the contents so our snapshot isn't the live
+        # reference Click/whatever else might mutate during the call.
+        monkeypatch.setattr("sys.path", list(sys.path))
+        before = list(sys.path)
+
+        create_cli(name="t", commands_dir=tmp_path)
+
+        assert sys.path == before, (
+            f"sys.path changed even though add_parent_to_path defaulted False: "
+            f"before={before!r}, after={sys.path!r}"
+        )
+
+    def test_add_parent_to_path_true_inserts_commands_dir_parent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """With add_parent_to_path=True, sys.path[0] must be the resolved parent.
+
+        WHY the resolved path: the implementation calls .resolve() so different
+        unresolved spellings of the same directory (relative paths from different
+        CWDs, symlinks, etc.) don't cause duplicate entries. We assert against
+        the resolved absolute path to match what the implementation inserts.
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch for auto-restoration.
+        monkeypatch.setattr("sys.path", list(sys.path))
+
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+
+        create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
+
+        expected = str(commands_dir.parent.resolve())
+        # Sanity check on the test's own assumptions: resolving the parent of
+        # tmp_path/commands should equal the resolved tmp_path itself. If this
+        # fails, the test is inadvertently comparing apples and oranges.
+        assert expected == str(tmp_path.resolve())
+        assert sys.path[0] == expected, (
+            f"Expected resolved parent at sys.path[0]: "
+            f"expected={expected!r}, got sys.path[:3]={sys.path[:3]!r}"
+        )
+
+    def test_add_parent_to_path_idempotent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Calling create_cli() twice must not insert the path twice.
+
+        WHY: plugin authors may instantiate create_cli() more than once in
+        tests or REPL sessions. Each call blindly prepending would bloat
+        sys.path unboundedly and shadow earlier entries with stale copies.
+        The implementation must dedupe on the resolved absolute path.
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch for auto-restoration.
+        monkeypatch.setattr("sys.path", list(sys.path))
+
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+
+        create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
+        create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
+
+        expected = str(commands_dir.parent.resolve())
+        # count() on the list tells us how many times the resolved path appears.
+        # Exactly one is the correct answer -- the first insert wins, the
+        # second call is a no-op because the path is already present.
+        assert sys.path.count(expected) == 1, (
+            f"Expected resolved parent to appear exactly once in sys.path; "
+            f"found {sys.path.count(expected)} occurrences in {sys.path!r}"
+        )
+
+
 class TestConvenienceMethods:
     """Convenience methods on CliContext are bound by create_cli()."""
 
