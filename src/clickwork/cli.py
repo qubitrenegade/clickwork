@@ -157,11 +157,12 @@ def pass_cli_context(f):
 
 def create_cli(
     name: str,
-    description: str | None = None,
     commands_dir: Path | None = None,
     discovery_mode: str = "auto",
     config_schema: dict | None = None,
     repo_config_path: Path | None = None,
+    *,
+    description: str | None = None,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -178,16 +179,18 @@ def create_cli(
 
     Args:
         name: CLI name (e.g., "orbit-admin"). Used for config paths and logging.
-        description: Short help summary shown at the top of ``<cli> --help``.
-            When omitted (None), an empty string is passed to Click so it
-            does NOT fall back to the inner cli_group callback's docstring,
-            which is a developer-only implementation detail. Plugin authors
-            should pass something like "Admin CLI for orbit" to give users
-            a one-line summary of what the CLI does.
         commands_dir: Path to the commands directory for dev-mode discovery.
         discovery_mode: "dev", "installed", or "auto".
         config_schema: Optional config schema dict for validation.
         repo_config_path: Optional path to repo-level config file.
+        description: Short help summary shown at the top of ``<cli> --help``.
+            Keyword-only to preserve positional compatibility for existing
+            callers that pass ``commands_dir`` positionally. When omitted
+            (None), an empty string is passed to Click so it does NOT fall
+            back to the inner cli_group callback's docstring, which is a
+            developer-only implementation detail. Plugin authors should
+            pass something like "Admin CLI for orbit" to give users a
+            one-line summary of what the CLI does.
 
     Returns:
         A configured Click group with all discovered commands registered.
