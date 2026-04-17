@@ -21,12 +21,12 @@ from pathlib import Path
 
 import click
 
+from clickwork import prereqs as _prereqs
 from clickwork._logging import setup_logging
 from clickwork._types import CliContext, CliProcessError, PrerequisiteError, normalize_prefix
 from clickwork.config import ConfigError, load_config
 from clickwork.discovery import discover_commands
 from clickwork.process import capture as _capture, run as _run, run_with_confirm as _run_with_confirm
-from clickwork.prereqs import require as _require
 from clickwork.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
 
 
@@ -324,9 +324,22 @@ def create_cli(
         cli_ctx.capture = lambda cmd, env=None: _capture(cmd, dry_run=cli_ctx.dry_run, env=env)
 
         # require() has no dry_run / yes concept -- it's always a live check.
-        # We bind it directly so the call site is ctx.require("docker") not
-        # ctx.require("docker", dry_run=...).
-        cli_ctx.require = _require
+        # The call site is ctx.require("docker") not ctx.require("docker", dry_run=...).
+        #
+        # WHY a lambda that looks up prereqs.require at call time instead of
+        # capturing the imported function directly (issue #8): binding
+        # ``cli_ctx.require = _require`` freezes the reference at import time,
+        # so tests that do ``patch("clickwork.prereqs.require")`` silently
+        # have no effect -- the CliContext already holds the original
+        # function. Resolving the attribute through the ``_prereqs`` module
+        # object on every call means the patched function is picked up
+        # naturally, matching what test authors expect.
+        #
+        # WHY not @functools.partial or a closure over a local name: both
+        # would also freeze the reference at bind time. The only shape that
+        # defers lookup is one that re-reads the module attribute each call,
+        # which this lambda does via ``_prereqs.require``.
+        cli_ctx.require = lambda *args, **kwargs: _prereqs.require(*args, **kwargs)
 
         # confirm() and confirm_destructive() close over yes so --yes propagates.
         cli_ctx.confirm = lambda msg: _confirm(msg, yes=cli_ctx.yes)

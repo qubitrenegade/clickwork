@@ -11,6 +11,7 @@ Test structure:
 - TestPassCliContextDecorator: tests the @pass_cli_context decorator
 """
 from pathlib import Path
+from unittest.mock import patch
 import sys
 
 import click
@@ -377,6 +378,71 @@ class TestConvenienceMethods:
         result = runner.invoke(cli, ["--dry-run", "check"])
         assert result.exit_code == 0
         assert received["result"] is None
+
+
+class TestRequireMockPatchable:
+    """ctx.require() must be patchable via clickwork.prereqs.require (issue #8).
+
+    WHY this class exists: before the fix for issue #8, create_cli() bound
+    ``cli_ctx.require = _require`` where ``_require`` was imported at module
+    load time (``from clickwork.prereqs import require as _require``). That
+    snapshot meant ``patch("clickwork.prereqs.require")`` in a test had no
+    effect on ``ctx.require`` -- the CliContext already held the original
+    function reference. Users had to reach for the internal
+    ``clickwork.cli._require`` symbol, which is an implementation detail.
+
+    These tests pin the correct behaviour: patching the *public* module
+    attribute ``clickwork.prereqs.require`` intercepts ``ctx.require(...)``
+    calls made from inside a command.
+    """
+
+    def test_ctx_require_is_patchable_via_prereqs_module(self, tmp_path: Path):
+        """Patching clickwork.prereqs.require must intercept ctx.require().
+
+        WHY this matters: plugin authors writing tests for commands that
+        guard on ``ctx.require("docker")`` expect the natural
+        ``patch("clickwork.prereqs.require")`` to work. If the binding is
+        eager (module-level import captured at factory time), the patch
+        silently no-ops and the test either passes for the wrong reason or
+        fails because the real tool is present/absent on the test machine.
+
+        We assert the mock was called -- not the return value -- because the
+        test contract is "the framework routed the call through the patched
+        symbol", not "require returned X".
+        """
+        from clickwork.cli import create_cli
+
+        @click.command()
+        @click.pass_obj
+        def needs_git(ctx):
+            # Call ctx.require the same way a real command would.
+            # With the patch active, this should route through the mock
+            # rather than the real prereqs.require (which would consult PATH).
+            ctx.require("git")
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(needs_git)
+
+        runner = CliRunner()
+        # Patch the PUBLIC symbol users reach for. If ctx.require is bound
+        # eagerly at factory time, this patch will not take effect and the
+        # test will fail (either because the real require runs, or because
+        # mock_req.called stays False).
+        with patch("clickwork.prereqs.require") as mock_req:
+            result = runner.invoke(cli, ["needs-git"])
+
+        assert result.exit_code == 0, result.output
+        assert mock_req.called, (
+            "Expected clickwork.prereqs.require to be called via ctx.require(), "
+            "but the mock was never invoked -- ctx.require is likely bound to "
+            "a pre-import snapshot of the function (issue #8)."
+        )
+        # Double-check the call argument so a future regression that only
+        # forwards *some* calls (e.g. unconditionally eats them) is caught.
+        mock_req.assert_called_once_with("git")
 
 
 class TestFrameworkErrorHandling:
