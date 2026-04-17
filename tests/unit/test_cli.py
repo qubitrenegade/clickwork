@@ -316,14 +316,21 @@ class TestCreateCli:
 
 
 class TestAddParentToPath:
-    """create_cli(add_parent_to_path=True) inserts commands_dir.parent into sys.path.
+    """create_cli(add_parent_to_path=True) inserts commands_dir.parent.parent into sys.path.
 
     WHY this feature exists: plugin authors want their command files to be able
     to ``from tools.lib.X import Y`` without having to add sys.path boilerplate
     in their CLI entry script. When ``add_parent_to_path=True`` (opt-in), the
-    factory prepends the resolved parent of ``commands_dir`` to ``sys.path`` so
-    command modules discovered under it can import sibling packages that live
-    alongside the commands/ directory.
+    factory prepends the resolved GRANDPARENT of ``commands_dir`` (i.e., the
+    project root that contains ``tools/`` as a package) to ``sys.path`` so
+    command modules can import the parent package (``tools``) and its siblings.
+
+    Why grandparent and not parent: making ``tools/`` importable as a package
+    (so ``import tools`` or ``from tools.lib.X import Y`` works) requires the
+    directory that *contains* ``tools/`` to be on sys.path -- that's
+    ``commands_dir.parent.parent``. Inserting just ``commands_dir.parent``
+    would enable ``import lib`` style sibling imports, which is a less useful
+    feature than what issue #15 called for.
 
     sys.path isolation: each test snapshots and restores ``sys.path`` via
     ``monkeypatch.setattr`` to avoid leaking mutations across the suite.
@@ -356,33 +363,46 @@ class TestAddParentToPath:
             f"before={before!r}, after={sys.path!r}"
         )
 
-    def test_add_parent_to_path_true_inserts_commands_dir_parent(
+    def test_add_parent_to_path_true_inserts_commands_dir_grandparent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """With add_parent_to_path=True, sys.path[0] must be the resolved parent.
+        """With add_parent_to_path=True, sys.path[0] must be the resolved grandparent.
 
-        WHY the resolved path: the implementation calls .resolve() so different
-        unresolved spellings of the same directory (relative paths from different
-        CWDs, symlinks, etc.) don't cause duplicate entries. We assert against
-        the resolved absolute path to match what the implementation inserts.
+        WHY grandparent: to make ``commands_dir.parent`` importable as a
+        package (e.g. ``import tools``), ``commands_dir.parent.parent`` has
+        to be on sys.path. This test pins that relationship so a future
+        refactor can't silently regress to the easier-but-wrong "insert
+        parent" behavior -- see the module comment for the full rationale.
+
+        WHY the resolved path: the implementation calls .resolve() so
+        different unresolved spellings of the same directory (relative
+        paths from different CWDs, symlinks, etc.) don't cause duplicate
+        entries. We assert against the resolved absolute path to match
+        what the implementation inserts.
         """
         from clickwork.cli import create_cli
 
         # Snapshot sys.path via monkeypatch for auto-restoration.
         monkeypatch.setattr("sys.path", list(sys.path))
 
-        commands_dir = tmp_path / "commands"
-        commands_dir.mkdir()
+        # Build a realistic layout: tmp_path / "project" / "tools" / "commands".
+        # The commands_dir here is .../project/tools/commands, so the
+        # grandparent is .../project. We assert sys.path[0] matches that.
+        project_root = tmp_path / "project"
+        tools_dir = project_root / "tools"
+        commands_dir = tools_dir / "commands"
+        commands_dir.mkdir(parents=True)
 
         create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
 
-        expected = str(commands_dir.parent.resolve())
-        # Sanity check on the test's own assumptions: resolving the parent of
-        # tmp_path/commands should equal the resolved tmp_path itself. If this
-        # fails, the test is inadvertently comparing apples and oranges.
-        assert expected == str(tmp_path.resolve())
+        expected = str(commands_dir.parent.parent.resolve())
+        # Sanity check on the test's own assumptions: the resolved
+        # grandparent of tools/commands must equal the resolved project
+        # root we just built. If this assertion fails, the test is
+        # comparing the wrong reference value.
+        assert expected == str(project_root.resolve())
         assert sys.path[0] == expected, (
-            f"Expected resolved parent at sys.path[0]: "
+            f"Expected resolved grandparent at sys.path[0]: "
             f"expected={expected!r}, got sys.path[:3]={sys.path[:3]!r}"
         )
 
@@ -401,18 +421,19 @@ class TestAddParentToPath:
         # Snapshot sys.path via monkeypatch for auto-restoration.
         monkeypatch.setattr("sys.path", list(sys.path))
 
-        commands_dir = tmp_path / "commands"
-        commands_dir.mkdir()
+        project_root = tmp_path / "project"
+        commands_dir = project_root / "tools" / "commands"
+        commands_dir.mkdir(parents=True)
 
         create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
         create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
 
-        expected = str(commands_dir.parent.resolve())
+        expected = str(commands_dir.parent.parent.resolve())
         # count() on the list tells us how many times the resolved path appears.
         # Exactly one is the correct answer -- the first insert wins, the
         # second call is a no-op because the path is already present.
         assert sys.path.count(expected) == 1, (
-            f"Expected resolved parent to appear exactly once in sys.path; "
+            f"Expected resolved grandparent to appear exactly once in sys.path; "
             f"found {sys.path.count(expected)} occurrences in {sys.path!r}"
         )
 

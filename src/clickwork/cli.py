@@ -194,44 +194,57 @@ def create_cli(
             pass something like "Admin CLI for orbit" to give users a
             one-line summary of what the CLI does.
         add_parent_to_path: When True (and ``commands_dir`` is provided),
-            prepend the resolved parent of ``commands_dir`` to ``sys.path``
-            so command files can ``from your_project.lib.X import Y``
-            without the CLI entry script having to manually poke sys.path.
-            Defaults to False (opt-in) so existing callers experience no
-            change in import resolution. Keyword-only to keep the positional
-            signature stable. The inserted path is de-duplicated against
-            ``sys.path`` using ``Path.resolve()``, so repeated calls with
-            the same directory (potentially spelled differently) don't
-            stack duplicate entries.
+            prepend ``commands_dir.parent.parent`` (resolved) to
+            ``sys.path`` so command files can ``from your_project.lib.X
+            import Y`` without the CLI entry script having to manually
+            poke sys.path. *Note:* we insert the **grandparent** of
+            ``commands_dir``, not the parent -- see the implementation
+            comment below for why that's what's needed to make the parent
+            package (e.g. ``your_project``) importable. Defaults to False
+            (opt-in) so existing callers experience no change in import
+            resolution. Keyword-only to keep the positional signature
+            stable. The inserted path is de-duplicated against ``sys.path``
+            using ``Path.resolve()``, so repeated calls with the same
+            directory (potentially spelled differently) don't stack
+            duplicate entries.
 
     Returns:
         A configured Click group with all discovered commands registered.
     """
 
-    # Optionally make the commands_dir's parent importable.
+    # Optionally make commands_dir's parent package importable.
     #
     # WHY: plugin authors typically lay out their project as
     #
-    #     tools/
-    #       my_cli           (entry script)
-    #       commands/        (per-command .py files)
-    #       lib/             (shared helpers)
+    #     project_root/
+    #       tools/           (commands_dir.parent)
+    #         my_cli         (entry script)
+    #         commands/      (commands_dir -- per-command .py files)
+    #         lib/           (shared helpers)
     #
     # and want their command files to write ``from tools.lib.X import Y``
-    # without the entry script prepending ``tools/..`` to sys.path. Setting
-    # ``add_parent_to_path=True`` does that prepend here, once, at CLI-
-    # construction time.
+    # without the entry script prepending project_root to sys.path.
+    # Setting ``add_parent_to_path=True`` does that prepend here, once,
+    # at CLI-construction time.
+    #
+    # WHY grandparent, not parent: to make ``tools/`` importable *as a
+    # package* (enabling ``from tools.lib.X import Y``), the directory
+    # that CONTAINS ``tools/`` has to be on sys.path -- that's
+    # ``commands_dir.parent.parent`` (project_root). Inserting just
+    # ``commands_dir.parent`` would only enable ``import lib`` (sibling
+    # top-level imports), which is a different, less useful feature
+    # than what issue #15 asked for.
     #
     # WHY .resolve() + dedup: the same directory can be reached via
-    # different strings -- ``./commands`` vs ``/abs/path/commands`` vs a
+    # different strings -- ``./project`` vs ``/abs/path/project`` vs a
     # symlinked path -- depending on the caller's CWD. Resolving to the
     # absolute canonical path before comparing against sys.path ensures
     # repeat calls don't stack duplicate entries that would shadow each
     # other during import resolution.
     if add_parent_to_path and commands_dir is not None:
-        parent = str(commands_dir.parent.resolve())
-        if parent not in sys.path:
-            sys.path.insert(0, parent)
+        project_root = str(commands_dir.parent.parent.resolve())
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
 
     # Resolve the help text shown by ``<cli> --help``.
     #
