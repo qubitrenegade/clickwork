@@ -9,8 +9,8 @@
 | Issue | Decision |
 |-------|----------|
 | #8 | Lazy resolution via property on `CliContext`. One test asserting `patch("clickwork.prereqs.require")` works as intuitively expected. |
-| #10 | Two keyword-only params on `ctx.run()` and `ctx.run_with_confirm()`: `stdin_text: str \| None = None` and `stdin_bytes: bytes \| None = None`. Passing both raises `ValueError`. Subprocess `text=` auto-routed based on which one is set. |
-| #15 | New kwarg `add_parent_to_path: bool = False` on `create_cli()`. When `True` and `commands_dir` is provided, `str(commands_dir.parent)` is inserted at `sys.path[0]` if not already present. Opt-in to avoid surprising existing consumers. |
+| #10 | Two keyword-only params on `ctx.run()` and `ctx.run_with_confirm()`: `stdin_text: str \| None = None` and `stdin_bytes: bytes \| None = None`. Passing both raises `ValueError`. Text/binary mode chosen per the provided value; data delivered via `Popen.communicate()` so existing SIGINT-forwarding semantics are preserved (no switch to `subprocess.run`). |
+| #15 | New kwarg `add_parent_to_path: bool = False` on `create_cli()`. When `True` and `commands_dir` is provided, `str(commands_dir.parent.resolve())` is inserted at `sys.path[0]` if that resolved path is not already present. Opt-in to avoid surprising existing consumers. |
 
 ## Branch + worktree layout
 
@@ -44,8 +44,8 @@
 **Files:** `src/clickwork/process.py`, `src/clickwork/cli.py` (the lambdas wired into `CliContext`), `tests/unit/test_process.py`.
 
 **TDD:**
-1. Red: add tests for `ctx.run(["cat"], stdin_text="hello")` — assert subprocess receives "hello" on stdin and returns it on stdout. Same for `stdin_bytes=b"world"`. Add a test that passing both raises `ValueError`. Add a test that `stdin_text` works under `dry_run=True` (should NOT execute, just log).
-2. Green: add `stdin_text: str | None = None` and `stdin_bytes: bytes | None = None` keyword-only params to `clickwork.process.run()` and `run_with_confirm()`. Route to `subprocess.run(..., input=value, text=isinstance(value, str))`. Validate mutual exclusivity up front.
+1. Red: add tests using a portable `[sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"]` (matches the existing `test_process.py` pattern — no reliance on `cat`/`echo` which differ on Windows). Assert `stdin_text="hello"` is received on stdin and echoed on stdout. Same for `stdin_bytes=b"world"` (note: route through a separate binary-mode helper script). Add a test that passing both raises `ValueError`. Add a test that `stdin_text` works under `dry_run=True` (should NOT execute, just log).
+2. Green: add `stdin_text: str | None = None` and `stdin_bytes: bytes | None = None` keyword-only params to `clickwork.process.run()` and `run_with_confirm()`. **Keep the existing `subprocess.Popen`-based execution path** — do not switch to `subprocess.run(input=...)`, because the current implementation uses `Popen` specifically to forward SIGINT to the child before re-raising `KeyboardInterrupt` (see `_wait_with_signal_forwarding` in `process.py`). When a stdin payload is provided: validate mutual exclusivity, set `stdin=subprocess.PIPE`, write the data via `proc.communicate(input=...)` (or equivalent write/close on `proc.stdin`) with text/binary mode chosen to match the provided value. Mode must be consistent: pick `text=True` with `stdin_text` and `text=False` with `stdin_bytes`.
 3. Refactor: update the lambdas in `cli.py` that bind `cli_ctx.run` / `cli_ctx.run_with_confirm` to forward the new kwargs. Update the `run()` / `run_with_confirm()` docstrings with a section on stdin data passing, including the "never pass secrets via argv" use case.
 
 **Constraints:**
