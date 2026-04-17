@@ -58,7 +58,7 @@
 **Files:** `src/clickwork/cli.py`, `tests/unit/test_cli.py`.
 
 **TDD:**
-1. Red: write `test_add_parent_to_path_false_by_default_does_not_modify_sys_path` (creates a CLI, snapshots `sys.path`, builds CLI, asserts unchanged) and `test_add_parent_to_path_true_inserts_commands_dir_parent` (creates a `commands_dir`, passes `add_parent_to_path=True`, asserts `str(commands_dir.parent)` is at `sys.path[0]` after construction). Plus `test_add_parent_to_path_idempotent` (call twice with the same commands_dir, path only appears once).
+1. Red: write `test_add_parent_to_path_false_by_default_does_not_modify_sys_path` (creates a CLI, snapshots `sys.path`, builds CLI, asserts unchanged) and `test_add_parent_to_path_true_inserts_commands_dir_parent` (creates a `commands_dir`, passes `add_parent_to_path=True`, asserts `str(commands_dir.parent.resolve())` is at `sys.path[0]` after construction — match the resolved absolute path since the implementation uses `.resolve()` for dedup). Plus `test_add_parent_to_path_idempotent` (call twice with the same commands_dir, path only appears once).
 2. Green: add the kwarg to `create_cli()`. In the factory body, before or after discovery:
    ```python
    if add_parent_to_path and commands_dir is not None:
