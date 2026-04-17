@@ -161,6 +161,8 @@ def create_cli(
     discovery_mode: str = "auto",
     config_schema: dict | None = None,
     repo_config_path: Path | None = None,
+    *,
+    description: str | None = None,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -181,15 +183,33 @@ def create_cli(
         discovery_mode: "dev", "installed", or "auto".
         config_schema: Optional config schema dict for validation.
         repo_config_path: Optional path to repo-level config file.
+        description: Short help summary shown at the top of ``<cli> --help``.
+            Keyword-only to preserve positional compatibility for existing
+            callers that pass ``commands_dir`` positionally. When omitted
+            (None), an empty string is passed to Click so it does NOT fall
+            back to the inner cli_group callback's docstring, which is a
+            developer-only implementation detail. Plugin authors should
+            pass something like "Admin CLI for orbit" to give users a
+            one-line summary of what the CLI does.
 
     Returns:
         A configured Click group with all discovered commands registered.
     """
 
+    # Resolve the help text shown by ``<cli> --help``.
+    #
+    # WHY an explicit fallback to "": Click's @click.group() decorator falls
+    # back to the callback function's __doc__ when ``help=`` is None. That
+    # behaviour would leak the inner cli_group() docstring -- which documents
+    # internal callback args like ctx/verbose/quiet -- to end users. Passing
+    # an empty string forces Click to render no description at all, instead
+    # of scraping the developer-facing docstring (issue #4).
+    group_help = description if description is not None else ""
+
     # Define the group callback as a local function so that 'name', 'config_schema',
     # and 'repo_config_path' from the outer scope are captured in the closure.
     # This is the standard Click pattern for parameterised group factories.
-    @click.group(name=name)
+    @click.group(name=name, help=group_help)
     @click.option(
         "--verbose", "-v",
         count=True,
