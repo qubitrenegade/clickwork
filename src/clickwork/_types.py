@@ -353,8 +353,9 @@ class CliContext:
     (the public symbol). The CLI harness binds ``ctx.require`` through a
     lazy lambda that re-reads the module attribute on every call, so
     ``unittest.mock.patch("clickwork.prereqs.require")`` transparently takes
-    effect -- there is no need to reach for internal symbols like
-    ``clickwork.cli._require`` (issue #8).
+    effect. Prior to issue #8's fix, tests had to reach for the internal
+    ``clickwork.cli._require`` alias; that alias no longer exists -- patch
+    ``clickwork.prereqs.require`` instead.
     """
 
     confirm: Callable[..., bool] | None = field(
