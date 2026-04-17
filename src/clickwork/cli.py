@@ -348,11 +348,23 @@ def create_cli(
     def wrapped_invoke(ctx: click.Context):
         """Invoke the CLI group and classify any unhandled exceptions.
 
-        Known exception types (CliProcessError, Click's Exit and Abort) are
-        handled explicitly so Click's normal handlers surface them with the
-        correct exit codes. Any other unexpected exception is treated as a
-        framework bug and exits with code 2 (EXIT_FRAMEWORK_ERROR) after
-        printing a short message to stderr.
+        Known exception types are routed by semantic category:
+
+        - ``CliProcessError`` and ``PrerequisiteError`` are our own user-error
+          signals -- emit the message and exit 1 without a traceback.
+        - ``click.exceptions.Exit`` and ``click.exceptions.Abort`` are normal
+          Click control-flow exceptions and are re-raised so Click handles them.
+        - ``click.exceptions.ClickException`` (and subclasses like UsageError,
+          FileError, BadParameter) are also user errors. We re-raise them so
+          Click's native handler formats the message with its own "Error:"
+          prefix (plus a "Usage:" hint for UsageError) and exits with the
+          subclass's own ``exit_code`` attribute (1 for most, 2 for UsageError).
+          Before issue #5 these fell through to the generic catch-all below
+          and got stamped with "Internal error:" + exit 2, hiding the real
+          message and implying a framework bug.
+        - Any OTHER exception is treated as an unexpected framework bug and
+          exits with code 2 (EXIT_FRAMEWORK_ERROR) after printing a short
+          message to stderr.
 
         Args:
             ctx: The current Click context passed to the group's invoke().
@@ -375,6 +387,18 @@ def create_cli(
         except click.exceptions.Abort:
             # User pressed Ctrl-C at a confirmation prompt.
             # Don't intercept -- Click handles this with a clean "Aborted!" message.
+            raise
+        except click.exceptions.ClickException:
+            # ClickException covers UsageError, BadParameter, FileError, etc.
+            # These are user errors, NOT framework bugs. Re-raise so Click's
+            # own standalone_mode handler formats them (with "Error:" prefix
+            # and, for UsageError, a "Usage: ... --help" hint) and uses the
+            # subclass's ``exit_code`` attribute (default 1; UsageError's is 2).
+            #
+            # IMPORTANT: this clause MUST come before ``except Exception`` --
+            # ClickException inherits from Exception, so the generic clause
+            # would otherwise shadow it and we'd be right back where we
+            # started (issue #5).
             raise
         except Exception as e:
             # Everything else is an unexpected framework bug.

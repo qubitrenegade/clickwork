@@ -382,6 +382,124 @@ class TestFrameworkErrorHandling:
         assert "docker" in result.output
 
 
+class TestClickExceptionHandling:
+    """Click's own exceptions (UsageError, FileError, etc.) are user errors.
+
+    WHY this class exists: ClickException and its subclasses represent user
+    mistakes -- bad flags, missing files, invalid parameter values. Before
+    the fix for issue #5, they fell through to the generic ``except Exception``
+    branch in wrapped_invoke(), which stamped them with exit code 2 (framework
+    bug) and an "Internal error:" prefix -- swallowing Click's own formatting
+    (including the usage hint from UsageError). These tests pin the correct
+    behaviour: we re-raise ClickException so Click's native handling surfaces
+    the message with the right exit code and no "Internal error:" prefix.
+    """
+
+    def test_usage_error_is_not_treated_as_framework_bug(self, tmp_path: Path):
+        """A click.UsageError must not be prefixed with "Internal error:".
+
+        WHY: UsageError is the user passing a bad flag ("no such option"),
+        which Click formats with a helpful "Usage: ... --help" hint. The old
+        behaviour swallowed all of that and printed "Internal error: no such
+        option: --foo", which wrongly implied a framework bug.
+
+        We assert the absence of the "Internal error:" prefix rather than a
+        specific exit code because Click's own convention assigns UsageError
+        exit code 2 (collision with our framework-error code 2, but that's
+        Click's behaviour and distinct from our "we crashed" path). What we
+        really care about is that Click handled it, not us.
+        """
+        from clickwork.cli import create_cli
+
+        @click.command()
+        @click.pass_obj
+        def bad_usage(ctx):
+            # Simulates Click deep in a command raising UsageError from code
+            # the command called (e.g., a helper that validates inputs).
+            raise click.UsageError("no such option: --foo")
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(bad_usage)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["bad-usage"], standalone_mode=True)
+        # Click-native UsageError handling uses exit code 2 BUT does NOT
+        # print "Internal error:" -- that's the key signal that we delegated
+        # to Click instead of wrapping the exception as a framework bug.
+        assert "Internal error:" not in result.output
+        # Click's UsageError output includes "Error:" (Click's own formatter).
+        assert "Error:" in result.output
+        # UsageError.exit_code is 2 in Click -- happens to match our framework
+        # error code, but semantically these are distinct paths.
+        assert result.exit_code == 2
+
+    def test_file_error_uses_click_native_handling(self, tmp_path: Path):
+        """A click.FileError should exit 1 with Click's own "Error:" prefix.
+
+        WHY: FileError is for "can't open this file" messages. Click's default
+        exit_code for FileError is 1 (a user error, same as ours), and its
+        formatter prints "Error: Could not open file 'X': <reason>". Before
+        the fix, the user got "Internal error: <reason>" and exit 2 -- hiding
+        the filename entirely.
+        """
+        from clickwork.cli import create_cli
+
+        @click.command()
+        @click.pass_obj
+        def bad_file(ctx):
+            # FileError is what click.File() raises for unreadable paths;
+            # commands can also raise it directly for custom file handling.
+            raise click.FileError("myfile.txt", "file not found")
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(bad_file)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["bad-file"], standalone_mode=True)
+        # User error -- not a framework bug.
+        assert result.exit_code == 1
+        assert "Internal error:" not in result.output
+        # Click's native formatter mentions the filename and reason.
+        assert "myfile.txt" in result.output
+        assert "file not found" in result.output
+
+    def test_generic_click_exception_exits_1_without_internal_prefix(
+        self, tmp_path: Path
+    ):
+        """A plain click.ClickException should exit 1 with Click's own format.
+
+        WHY: Plugin authors sometimes raise ClickException directly to signal
+        a clean user error with a custom message. ClickException.exit_code
+        defaults to 1, and Click formats the message as "Error: <msg>". Before
+        the fix, we clobbered both the exit code (to 2) and the formatting
+        (with "Internal error:").
+        """
+        from clickwork.cli import create_cli
+
+        @click.command()
+        @click.pass_obj
+        def raises_click_exc(ctx):
+            raise click.ClickException("generic user error")
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(raises_click_exc)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["raises-click-exc"], standalone_mode=True)
+        assert result.exit_code == 1
+        assert "Internal error:" not in result.output
+        assert "generic user error" in result.output
+
+
 class TestPassCliContextDecorator:
     """@pass_cli_context injects a CliContext into the command function."""
 
