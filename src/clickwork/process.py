@@ -148,10 +148,40 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
 
 
 
+def _validate_stdin_params(
+    stdin_text: str | None, stdin_bytes: bytes | None
+) -> None:
+    """Enforce mutual exclusivity between stdin_text and stdin_bytes.
+
+    WHY two separate kwargs instead of one polymorphic stdin=str|bytes:
+    self-documenting call sites. ``run(cmd, stdin_text=token)`` is
+    unambiguous; ``run(cmd, stdin=token)`` forces the reader to check
+    the type to know whether the child sees text or bytes. Splitting the
+    parameter makes the intent explicit at every call site. The cost is
+    this one-time validation that the caller didn't pass both.
+
+    Args:
+        stdin_text: Text payload for the child's stdin, or None.
+        stdin_bytes: Binary payload for the child's stdin, or None.
+
+    Raises:
+        ValueError: If both parameters are set. Passing neither is fine
+            (it means "don't attach anything to stdin").
+    """
+    if stdin_text is not None and stdin_bytes is not None:
+        raise ValueError(
+            "Pass stdin_text OR stdin_bytes, not both. "
+            "Use stdin_text for UTF-8 strings; use stdin_bytes for raw bytes."
+        )
+
+
 def run(
     cmd: list[str],
     dry_run: bool = False,
     env: dict[str, str] | None = None,
+    *,
+    stdin_text: str | None = None,
+    stdin_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess | None:
     """Execute a command, streaming output in real-time.
 
@@ -160,6 +190,10 @@ def run(
         dry_run: If True, print the command but don't execute it.
         env: Extra environment variables merged with os.environ. Use this
             for secrets instead of putting them in cmd (argv is visible in ps).
+        stdin_text: If set, pipe this string to the child's stdin (text mode,
+            UTF-8 by default). Mutually exclusive with stdin_bytes.
+        stdin_bytes: If set, pipe these raw bytes to the child's stdin
+            (binary mode). Mutually exclusive with stdin_text.
 
     Returns:
         subprocess.CompletedProcess on success, or None if dry_run=True.
@@ -167,8 +201,29 @@ def run(
     Raises:
         CliProcessError: If the command exits with non-zero status.
         TypeError: If cmd is a string instead of a list.
+        ValueError: If both stdin_text and stdin_bytes are set.
+
+    Passing data on stdin (secrets-via-stdin):
+        Many tools accept a secret on stdin so it never appears in argv
+        (which is visible in ``ps`` output). Common examples:
+
+        - ``wrangler secret put API_KEY`` reads the secret from stdin
+        - ``gh auth login --with-token`` reads the token from stdin
+        - ``docker login --password-stdin`` reads the password from stdin
+
+        Use ``stdin_text`` for UTF-8 text (the common case), or
+        ``stdin_bytes`` for raw binary payloads. Never pass secrets via
+        ``cmd`` (argv is world-readable in ``ps``); prefer ``env`` for
+        env-var-based secrets and ``stdin_text`` for stdin-based ones.
+
+        Example::
+
+            ctx.run(["wrangler", "secret", "put", "API_KEY"], stdin_text=token)
     """
     _validate_cmd(cmd)
+    # Validate stdin mutual exclusivity BEFORE the dry_run short-circuit so
+    # callers catch the programming mistake in both live and dry-run modes.
+    _validate_stdin_params(stdin_text, stdin_bytes)
 
     if dry_run:
         # Log what would have run so dry-run mode is still informative.
@@ -177,11 +232,37 @@ def run(
 
     full_env = _build_env(env)
 
+    # Decide whether we need to attach a stdin pipe. Only one of stdin_text
+    # or stdin_bytes can be set (enforced above); "stdin_payload" captures
+    # whichever one it is, and "stdin_is_text" tells us what mode Popen
+    # should open its stdin stream in.
+    stdin_payload: str | bytes | None
+    if stdin_text is not None:
+        stdin_payload = stdin_text
+        stdin_is_text = True
+    elif stdin_bytes is not None:
+        stdin_payload = stdin_bytes
+        stdin_is_text = False
+    else:
+        stdin_payload = None
+        stdin_is_text = False  # unused when stdin_payload is None
+
+    # Only open a pipe when we actually have data to write. When no stdin
+    # payload is set, we inherit the parent's stdin (the existing behavior)
+    # so interactive tools that read from the TTY still work.
+    popen_kwargs: dict = {"env": full_env, "shell": False}
+    if stdin_payload is not None:
+        popen_kwargs["stdin"] = subprocess.PIPE
+        # text=True makes proc.stdin a text stream; text=False (the default)
+        # makes it a binary stream. We set it explicitly so it tracks the
+        # payload type we're about to write.
+        popen_kwargs["text"] = stdin_is_text
+
     # Use Popen instead of subprocess.run so we can explicitly forward SIGINT
     # to the child and wait for it before propagating KeyboardInterrupt.
     # subprocess.run() has no hook for signal interception.
     try:
-        proc = subprocess.Popen(cmd, env=full_env, shell=False)
+        proc = subprocess.Popen(cmd, **popen_kwargs)
     except FileNotFoundError:
         # The binary doesn't exist. This is a user/environment error (like
         # PrerequisiteError), not a framework bug. Surface it as exit code 1
@@ -191,6 +272,33 @@ def run(
                 returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
             )
         )
+
+    # If we opened a stdin pipe, write the payload and close it so the child
+    # sees EOF and can proceed. We do this BEFORE _wait_with_signal_forwarding
+    # so the child isn't blocked waiting for stdin input we haven't sent yet.
+    #
+    # WHY manual write-and-close instead of proc.communicate(input=...):
+    # communicate() internally calls proc.wait(), which bypasses our
+    # _wait_with_signal_forwarding helper and therefore breaks Ctrl-C
+    # SIGINT forwarding to the child. A manual write-then-close keeps the
+    # existing wait path intact -- the child sees the stdin payload and
+    # EOF, and the parent still forwards SIGINT on KeyboardInterrupt.
+    #
+    # Risk: if the child produces a huge stdout/stderr burst while we're
+    # writing to stdin, the OS pipe buffer could fill and deadlock. In
+    # practice, we don't capture stdout/stderr (they inherit the parent's
+    # file descriptors), so the child's output streams freely to the
+    # terminal and never fills a buffer we control. And stdin payloads
+    # for this use case (secrets, tokens) are small enough to fit in a
+    # single pipe buffer write, so the write itself won't block either.
+    if stdin_payload is not None and proc.stdin is not None:
+        try:
+            proc.stdin.write(stdin_payload)  # type: ignore[arg-type]
+        finally:
+            # Close in a finally so a write failure still sends EOF -- without
+            # it, a child waiting on stdin would hang forever.
+            proc.stdin.close()
+
     returncode = _wait_with_signal_forwarding(proc)
     if returncode != 0:
         raise CliProcessError(
@@ -253,6 +361,9 @@ def run_with_confirm(
     yes: bool = False,
     dry_run: bool = False,
     env: dict[str, str] | None = None,
+    *,
+    stdin_text: str | None = None,
+    stdin_bytes: bytes | None = None,
 ) -> subprocess.CompletedProcess | None:
     """Prompt for confirmation, then execute a destructive command.
 
@@ -266,11 +377,28 @@ def run_with_confirm(
         yes: If True, skip the prompt (--yes flag).
         dry_run: If True, print the command but don't execute it.
         env: Extra environment variables merged with os.environ.
+        stdin_text: If set, pipe this string to the child's stdin (text mode).
+            Mutually exclusive with stdin_bytes. See ``run()`` for the
+            secrets-via-stdin pattern this supports.
+        stdin_bytes: If set, pipe these raw bytes to the child's stdin (binary
+            mode). Mutually exclusive with stdin_text.
 
     Returns:
         subprocess.CompletedProcess on success, or None if denied/dry-run.
+
+    Raises:
+        ValueError: If both stdin_text and stdin_bytes are set.
+
+    See Also:
+        ``run()`` -- full documentation of the secrets-via-stdin pattern
+        (``wrangler secret put``, ``gh auth login --with-token``,
+        ``docker login --password-stdin``).
     """
     _validate_cmd(cmd)
+    # Validate stdin arguments here too so callers get the same early
+    # ValueError they'd get from run(), rather than a confusing error that
+    # only surfaces after the confirmation prompt has been answered.
+    _validate_stdin_params(stdin_text, stdin_bytes)
 
     # Delegate to the framework's TTY-aware confirm() from prompts.py.
     # When yes=True, confirm() returns True immediately and skips the prompt.
@@ -279,6 +407,12 @@ def run_with_confirm(
         logger.info("Cancelled: %s", _format_cmd(cmd))
         return None
 
-    # Delegate to run() so dry-run, env passing, and signal forwarding are
-    # handled consistently in one place.
-    return run(cmd, dry_run=dry_run, env=env)
+    # Delegate to run() so dry-run, env passing, stdin piping, and signal
+    # forwarding are all handled consistently in one place.
+    return run(
+        cmd,
+        dry_run=dry_run,
+        env=env,
+        stdin_text=stdin_text,
+        stdin_bytes=stdin_bytes,
+    )

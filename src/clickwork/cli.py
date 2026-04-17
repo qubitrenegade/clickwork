@@ -320,7 +320,17 @@ def create_cli(
         # keyword arguments at bind time, but we want them evaluated at
         # call time (from cli_ctx which could in theory be mutated later).
         # Lambdas defer the lookup to when the method is actually called.
-        cli_ctx.run = lambda cmd, env=None: _run(cmd, dry_run=cli_ctx.dry_run, env=env)
+        # stdin_text / stdin_bytes are forwarded through so callers can use
+        # ctx.run(cmd, stdin_text=secret) for the secrets-via-stdin pattern
+        # (wrangler secret put, gh auth login --with-token, etc.) without
+        # reaching around ctx to the underlying process.run() helper.
+        cli_ctx.run = lambda cmd, env=None, *, stdin_text=None, stdin_bytes=None: _run(
+            cmd,
+            dry_run=cli_ctx.dry_run,
+            env=env,
+            stdin_text=stdin_text,
+            stdin_bytes=stdin_bytes,
+        )
         cli_ctx.capture = lambda cmd, env=None: _capture(cmd, dry_run=cli_ctx.dry_run, env=env)
 
         # require() has no dry_run / yes concept -- it's always a live check.
@@ -336,8 +346,14 @@ def create_cli(
         # cli_ctx's flags. This keeps the logic single-sourced in process.py
         # (confirmation + execution + dry-run + signal forwarding) while still
         # letting ctx.run_with_confirm(cmd, msg) work without extra args.
-        cli_ctx.run_with_confirm = lambda cmd, msg, env=None: _run_with_confirm(
-            cmd, msg, yes=cli_ctx.yes, dry_run=cli_ctx.dry_run, env=env,
+        cli_ctx.run_with_confirm = lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: _run_with_confirm(
+            cmd,
+            msg,
+            yes=cli_ctx.yes,
+            dry_run=cli_ctx.dry_run,
+            env=env,
+            stdin_text=stdin_text,
+            stdin_bytes=stdin_bytes,
         )
 
         # Attach the CliContext to Click's ctx.obj so all subcommands can
