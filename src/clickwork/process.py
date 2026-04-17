@@ -190,10 +190,14 @@ def run(
         dry_run: If True, print the command but don't execute it.
         env: Extra environment variables merged with os.environ. Use this
             for secrets instead of putting them in cmd (argv is visible in ps).
-        stdin_text: If set, pipe this string to the child's stdin (text mode,
-            UTF-8 by default). Mutually exclusive with stdin_bytes.
-        stdin_bytes: If set, pipe these raw bytes to the child's stdin
-            (binary mode). Mutually exclusive with stdin_text.
+        stdin_text: If set, encode this string as UTF-8 and pipe the bytes
+            to the child's stdin. Mutually exclusive with stdin_bytes.
+            (Implementation note: the child's stdin is always opened in
+            binary mode and we encode here -- this avoids platform-locale
+            surprises and newline translation, so secret/token values
+            arrive byte-exact regardless of OS.)
+        stdin_bytes: If set, pipe these raw bytes to the child's stdin.
+            Mutually exclusive with stdin_text.
 
     Returns:
         subprocess.CompletedProcess on success, or None if dry_run=True.
@@ -232,20 +236,26 @@ def run(
 
     full_env = _build_env(env)
 
-    # Decide whether we need to attach a stdin pipe. Only one of stdin_text
-    # or stdin_bytes can be set (enforced above); "stdin_payload" captures
-    # whichever one it is, and "stdin_is_text" tells us what mode Popen
-    # should open its stdin stream in.
-    stdin_payload: str | bytes | None
+    # Decide whether we need to attach a stdin pipe, and if so, normalize
+    # the payload to raw bytes. Only one of stdin_text or stdin_bytes can
+    # be set (enforced above).
+    #
+    # WHY always bytes on the wire (even for stdin_text): Popen(text=True)
+    # would wrap proc.stdin in a TextIOWrapper that uses the *platform
+    # locale encoding* -- not necessarily UTF-8 -- and can apply newline
+    # translation ("\n" -> "\r\n" on Windows). For secrets and tokens
+    # that must be transmitted byte-exactly (a flipped newline silently
+    # corrupts a token's hash, a locale mismatch breaks the first
+    # non-ASCII character), that's a real bug. Encoding stdin_text to
+    # UTF-8 ourselves and writing bytes directly bypasses both hazards
+    # and unifies the two code paths below.
+    stdin_payload: bytes | None
     if stdin_text is not None:
-        stdin_payload = stdin_text
-        stdin_is_text = True
+        stdin_payload = stdin_text.encode("utf-8")
     elif stdin_bytes is not None:
         stdin_payload = stdin_bytes
-        stdin_is_text = False
     else:
         stdin_payload = None
-        stdin_is_text = False  # unused when stdin_payload is None
 
     # Only open a pipe when we actually have data to write. When no stdin
     # payload is set, we inherit the parent's stdin (the existing behavior)
@@ -253,10 +263,9 @@ def run(
     popen_kwargs: dict = {"env": full_env, "shell": False}
     if stdin_payload is not None:
         popen_kwargs["stdin"] = subprocess.PIPE
-        # text=True makes proc.stdin a text stream; text=False (the default)
-        # makes it a binary stream. We set it explicitly so it tracks the
-        # payload type we're about to write.
-        popen_kwargs["text"] = stdin_is_text
+        # Deliberately NOT setting text=True: we normalized to bytes above
+        # so the child's stdin stream is binary. No locale dependency, no
+        # newline translation, byte-exact transmission.
 
     # Use Popen instead of subprocess.run so we can explicitly forward SIGINT
     # to the child and wait for it before propagating KeyboardInterrupt.
@@ -293,11 +302,25 @@ def run(
     # single pipe buffer write, so the write itself won't block either.
     if stdin_payload is not None and proc.stdin is not None:
         try:
-            proc.stdin.write(stdin_payload)  # type: ignore[arg-type]
+            proc.stdin.write(stdin_payload)
+        except BrokenPipeError:
+            # The child exited (or closed its stdin) before we finished
+            # writing. This is a legitimate flow for tools that validate
+            # arguments or environment before consuming stdin, then exit
+            # with a non-zero status. Swallow the write error here and
+            # let the wait path below report the child's real exit code
+            # via CliProcessError -- that message is more actionable than
+            # a BrokenPipeError traceback from the parent.
+            pass
         finally:
-            # Close in a finally so a write failure still sends EOF -- without
-            # it, a child waiting on stdin would hang forever.
-            proc.stdin.close()
+            # Close in a finally so a successful-but-partial write still
+            # sends EOF. Wrap the close in its own try because closing a
+            # pipe whose peer already closed can also raise BrokenPipeError
+            # on some platforms (it's the flush-on-close that fails).
+            try:
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
 
     returncode = _wait_with_signal_forwarding(proc)
     if returncode != 0:
