@@ -15,6 +15,7 @@ host application has already configured root logging. The stdlib logging
 module is global mutable state, so these tests rigorously reset handlers
 and propagation flags around every case to keep tests order-independent.
 """
+
 import io
 import logging
 
@@ -33,18 +34,32 @@ def reset_logging():
     ``TestSetupLogging`` cases don't need it; they only check return-
     value attributes.
     """
-    logger_names = ["clickwork", "clickwork.http", "", "my-cli", "test_default",
-                    "test_v1", "test_v2", "test_quiet", "test_host",
-                    "test_nullfallback", "test_propagate", "test_no_dup"]
+    logger_names = [
+        "clickwork",
+        "clickwork.http",
+        "",  # root, snapshotted so we can fully restore handler list
+        "my-cli",
+        "test_default",
+        "test_v1",
+        "test_v2",
+        "test_quiet",
+        "test_host",
+        "test_nullfallback",
+        "test_propagate",
+        "test_no_dup",
+        "test_standalone",
+    ]
     snapshots = []
     for name in logger_names:
         logger = logging.getLogger(name)
-        snapshots.append((
-            logger,
-            list(logger.handlers),
-            logger.level,
-            logger.propagate,
-        ))
+        snapshots.append(
+            (
+                logger,
+                list(logger.handlers),
+                logger.level,
+                logger.propagate,
+            )
+        )
 
     yield
 
@@ -134,6 +149,7 @@ class TestHostPreservingBehavior:
 
         # Host has called basicConfig-equivalent. Now clickwork runs.
         from clickwork._logging import setup_logging
+
         setup_logging(verbose=1, quiet=False, name="test_no_dup")
 
         # Emit a record on the shared clickwork logger -- this is what
@@ -147,15 +163,16 @@ class TestHostPreservingBehavior:
         # host wouldn't get it at all. The correct behavior is: host
         # handler gets exactly one copy.
         output = buffer.getvalue()
-        assert output.count("hello from clickwork") == 1, (
-            f"Expected exactly one emission; got: {output!r}"
-        )
+        assert (
+            output.count("hello from clickwork") == 1
+        ), f"Expected exactly one emission; got: {output!r}"
         # And we should also verify no clickwork-attached StreamHandler
         # was installed on the "clickwork" logger when the host was
         # already configured. (NullHandler is fine / expected.)
         clickwork_logger = logging.getLogger("clickwork")
         non_null_stream_handlers = [
-            h for h in clickwork_logger.handlers
+            h
+            for h in clickwork_logger.handlers
             if isinstance(h, logging.StreamHandler)
             and not isinstance(h, logging.NullHandler)
         ]
@@ -183,13 +200,16 @@ class TestHostPreservingBehavior:
         # side effects re-run and we can observe them.
         import importlib
         import clickwork._logging
+
         importlib.reload(clickwork._logging)
 
         # After the module reloads, the clickwork logger MUST have a
         # NullHandler attached. This is the "baseline" that prevents
         # stdlib's "no handlers" warning.
         clickwork_logger = logging.getLogger("clickwork")
-        has_null = any(isinstance(h, logging.NullHandler) for h in clickwork_logger.handlers)
+        has_null = any(
+            isinstance(h, logging.NullHandler) for h in clickwork_logger.handlers
+        )
         assert has_null, (
             f"clickwork logger must have a NullHandler baseline; "
             f"handlers are: {clickwork_logger.handlers}"
@@ -220,6 +240,7 @@ class TestHostPreservingBehavior:
         """
         import importlib
         import clickwork._logging
+
         importlib.reload(clickwork._logging)
 
         assert logging.getLogger("clickwork").propagate is True
@@ -227,6 +248,7 @@ class TestHostPreservingBehavior:
         # Also verify propagate stays True after setup_logging() runs,
         # since setup_logging explicitly restates the value.
         from clickwork._logging import setup_logging
+
         setup_logging(verbose=0, quiet=False, name="test_propagate")
         assert logging.getLogger("clickwork").propagate is True
         # And the named CLI logger should also propagate.
@@ -251,6 +273,7 @@ class TestHostPreservingBehavior:
         # could pre-attach handlers and mask the "bare root" scenario.
         import importlib
         import clickwork._logging
+
         importlib.reload(clickwork._logging)
 
         from clickwork._logging import setup_logging
@@ -280,7 +303,9 @@ class TestHostPreservingBehavior:
         captured = capsys.readouterr()
         assert "standalone warn record" in captured.err
 
-    def test_stderr_handler_marker_survives_setup_logging_reinvocation(self, reset_logging):
+    def test_stderr_handler_marker_survives_setup_logging_reinvocation(
+        self, reset_logging
+    ):
         """setup_logging is idempotent: a second call updates-in-place, not stacks.
 
         Without the ``_clickwork_owned`` marker, the old
@@ -294,6 +319,7 @@ class TestHostPreservingBehavior:
         root.handlers = []
         import importlib
         import clickwork._logging
+
         importlib.reload(clickwork._logging)
 
         from clickwork._logging import setup_logging

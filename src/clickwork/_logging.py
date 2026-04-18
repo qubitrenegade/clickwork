@@ -1,13 +1,15 @@
 """Logging setup for clickwork CLIs.
 
 This module is the *host-friendly* logging entry point for clickwork. The
-name of the game here: **respect the host's root logging configuration,
-and only touch loggers inside the ``clickwork`` namespace.** clickwork is
-a library as well as a CLI framework; when a host app (think: an
-orbit-admin plugin imported from another tool, or a test harness that
-calls ``clickwork.http.get`` directly) has already run
-``logging.basicConfig()`` or installed its own root handler, clickwork
-must NOT attach a second stderr handler that duplicates every log line.
+name of the game here: **respect the host's root logging configuration.
+The loggers we touch are the ``clickwork`` namespace and the CLI-named
+logger the caller passes to ``setup_logging()`` (typically the project
+name -- e.g. ``"orbit-admin"``).** clickwork is a library as well as a
+CLI framework; when a host app (think: an orbit-admin plugin imported
+from another tool, or a test harness that calls ``clickwork.http.get``
+directly) has already run ``logging.basicConfig()`` or installed its
+own root handler, clickwork must NOT attach a second stderr handler
+that duplicates every log line.
 
 Scope of clickwork's overrides: we DO set the ``propagate`` flag to
 ``True`` on the ``clickwork`` logger and any CLI-named logger, because
