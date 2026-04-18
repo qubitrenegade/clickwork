@@ -294,3 +294,76 @@ class TestPlatformDispatchFunctional:
                 windows=lambda *a, **k: None,
                 macos=lambda *a, **k: None,
             )
+
+
+class TestPlatformDispatchViaClickRunner:
+    """End-to-end test that platform_dispatch works through Click's CliRunner.
+
+    WHY this class exists (separate from the direct-call tests): the
+    decorator-order gotcha around ``@pass_cli_context`` only manifests
+    when Click actually invokes the command through its own callback
+    machinery. Direct-call tests bypass that, so they can pass while a
+    real Click invocation would crash. This class pins the working
+    decorator stack (platform_dispatch innermost, pass_cli_context
+    above, click.command / click.argument on top).
+    """
+
+    def test_dispatch_through_clirunner_hits_linux_impl(self, monkeypatch, tmp_path: Path):
+        """A Click command decorated with @platform_dispatch runs its linux impl.
+
+        Builds a CLI via ``create_cli`` so the CliContext injection flows
+        through ``@pass_cli_context`` and then into the dispatched impl.
+        Patches ``sys.platform`` to ``"linux"`` before invocation.
+        """
+        import click
+        from click.testing import CliRunner
+        from clickwork.cli import create_cli, pass_cli_context
+        from clickwork.platform import platform_dispatch
+
+        captured: dict = {}
+
+        # Inner per-platform impls receive the CliContext that
+        # @pass_cli_context injected upstream. Prove that by stashing
+        # the first arg and a known kwarg into captured[].
+        def _linux_up(ctx, *, name):
+            captured["impl"] = "linux"
+            captured["ctx_has_dry_run"] = hasattr(ctx, "dry_run")
+            captured["name"] = name
+
+        def _windows_up(ctx, *, name):
+            captured["impl"] = "windows"
+
+        def _macos_up(ctx, *, name):
+            captured["impl"] = "macos"
+
+        @click.command("runner-up")
+        @click.option("--name", default="test-runner")
+        @pass_cli_context
+        @platform_dispatch(
+            linux=_linux_up,
+            windows=_windows_up,
+            macos=_macos_up,
+        )
+        def runner_up(ctx, name): ...  # body intentionally empty -- platform_dispatch never calls it
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(runner_up)
+
+        monkeypatch.setattr("sys.platform", "linux")
+        runner = CliRunner()
+        result = runner.invoke(cli, ["runner-up", "--name", "rabbithole"])
+
+        assert result.exit_code == 0, result.output
+        assert captured.get("impl") == "linux"
+        # If this is True, @pass_cli_context's injection actually reached
+        # the impl (CliContext has a dry_run attribute; a raw click.Context
+        # does not). If False, platform_dispatch consumed the @pass_cli_context
+        # wrapper without preserving its behaviour -- the decorator-order
+        # bug this test exists to catch.
+        assert captured.get("ctx_has_dry_run") is True, (
+            f"impl did not receive CliContext; got ctx={captured.get('ctx_has_dry_run')!r}. "
+            "Check that @platform_dispatch is the INNERMOST decorator on the stack."
+        )
+        assert captured.get("name") == "rabbithole"

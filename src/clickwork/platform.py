@@ -188,22 +188,29 @@ def platform_dispatch(
 
     Example::
 
-        # Decorator ORDER matters: @click.command() must be the outermost
-        # (applied last), with @platform_dispatch *below* it so Click sees
-        # the completed dispatch wrapper as the command callback. If you
-        # put @platform_dispatch on top, @click.command() has already
-        # converted the function into a click.Command object and
-        # platform_dispatch would end up wrapping that Command object,
-        # which breaks Click's registration.
+        # Decorator ORDER matters. platform_dispatch never calls the
+        # wrapped function's body -- it only uses it to carry the Click
+        # command metadata (name, help, args/options). That means any
+        # decorator applied ABOVE platform_dispatch (outer, applied
+        # later) sees platform_dispatch's dispatcher as the callable,
+        # and any decorator applied BELOW platform_dispatch (inner,
+        # applied earlier) never runs because platform_dispatch discards
+        # the body.
+        #
+        # Practical rule: put platform_dispatch at the *bottom* of the
+        # decorator stack (closest to ``def``) so ``@pass_cli_context``
+        # and any other callback-wrapping decorators have already added
+        # their injection logic to the enclosing stack. Click's
+        # ``@click.command()`` / ``@click.argument()`` go above, as usual.
         @click.command()
         @click.argument("name")
+        @pass_cli_context
         @clickwork.platform_dispatch(
             linux=my_lib.linux.up,
             windows=my_lib.windows.up,
             macos=my_lib.macos.up,
             macos_error="macOS not supported yet",
         )
-        @pass_cli_context
         def runner_up(ctx, name): ...
     """
     # Bundle the kwargs into a single dict once, at decoration time, so the
