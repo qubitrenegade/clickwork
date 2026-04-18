@@ -99,7 +99,16 @@ def run_benchmark(runs: int) -> dict[str, object]:
         ),
         "runs": runs,
         "python": platform.python_version(),
-        "platform": platform.platform(),
+        # ``system + machine`` instead of ``platform.platform()``. The
+        # full platform string includes the kernel release ("6.8.0-106-
+        # generic", etc.), which shifts on routine ubuntu-24.04 security
+        # updates and would flap the env-mismatch WARNING below every
+        # time GHA rolls a new patch image. system+machine is coarse
+        # enough to stay stable across those rolls ("Linux-x86_64")
+        # while still distinguishing Linux vs macOS vs Windows, or x86
+        # vs arm -- the environmental axes that actually move
+        # cold-start timing.
+        "platform": f"{platform.system()}-{platform.machine()}",
     }
 
 
@@ -173,8 +182,22 @@ def compare_to_baseline(current: dict[str, object], baseline_path: Path) -> int:
                 file=sys.stderr,
             )
 
-    current_ms = float(current["import_ms"])  # type: ignore[arg-type]
-    baseline_ms = float(baseline["import_ms"])
+    # Guard the float cast: baseline["import_ms"] might be "N/A" or
+    # some other non-numeric string if someone hand-edited the file
+    # or a future key-renaming went wrong. A raw TypeError /
+    # ValueError traceback here would be unactionable in CI; a clean
+    # message pointing at the offending key is the right exit.
+    try:
+        current_ms = float(current["import_ms"])  # type: ignore[arg-type]
+        baseline_ms = float(baseline["import_ms"])
+    except (TypeError, ValueError) as exc:
+        print(
+            f"ERROR: baseline at {baseline_path} has a non-numeric "
+            f"'import_ms' value: {baseline.get('import_ms')!r}. "
+            f"Re-capture via --update-baseline. ({exc})",
+            file=sys.stderr,
+        )
+        return 1
     # ``max(1e-9, ...)`` guards against a zero baseline (shouldn't
     # happen in practice but cheap insurance against ZeroDivisionError).
     delta_pct = ((current_ms - baseline_ms) / max(1e-9, baseline_ms)) * 100.0
