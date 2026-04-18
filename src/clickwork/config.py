@@ -746,7 +746,22 @@ def load_config(
             env_sections_raw if isinstance(env_sections_raw, dict) else {}
         )
         if env in env_sections:
-            repo_env = _flatten_mapping(env_sections[env])
+            # Also guard the selected section itself: a TOML dotted-key
+            # form like ``env.production = "x"`` (vs the intended
+            # nested table ``[env.production]``) lands as a non-dict
+            # value in env_sections[env] and would blow up
+            # ``_flatten_mapping``. Route that through the same
+            # "malformed section" error path so the operator sees a
+            # clean message instead of an AttributeError.
+            env_section_raw = env_sections[env]
+            if not isinstance(env_section_raw, dict):
+                raise ConfigError(
+                    f"Config env '{env}' is not a TOML table in "
+                    f"{repo_config_path}. Check the TOML syntax: the "
+                    f"section must be declared as ``[env.{env}]`` with "
+                    "nested keys, not as a bare dotted-key assignment."
+                )
+            repo_env = _flatten_mapping(env_section_raw)
         else:
             # Sort the defined-sections list so error messages are stable
             # across dict-iteration orderings (Python 3.7+ preserves insertion

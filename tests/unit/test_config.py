@@ -1019,6 +1019,21 @@ class TestInFileEnvPrecedence:
     directory -- no monkeypatching of ``Path.cwd()``, no global state.
     """
 
+    @pytest.fixture(autouse=True)
+    def _clear_test_cli_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Remove any TEST_CLI_* env vars inherited from the developer's shell.
+
+        ``load_config`` gives auto-prefixed env vars the highest
+        precedence in the merge chain (``TEST_CLI_KEY`` wins over every
+        TOML source). If the developer running the tests has any such
+        var set, the merge assertions below would see unexpected values
+        and flap. This fixture is autouse on the class so every test in
+        TestInFileEnvPrecedence starts from a deterministic empty env.
+        """
+        for name in list(__import__("os").environ):
+            if name.startswith("TEST_CLI_"):
+                monkeypatch.delenv(name, raising=False)
+
     def test_env_section_overrides_default_same_file(self, tmp_path: Path) -> None:
         """A key defined in BOTH ``[default]`` and ``[env.<selected>]`` wins from env.
 
