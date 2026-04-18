@@ -39,7 +39,7 @@
    - `test_load_env_file_skips_blank_lines`
    - `test_load_env_file_handles_multiple_keys`
    - `test_load_env_file_raises_on_missing_file` — clear `FileNotFoundError` or custom `ConfigError` (match existing pattern in `config.py`)
-   - `test_load_env_file_rejects_world_readable_file` — file with mode `0o644` → owner-only check fails with actionable error matching existing user-config permission pattern
+   - `test_load_env_file_rejects_world_readable_file` — **non-Windows only** (mark with `@pytest.mark.skipif(sys.platform == "win32", reason=...)` — matches `_read_checked_user_config()`'s existing Windows carve-out, since POSIX file-mode semantics don't apply there): file with mode `0o644` → owner-only check fails with actionable error matching existing user-config permission pattern
    - `test_load_env_file_ignores_malformed_lines` — OR `test_load_env_file_raises_on_malformed_line` — pick whichever is cleaner. **Recommend raising** with the line number so callers know which line is bad.
    - `test_load_env_file_does_not_expand_variables` — `K=$OTHER` → literal `"$OTHER"`, not empty or substituted (explicit anti-test so no one "helpfully" adds substitution later)
 2. Green: implement `load_env_file(path: Path) -> dict[str, str]`:
@@ -68,9 +68,9 @@
      - `test_platform_dispatch_unsupported_platform_raises_usage_error` — patch `sys.platform` to `"freebsd13"` (or any platform we don't wire), assert `click.UsageError`.
      - `test_platform_dispatch_linux_error_kwarg_overrides_message` — `linux=None, linux_error="not yet"`, `sys.platform="linux"`, assert `UsageError` with the custom message.
      - Same pattern for `windows_error` and `macos_error`.
-   - Functional form:
-     - `test_dispatch_functional_linux` — `dispatch(ctx, linux=fn, windows=other, **kwargs)` on linux, assert `fn(**kwargs)` called.
-     - `test_dispatch_functional_forwards_kwargs` — pass `extra="x"`, assert the selected impl received it.
+   - Functional form (impls receive `ctx` as the first positional arg to mirror how `@pass_cli_context` command callbacks are structured):
+     - `test_dispatch_functional_linux` — `dispatch(ctx, linux=fn, windows=other, **kwargs)` on linux, assert `fn(ctx, **kwargs)` called (not `fn(**kwargs)` — the selected impl gets the context forwarded).
+     - `test_dispatch_functional_forwards_kwargs` — pass `extra="x"`, assert the selected impl received `ctx` and `extra="x"`.
    - Signature forwarding for the decorator: a decorated Click command with `@click.argument("name")` must still receive `name` through to the dispatched impl (impls have the same signature as the Click callback).
 2. Green: implement both forms. The decorator wraps the original function: at call time, detect platform, route to the right impl. The functional form is thin — just the platform detection + kwarg dispatch. Share the platform-detection logic so they can't drift.
 3. Refactor: docstrings on both forms with a code example. Add the existing `is_linux/is_windows/is_macos` helpers as the reference for platform detection.
@@ -94,7 +94,7 @@
    - `test_add_global_option_flag_or_semantics_across_levels` — `cli --json sub-cmd` (root True only), `cli sub-cmd --json` (sub True only), and `cli --json sub-cmd --json` (both True) all resolve to `ctx.meta["json"] is True`.
    - `test_add_global_option_value_innermost_wins` — `cli --env=prod sub-cmd --env=staging` → `ctx.meta["env"] == "staging"`. And `cli --env=prod sub-cmd` → `"prod"`.
    - `test_add_global_option_not_passed_is_falsy_or_none` — no flag set anywhere → `ctx.meta["json"] is False` (for flag) or `ctx.meta["env"] is None` (for value).
-   - `test_add_global_option_registered_before_subcommands_still_applies` — call `add_global_option` then add a subcommand; the new subcommand does NOT retroactively get the option (document current behavior — registration is at call time).
+   - `test_add_global_option_added_subcommands_do_not_inherit_option_retroactively` — call `add_global_option`, then add a subcommand; the new subcommand does NOT retroactively get the option. Pins the "registration is a call-time snapshot" semantics so a future refactor can't silently shift to dynamic traversal.
 2. Green: implement `add_global_option(cli, *param_decls, **option_kwargs)`:
    - Walk the existing commands attached to `cli` at call time (root + all groups recursively + all subcommands). Attach the option to each.
    - Each command's callback wrapper updates `ctx.meta[<name>]` based on the semantics: flag (`is_flag=True`) uses OR (`ctx.meta[name] = ctx.meta.get(name) or current`); value option uses innermost-wins (`ctx.meta[name] = current if current is not None else ctx.meta.get(name)`).
