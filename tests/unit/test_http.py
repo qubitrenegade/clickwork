@@ -404,7 +404,6 @@ class TestAllowedHosts:
         clear "pass None to disable" message so the caller can tell
         which interpretation they wanted.
         """
-        import pytest
         from clickwork import http
 
         # If the allowlist DID skip (the pre-fix behaviour), urlopen
@@ -429,7 +428,6 @@ class TestAllowedHosts:
         this into a local-file-read primitive. The scheme guard makes
         the "HTTP client" contract enforceable.
         """
-        import pytest
         from clickwork import http
 
         def _urlopen_must_not_run(*args, **kwargs):
@@ -448,7 +446,6 @@ class TestAllowedHosts:
         Same reason as file://; documented separately so nobody later
         decides "ftp is fine actually" without noticing the test.
         """
-        import pytest
         from clickwork import http
 
         def _urlopen_must_not_run(*args, **kwargs):
@@ -462,6 +459,126 @@ class TestAllowedHosts:
 # ---------------------------------------------------------------------------
 # Timeout forwarding
 # ---------------------------------------------------------------------------
+
+class TestEmptyBodyHandling:
+    """204/empty-body responses with JSON Content-Type don't crash."""
+
+    def test_empty_body_with_json_content_type_does_not_crash(self):
+        """A 204 No Content response with Content-Type: application/json
+        and an empty body must NOT raise JSONDecodeError.
+
+        WHY: ``json.loads(b"")`` raises JSONDecodeError, and some APIs
+        legitimately return empty bodies on successful no-content
+        responses (PUT / DELETE / 204). An earlier draft would have
+        crashed inside the parser, burying the URL/status context. We
+        now hand back the empty bytes so the caller can do whatever
+        makes sense (treat as success, skip parsing, etc.).
+        """
+        from clickwork import http
+
+        resp = _make_response(
+            status=204, body=b"", content_type="application/json",
+        )
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        # Empty body passes through as bytes (not a parsed None).
+        assert result == b""
+
+    def test_whitespace_only_body_does_not_crash(self):
+        """Whitespace-only JSON body also handled gracefully."""
+        from clickwork import http
+
+        resp = _make_response(
+            body=b"   \n\t  ", content_type="application/json",
+        )
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        assert result == b"   \n\t  "
+
+    def test_malformed_json_with_json_content_type_returns_bytes(self):
+        """A server sending garbage under Content-Type: application/json
+        gets the raw bytes back instead of a JSONDecodeError.
+
+        WHY: clickwork.http can't be responsible for a server's bad
+        behaviour. Crashing the parser would mask the real request
+        context; returning bytes lets the caller log the response and
+        decide. Especially matters on the HttpError path -- a 500 with
+        an HTML error page under a JSON content-type shouldn't crash
+        our error construction.
+        """
+        from clickwork import http
+
+        resp = _make_response(
+            body=b"<html>not json at all</html>",
+            content_type="application/json",
+        )
+        with patch("urllib.request.urlopen", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        assert result == b"<html>not json at all</html>"
+
+
+class TestLogSanitization:
+    """Logged URLs are sanitized so embedded credentials never leak."""
+
+    def test_userinfo_stripped_from_log(self, caplog):
+        """``https://user:token@host/path`` must log as ``https://host/path``.
+
+        WHY: RFC 3986 lets credentials appear in the URL itself
+        (``user:pass@host``). Some APIs accept this form; many
+        libraries extract those credentials into the Authorization
+        header automatically. Either way, the raw URL string contains
+        the secret and must not reach the log.
+        """
+        from clickwork import http
+
+        resp = _make_response(body=b"{}")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with caplog.at_level(logging.INFO, logger="clickwork.http"):
+                http.get("https://alice:super-secret-token@example.com/api")
+
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert "super-secret-token" not in all_log_text
+        assert "alice" not in all_log_text
+        # The sanitized form must still contain enough info to debug.
+        assert "example.com" in all_log_text
+        assert "/api" in all_log_text
+
+    def test_query_string_stripped_from_log(self, caplog):
+        """``?api_key=xxx`` must not end up in the log.
+
+        Some APIs still accept credentials as query params. Even if
+        the caller is using bearer_token correctly, a URL like
+        ``?api_key=...`` would slip past the header redaction. The
+        sanitizer drops the query entirely.
+        """
+        from clickwork import http
+
+        resp = _make_response(body=b"{}")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with caplog.at_level(logging.INFO, logger="clickwork.http"):
+                http.get("https://example.com/api?api_key=leaked-creds")
+
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert "leaked-creds" not in all_log_text
+        assert "api_key" not in all_log_text
+        assert "example.com" in all_log_text
+        assert "/api" in all_log_text
+
+    def test_port_preserved_in_log(self, caplog):
+        """Non-default ports are operationally useful; they stay visible."""
+        from clickwork import http
+
+        resp = _make_response(body=b"{}")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with caplog.at_level(logging.INFO, logger="clickwork.http"):
+                http.get("https://internal.example:8443/health")
+
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert "internal.example:8443" in all_log_text
+
 
 class TestTimeout:
 

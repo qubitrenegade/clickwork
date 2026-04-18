@@ -169,6 +169,53 @@ class HttpError(Exception):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+def _sanitize_url_for_log(url: str) -> str:
+    """Strip credentials and query string from a URL for safe logging.
+
+    Two leak paths this handles:
+      1. ``https://user:token@host/path`` -- RFC 3986 userinfo. Credentials
+         embedded in the URL itself. Logging the full URL leaks them.
+      2. ``https://host/path?api_key=xxx`` -- credentials as query params.
+         Some APIs still accept this form.
+
+    The fragment is also dropped for consistency (fragments shouldn't
+    carry secrets, but they add noise and aren't part of the request
+    wire anyway).
+
+    Edge cases:
+      - A URL we can't parse falls back to returning ``"<unparseable URL>"``
+        rather than leaking the raw string.
+      - A URL with no userinfo and no query is returned unchanged
+        (common case, no extra allocations beyond the urlparse).
+
+    Args:
+        url: The URL that was passed to the public ``get``/``post``/etc.
+
+    Returns:
+        A URL safe to emit in a log line: scheme + host + port + path,
+        no userinfo, no query, no fragment.
+    """
+    try:
+        parts = urllib.parse.urlparse(url)
+    except ValueError:
+        return "<unparseable URL>"
+
+    # Rebuild netloc WITHOUT userinfo. urlparse exposes hostname (always
+    # without userinfo) and port separately; reassemble them so we keep
+    # non-default ports visible (they're operationally useful) but drop
+    # any "user:pass@" prefix the original might have had.
+    if parts.hostname is None:
+        return "<unparseable URL>"
+    netloc = parts.hostname
+    if parts.port is not None:
+        netloc = f"{netloc}:{parts.port}"
+
+    # Drop query and fragment entirely.
+    return urllib.parse.urlunparse(
+        (parts.scheme, netloc, parts.path, "", "", "")
+    )
+
+
 def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
     """Enforce the per-call URL allowlist BEFORE any network activity.
 
@@ -426,6 +473,20 @@ def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool
     normal success path and the :class:`HttpError` construction path
     (which decides whether the error body is a parsed JSON value or bytes).
 
+    Edge cases handled:
+      - Empty or whitespace-only body: returned as-is (bytes). A 204 No
+        Content with ``Content-Type: application/json`` and an empty
+        body is a real thing on the wire, and ``json.loads(b"")`` raises
+        ``JSONDecodeError`` -- we treat empty body as "nothing to parse"
+        and hand back the original bytes so the caller's error handling
+        doesn't lose URL/status context to a crash inside this helper.
+      - Malformed JSON with a JSON Content-Type: returned as raw bytes
+        (same rationale -- don't turn a server misbehaviour into a
+        confusing internal crash; give the caller the bytes so they
+        can decide how to react, including on the ``HttpError`` path
+        where ``response_body`` becoming parseable-dict-or-bytes is
+        documented contract).
+
     Args:
         body: The raw response bytes.
         content_type: The response's Content-Type header value.
@@ -435,7 +496,23 @@ def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool
         The parsed JSON value (any :data:`JSONValue`) or the raw bytes.
     """
     if parse_json and _is_json_content_type(content_type):
-        return json.loads(body)
+        # Skip json.loads on empty/whitespace bodies: json.loads(b"")
+        # raises JSONDecodeError which would turn a legitimate 204 /
+        # empty response into an internal crash that masks the real
+        # request context.
+        if not body.strip():
+            return body
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            # Server sent JSON Content-Type with a non-JSON payload.
+            # Don't pretend we understand it; hand back the raw bytes
+            # so the caller can log / inspect / error out with full
+            # context. Particularly important on the HttpError path --
+            # a misbehaving server replying to a 500 with HTML under a
+            # JSON Content-Type shouldn't obscure the status code by
+            # crashing inside our error construction.
+            return body
     return body
 
 
@@ -483,10 +560,19 @@ def _send(
     body_bytes = _encode_body(body, merged_headers)
 
     # --- 4. Log line (exactly one per request). ---
+    #
+    # Sanitize the URL before logging -- some APIs still accept
+    # credentials either as RFC 3986 userinfo (https://user:pass@host)
+    # or as query parameters (?api_key=xxx). The auth-header redaction
+    # above wouldn't catch those forms because they live on the URL
+    # itself. ``_sanitize_url_for_log`` strips userinfo + query + fragment
+    # so the log keeps scheme + host + port + path (operationally useful)
+    # without ever surfacing credential material.
+    safe_url = _sanitize_url_for_log(url)
     if auth_attached:
-        logger.info("%s %s [auth: <redacted>]", method, url)
+        logger.info("%s %s [auth: <redacted>]", method, safe_url)
     else:
-        logger.info("%s %s", method, url)
+        logger.info("%s %s", method, safe_url)
 
     # --- 5. Build the Request and dispatch. ---
     #
@@ -518,8 +604,13 @@ def _send(
         )
         err_headers = _headers_to_dict(err.headers)
 
-        # First line of body (or its repr if it's bytes) gives a quick
-        # triage message without dumping the full payload into the log.
+        # Include a short preview in the message without dumping the full
+        # payload: bytes are truncated to 200 bytes and decoded as UTF-8
+        # with replacement (so binary error pages don't crash the error
+        # construction); structured (already-parsed-to-JSON) bodies are
+        # json-serialised and then truncated the same way. Keeps triage
+        # messages readable without letting a giant HTML error page
+        # flood the logs.
         if isinstance(err_response_body, bytes):
             snippet = err_response_body[:200].decode("utf-8", errors="replace")
         else:
