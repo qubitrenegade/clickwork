@@ -1,0 +1,131 @@
+name: Release smoke
+
+# WHY this workflow exists (separate from test.yml):
+# test.yml exercises the EDITABLE checkout (`uv sync` installs from `src/`).
+# That catches logic bugs but NOT packaging bugs: a wheel or sdist could be
+# missing `py.typed`, a data file, a template, or a submodule, and the
+# editable test run would still pass. A user `pip install`-ing the package
+# would then hit the missing file at runtime.
+#
+# This workflow builds the same artifacts that get published to PyPI
+# (`uv build` -> `dist/*.whl` + `dist/*.tar.gz`), installs each into a
+# FRESH venv that has no access to the source tree, and runs the test
+# suite against the installed package. A missing-file bug in the wheel
+# shows up here as a test failure before we cut a release.
+#
+# See docs/superpowers/specs/2026-04-18-clickwork-1.0-roadmap.md Wave 2b #40.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # workflow_dispatch lets the maintainer run this manually right before
+  # cutting a release, as an extra belt-and-suspenders check.
+  workflow_dispatch:
+
+jobs:
+  release-smoke:
+    name: Build + install from wheel/sdist + run tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Build wheel and sdist
+        # `uv build` produces both dist/*.whl and dist/*.tar.gz in one call.
+        run: uv build
+
+      - name: Assert py.typed is present in the wheel
+        # Until #37 (py.typed marker) lands, this assertion FAILS. We mark
+        # it continue-on-error so this workflow can land independently of
+        # #37. Once #37 merges, the step starts passing automatically and
+        # this comment + continue-on-error can be removed to make it a
+        # hard gate.
+        #
+        # See: https://github.com/qubitrenegade/clickwork/issues/37
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          whl = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          assert any("py.typed" in n for n in names), (
+              f"py.typed missing from wheel: {names}"
+          )
+          print(f"py.typed present in {whl}")
+          PY
+
+      - name: Install wheel into fresh venv and run tests
+        # WHY a fresh venv (not `uv sync`): `uv sync` installs the project
+        # in editable mode from `src/`. We need to exercise the BUILT
+        # artifact, not the source tree, to catch missing-file bugs in
+        # the wheel itself. `python -m venv` creates a standalone venv
+        # that has no connection to the repo's .venv.
+        #
+        # WHY we copy tests to a temp dir: running `pytest` from the
+        # repo root would pick up `src/clickwork/` on `sys.path` (via
+        # pyproject's `pythonpath = ["src"]`) and shadow the installed
+        # wheel. Running from /tmp/wheel-smoke-tests forces pytest to
+        # import from site-packages, which is what we want to exercise.
+        #
+        # WHY the minimal pytest.ini: the copied tests directory has no
+        # pyproject.toml, so pytest loses the `filterwarnings = error`
+        # and the `network` marker registration. We rewrite a minimal
+        # pytest.ini that preserves both so (a) unexpected warnings
+        # still fail the run and (b) the network marker doesn't trigger
+        # a PytestUnknownMarkWarning.
+        #
+        # WHY `-m "not network"`: the tests marked `network` (in
+        # tests/integration/test_sample_plugin.py) locate the repo root
+        # via Path(__file__).resolve().parents[2] and pip-install the
+        # sample-plugin fixture from there. Under the smoke test the
+        # copied tests live in /tmp/wheel-smoke-tests so parents[2]
+        # points at /tmp, not the repo. Those tests are covered by
+        # test.yml's editable run; here we deselect them.
+        run: |
+          python -m venv /tmp/wheel-smoke
+          /tmp/wheel-smoke/bin/pip install dist/*.whl pytest pytest-mock
+          cp -r tests /tmp/wheel-smoke-tests
+          cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
+          [pytest]
+          filterwarnings =
+              error
+          markers =
+              network: requires network access (pip install, HTTP calls)
+          INI
+          cd /tmp/wheel-smoke-tests
+          /tmp/wheel-smoke/bin/python -m pytest -q -m "not network"
+
+      - name: Clean up wheel venv
+        # Run after the wheel test so the sdist step starts from a clean
+        # slate. `if: always()` so we still reset even if the wheel tests
+        # failed -- otherwise the sdist step inherits the wheel venv.
+        if: always()
+        run: rm -rf /tmp/wheel-smoke /tmp/wheel-smoke-tests
+
+      - name: Install sdist into fresh venv and run tests
+        # Identical flow to the wheel step, but `pip install dist/*.tar.gz`
+        # forces pip to rebuild from the sdist. Catches sdist-specific
+        # packaging bugs (e.g. a file that got into the wheel via hatchling
+        # but is missing from the sdist's MANIFEST).
+        run: |
+          python -m venv /tmp/wheel-smoke
+          /tmp/wheel-smoke/bin/pip install dist/*.tar.gz pytest pytest-mock
+          cp -r tests /tmp/wheel-smoke-tests
+          cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
+          [pytest]
+          filterwarnings =
+              error
+          markers =
+              network: requires network access (pip install, HTTP calls)
+          INI
+          cd /tmp/wheel-smoke-tests
+          /tmp/wheel-smoke/bin/python -m pytest -q -m "not network"
