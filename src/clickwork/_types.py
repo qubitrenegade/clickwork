@@ -372,3 +372,17 @@ class CliContext:
         default=None, repr=False, compare=False,
     )
     """Confirm then run: wraps confirm() + run() in a single call."""
+
+    run_with_secrets: Callable[..., subprocess.CompletedProcess | None] | None = field(
+        default=None, repr=False, compare=False,
+    )
+    """Run a subprocess with secrets delivered via env (and optionally stdin).
+
+    The helper rejects ``Secret`` instances appearing directly in ``cmd``
+    (argv is visible in ``ps``), places each entry of ``secrets`` into the
+    subprocess's environment, and -- when ``stdin_secret="NAME"`` is set
+    -- additionally pipes ``secrets["NAME"].get()`` through the child's
+    stdin (Wave 1's ``stdin_text=`` path). Log lines show env-var NAMES
+    but redact VALUES. See :func:`clickwork.process.run_with_secrets` for
+    the full contract and examples.
+    """

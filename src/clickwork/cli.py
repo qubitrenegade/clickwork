@@ -27,7 +27,12 @@ from clickwork._logging import setup_logging
 from clickwork._types import CliContext, CliProcessError, PrerequisiteError, normalize_prefix
 from clickwork.config import ConfigError, load_config
 from clickwork.discovery import discover_commands
-from clickwork.process import capture as _capture, run as _run, run_with_confirm as _run_with_confirm
+from clickwork.process import (
+    capture as _capture,
+    run as _run,
+    run_with_confirm as _run_with_confirm,
+    run_with_secrets as _run_with_secrets,
+)
 from clickwork.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
 
 
@@ -439,6 +444,20 @@ def create_cli(
             env=env,
             stdin_text=stdin_text,
             stdin_bytes=stdin_bytes,
+        )
+
+        # run_with_secrets: safety-focused wrapper for subprocesses that
+        # need sensitive input. The forwarding lambda captures cli_ctx.dry_run
+        # (so --dry-run at the CLI level short-circuits secret delivery too)
+        # and accepts ``env=`` as a non-secret passthrough, matching the shape
+        # of the other bindings above. secrets / stdin_secret are keyword-only
+        # at the helper level; we mirror that here.
+        cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None, env=None: _run_with_secrets(
+            cmd,
+            secrets=secrets,
+            stdin_secret=stdin_secret,
+            dry_run=cli_ctx.dry_run,
+            env=env,
         )
 
         # Attach the CliContext to Click's ctx.obj so all subcommands can
