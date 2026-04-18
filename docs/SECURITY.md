@@ -26,11 +26,14 @@ free if you use the relevant helper.
 
 ### Secrets leaking in argv
 
-On POSIX systems, `argv` is world-readable via `ps` and
-`/proc/*/cmdline`. Any local user can see every command-line argument
-of every running process. `ctx.run_with_secrets` refuses to put a
-`Secret` in argv and routes the value through env vars and (optionally)
-stdin instead:
+On many POSIX systems `argv` is visible to other local users via `ps`
+and `/proc/*/cmdline`. Default Linux (`hidepid=0`) and macOS expose
+every command-line argument of every running process; hardened
+configurations (`hidepid=2`, SELinux policy, jails) restrict this, but
+clickwork treats the worst case as the design target rather than
+relying on operator-side hardening. `ctx.run_with_secrets` refuses to
+put a `Secret` in argv and routes the value through env vars and
+(optionally) stdin instead:
 
 ```python
 ctx.run_with_secrets(["wrangler", "secret", "put", "API_TOKEN"], secrets={"CLOUDFLARE_API_TOKEN": Secret(token)}, stdin_secret="CLOUDFLARE_API_TOKEN")
@@ -211,15 +214,23 @@ Implementation: `clickwork.config._check_owner_only_permissions`.
 
 ## Verifying release artifacts
 
-For 1.0.0, verify PyPI downloads by pinning the release hash:
+For 1.0.0, verify PyPI downloads by pinning the release hash. pip's
+hash-checking mode reads hashes from a requirements file rather than
+the command line:
+
+```text
+# requirements.txt
+clickwork==1.0.0 --hash=sha256:<hash-from-pypi>
+```
 
 ```bash
-pip install clickwork==1.0.0 --hash=sha256:<hash-from-pypi>
+pip install --require-hashes -r requirements.txt
 ```
 
 PyPI publishes SHA-256 hashes for each artifact on the release page.
 `uv.lock` captures the same hashes when `uv add clickwork==1.0.0` is
-used.
+used, and `uv sync --locked` refuses to install anything whose hash
+no longer matches the lockfile.
 
 Sigstore keyless signing is planned for 1.0.1 and tracked in
 [#61](https://github.com/qubitrenegade/clickwork/issues/61). Once it
