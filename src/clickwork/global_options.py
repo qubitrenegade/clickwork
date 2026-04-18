@@ -26,8 +26,14 @@ Design choices worth reading before changing this file:
    ``cli`` tree and we walk it immediately. Commands attached LATER don't get
    the option. This is intentional: a retroactive scheme would need to
    monkey-patch ``Group.add_command`` and would introduce surprising
-   lifecycle interactions with lazy plugin loading. If you need to cover
-   commands added later, call ``add_global_option`` again after adding them.
+   lifecycle interactions with lazy plugin loading. The correct workflow
+   is to invoke ``add_global_option`` ONCE, AFTER all commands (including
+   those loaded from ``discover_commands`` / entry points) are attached.
+   Re-invoking the function later with the same flag is **not** a
+   supported "catch up" mechanism -- the conflict-detection guard treats
+   an already-installed option as a collision and raises ``ValueError``.
+   That's deliberate: silent idempotent reinstalls would mask genuine
+   "declared the same flag twice by mistake" bugs.
 
 4. **Detecting "explicitly set".** For value options we must distinguish "the
    user passed ``--env=prod``" from "Click filled in the default of ``None``".
@@ -92,8 +98,13 @@ def add_global_option(
         Commands attached to ``cli`` AFTER ``add_global_option`` returns do
         NOT retroactively receive the option. This is deliberate: retroactive
         registration would require monkey-patching ``Group.add_command`` and
-        introduces lifecycle surprises. Call ``add_global_option`` again if
-        you need to cover later additions.
+        introduces lifecycle surprises. The correct workflow is to call
+        ``add_global_option`` ONCE, AFTER all commands (including those from
+        ``discover_commands`` / entry points) are attached. Re-invoking it
+        later with the same flag raises ``ValueError`` because the
+        conflict-detection guard treats the existing registration as a
+        collision -- this is intentional: silent idempotent reinstalls
+        would hide real "declared the same flag twice by mistake" bugs.
 
     Args:
         cli: The root Click group to install the option on. Walked recursively
