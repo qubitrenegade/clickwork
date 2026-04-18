@@ -19,7 +19,6 @@ import os
 import signal
 import subprocess
 import sys
-import tempfile
 import textwrap
 import threading
 import time
@@ -990,7 +989,21 @@ class TestRealSignalForwarding:
         # daemon=True: if the test aborts for an unrelated reason, we don't
         # want a lingering helper thread to keep the interpreter alive.
         def _fire() -> None:
-            TestRealSignalForwarding._wait_for_ready(ready_path)
+            # Poll for the ready marker but ALWAYS send SIGINT afterwards,
+            # even if the marker never appeared. If we raised here instead,
+            # the background thread would die silently (threads don't fail
+            # the parent test) AND the parent would stay blocked inside
+            # run() -> proc.wait() forever because no signal ever arrived.
+            # Better: send the signal anyway, let the test body observe
+            # what happened, and assert on the marker's existence post-hoc.
+            try:
+                TestRealSignalForwarding._wait_for_ready(ready_path)
+            except AssertionError:
+                # Marker never appeared. Either the child is slow to
+                # install its handler, or it died before doing so. Send
+                # SIGINT anyway to unblock the parent; the test body's
+                # post-run assertions will surface the real problem.
+                pass
             if extra_delay > 0:
                 time.sleep(extra_delay)
             # signal.SIGINT to our own PID is the POSIX equivalent of the user
@@ -1002,7 +1015,7 @@ class TestRealSignalForwarding:
         thread.start()
         return thread
 
-    def test_ctx_run_forwards_sigint_to_child(self, tmp_path: Path) -> None:
+    def test_run_forwards_sigint_to_child(self, tmp_path: Path) -> None:
         """SIGINT received by the parent is forwarded to the child process.
 
         Pins two properties of the production forwarding path:
@@ -1054,7 +1067,7 @@ class TestRealSignalForwarding:
             f"child exit took {elapsed:.2f}s; expected <5s on the graceful path"
         )
 
-    def test_ctx_run_sigkill_escalation_on_timeout(
+    def test_run_sigkill_escalation_on_timeout(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
