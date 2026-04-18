@@ -82,6 +82,7 @@ still accept the kwarg.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -99,7 +100,7 @@ if TYPE_CHECKING:
 
 def run_cli(
     cli: click.BaseCommand,
-    args: list[str],
+    args: str | Sequence[str] | None = None,
     **kwargs: Any,
 ) -> Result:
     """Invoke a Click CLI under CliRunner with test-friendly defaults.
@@ -116,7 +117,12 @@ def run_cli(
             ``@click.command``-decorated function or a group built with
             :func:`clickwork.create_cli`.
         args: The command-line arguments to pass, as you would write them
-            after the CLI name (e.g. ``["deploy", "--env", "staging"]``).
+            after the CLI name. The preferred form is a list/tuple of
+            already-tokenised strings (``["deploy", "--env", "staging"]``);
+            a single string gets shell-tokenised by Click, which matches
+            Click's ``CliRunner.invoke`` signature but is error-prone on
+            values containing spaces or quotes. ``None`` means "no
+            arguments," equivalent to invoking the CLI with no positionals.
         **kwargs: Forwarded verbatim to ``CliRunner.invoke``. Useful
             overrides: ``input=`` to feed stdin, ``env=`` to set
             environment variables, ``catch_exceptions=True`` to restore
