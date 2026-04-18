@@ -296,8 +296,11 @@ def load_env_file(path: Path) -> dict[str, str]:
         env = load_env_file(Path(".env"))
         # env == {"API_TOKEN": "...", "REGION": "us-east-1"}
 
-        # Pass to a subprocess without mutating the parent environment:
-        ctx.run("./deploy.sh", env={**os.environ, **env})
+        # Pass to a subprocess without mutating the parent environment.
+        # Note the list form: ctx.run (and the underlying subprocess
+        # helpers) reject string commands as a shell-injection guardrail,
+        # so every cmd must be an argv list.
+        ctx.run(["./deploy.sh"], env={**os.environ, **env})
 
         # Or inject into the parent process:
         os.environ.update(env)
