@@ -470,10 +470,15 @@ def discover_commands_from_dir(
     Args:
         commands_dir: Path to the commands directory.
         strict: When True, discovery failures raise
-            ``ClickworkDiscoveryError`` after the scan instead of logging
-            warnings. Default False preserves the forgiving dev-mode
-            behaviour. Keyword-only to keep the positional signature
-            stable for existing callers.
+            ``ClickworkDiscoveryError`` after the scan IN ADDITION to
+            emitting per-file ``logger.warning(...)`` as we go. The
+            warnings give operators an immediate fix list tied to the
+            offending files; the raised exception summarises all of
+            them at once so release-validation scripts get a single
+            structured error. Default False preserves the forgiving
+            dev-mode behaviour (warnings only, no raise). Keyword-only
+            to keep the positional signature stable for existing
+            callers.
 
     Returns:
         Dict mapping command name -> Click command/group.
@@ -669,9 +674,13 @@ def discover_commands_from_entrypoints(
 
     Args:
         strict: When True, failures observed while wrapping an entry point
-            raise ``ClickworkDiscoveryError`` after the scan instead of
-            logging warnings. Default False preserves the forgiving
-            behaviour. Keyword-only to keep the positional signature stable.
+            raise ``ClickworkDiscoveryError`` after the scan IN ADDITION
+            to emitting per-failure ``logger.warning(...)``. The warnings
+            give operators an immediate readout; the raised exception
+            summarises all failures at once for release-validation
+            scripts. Default False preserves the forgiving behaviour
+            (warnings only, no raise). Keyword-only to keep the positional
+            signature stable.
 
     Returns:
         Dict mapping command name to a lazy-loading Click command/group proxy.
