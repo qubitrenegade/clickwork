@@ -722,16 +722,25 @@ def run_with_secrets(
                 "str(path), ints with str(n), etc."
             )
 
-    # 4. Validate every value in ``secrets`` is a Secret instance. If
-    # a caller accidentally passes a plain string (or any other type),
-    # .get() below would raise AttributeError mid-execution -- which
-    # clickwork.cli's wrapped_invoke classifies as a framework bug
-    # (exit 2, "Internal error: ...") rather than the user error it
-    # actually is. Catching this up front gives a clear TypeError
-    # naming the offending key + type, and the error message
-    # deliberately does NOT include the value (which might itself be
-    # sensitive even in its unwrapped form).
+    # 4. Validate every KEY in ``secrets`` is a str and every VALUE is
+    # a Secret instance. Two distinct failure modes this prevents:
+    #   a) Non-str keys (e.g. ``secrets={1: Secret("x")}``) would
+    #      become env-var names and later fail mid-subprocess launch
+    #      with ``TypeError: expected str, bytes or os.PathLike
+    #      object, not int``. By that point we've already unwrapped
+    #      the Secret into memory -- too late for a clean recovery.
+    #   b) Non-Secret values (e.g. ``secrets={"T": "raw string"}``)
+    #      would crash on ``.get()`` below, misclassified as a
+    #      framework bug through clickwork.cli's wrapped_invoke.
+    # Error messages name the offending key/type but never the
+    # VALUE (which might be sensitive even in its unwrapped form).
     for sname, sval in secrets.items():
+        if not isinstance(sname, str):
+            raise TypeError(
+                f"secrets keys must be str (env-var names); got key of "
+                f"type {type(sname).__name__}. Every entry in the "
+                "secrets dict maps an env-var NAME (str) to a Secret."
+            )
         if not isinstance(sval, Secret):
             raise TypeError(
                 f"secrets[{sname!r}] must be a Secret instance; got "
@@ -753,7 +762,7 @@ def run_with_secrets(
             "your ``secrets={}`` dict, e.g. stdin_secret=\"TOKEN\"."
         )
 
-    # 7. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
+    # 6. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
     # we touch Secret.get() for any reason, so a typo surfaces as a
     # clear ValueError with no secret material in flight.
     if stdin_secret is not None and stdin_secret not in secrets:
@@ -774,7 +783,7 @@ def run_with_secrets(
         f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
     )
 
-    # 8. Dry-run short-circuit. Docstring promises dry_run does not
+    # 7. Dry-run short-circuit. Docstring promises dry_run does not
     # pull secret values into memory. Honouring that means bailing out
     # BEFORE Secret.get() on any entry of ``secrets`` -- only the
     # caller-supplied ``env`` (which is already plain strings) and the
@@ -796,7 +805,7 @@ def run_with_secrets(
         )
         return None
 
-    # 9. Build the full env for the subprocess. Caller's env goes first
+    # 8. Build the full env for the subprocess. Caller's env goes first
     # so secrets win on key conflict -- the helper's job is to deliver
     # the secret, and a stale override from ``env`` would silently break
     # that contract. Each Secret.get() is called EXACTLY ONCE and the
@@ -810,14 +819,14 @@ def run_with_secrets(
     # label so operators can tell them apart. Neither leaks the value.
     secret_keys = set(secret_env.keys())
 
-    # 10. Resolve the stdin payload from the ALREADY-unwrapped secret_env
+    # 9. Resolve the stdin payload from the ALREADY-unwrapped secret_env
     # dict rather than calling Secret.get() a second time -- one unwrap
     # per secret keeps the "minimal touch" contract explicit.
     stdin_payload: str | None = None
     if stdin_secret is not None:
         stdin_payload = secret_env[stdin_secret]
 
-    # 11. Emit the helper's own log line. This is the SINGLE place where
+    # 10. Emit the helper's own log line. This is the SINGLE place where
     # the "secrets-in-play" subprocess launch is recorded. We log
     # BEFORE delegating to run() so:
     #   - the argv (already validated Secret-free and all-str) appears
@@ -832,7 +841,7 @@ def run_with_secrets(
         stdin_display,
     )
 
-    # 12. Delegate. run() handles signal forwarding and stdin piping --
+    # 11. Delegate. run() handles signal forwarding and stdin piping --
     # we reuse all of it instead of reinventing the wheel (and instead
     # of teaching run() about Secret). dry_run was already handled
     # above so we pass False here to make that explicit.

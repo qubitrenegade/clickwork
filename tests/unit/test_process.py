@@ -686,6 +686,28 @@ class TestRunWithSecrets:
         # Mention the type so the fix (str(path)) is obvious.
         assert "PosixPath" in str(exc_info.value) or "WindowsPath" in str(exc_info.value) or "Path" in str(exc_info.value)
 
+    def test_run_with_secrets_rejects_non_str_key_in_secrets_dict(self):
+        """secrets keys must be str (env-var names), not int / tuple / etc.
+
+        WHY: an earlier draft only validated the values. A caller passing
+        ``secrets={1: Secret("x")}`` would then unwrap the Secret (pulling
+        it into memory!) and fail mid-subprocess launch with a confusing
+        ``TypeError: expected str, bytes or os.PathLike object, not int``
+        far from the real cause. Validate key types up front so the
+        Secret.get() never happens on the bad call.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={1: Secret("value-must-not-leak")},  # type: ignore[dict-item]
+            )
+        # Error names the offending type but NEVER the value.
+        assert "int" in str(exc_info.value)
+        assert "value-must-not-leak" not in str(exc_info.value)
+
     def test_run_with_secrets_rejects_non_Secret_value_in_secrets_dict(self):
         """secrets={"K": "plain-string"} fails with a clear TypeError.
 
