@@ -569,8 +569,11 @@ def _format_env_redacted(
     (detect missing / mistyped keys) without seeing the values.
 
     Args:
-        env: The full env dict that will be passed to the subprocess,
-            or ``None`` if no extra env was built.
+        env: The extra / override env dict that ``_build_env()`` will
+            merge into the inherited ``os.environ`` for the subprocess
+            (NOT the full inherited environment -- this helper only
+            sees and formats the entries the caller / secrets dict
+            explicitly supplied). ``None`` if no extra env was built.
         secret_keys: The set of keys whose values came from ``secrets``.
             Used to tag those keys as ``<redacted>`` vs ``<set>`` for
             caller-supplied env, so the log clearly shows which keys
@@ -616,10 +619,15 @@ def run_with_secrets(
        rationale -- and why a deep scan is NOT the right choice here --
        is spelled out on :func:`_validate_no_secret_in_argv`.
     2. **Redacted logging.** The helper emits its own log line BEFORE
-       delegating to :func:`run`, with every secret-sourced env-var
-       rendered as ``NAME=<redacted>``. Env-var names stay visible so
-       operators can see what environment the subprocess sees; values
-       are hidden. ``run()`` itself has no knowledge of Secret semantics
+       delegating to :func:`run`, with EVERY env-var value redacted.
+       Secret-sourced entries render as ``NAME=<redacted>``; caller-
+       supplied ``env`` entries render as ``NAME=<set>``. Env-var names
+       stay visible so operators can see what environment the
+       subprocess sees (missing / mistyped keys); values are uniformly
+       hidden because on this codepath any non-secret value might ALSO
+       be sensitive (a caller could forget to wrap a token in Secret
+       and drop it into ``env=``; printing that would compound the
+       mistake). ``run()`` itself has no knowledge of Secret semantics
        and emits no env-echoing logs during normal execution, so no
        redaction is needed there.
 
@@ -765,8 +773,10 @@ def run_with_secrets(
     base_env: dict[str, str] = dict(env) if env is not None else {}
     secret_env = {name: s.get() for name, s in secrets.items()}
     full_env: dict[str, str] = {**base_env, **secret_env}
-    # Track which keys came from secrets so the log line redacts only
-    # those values -- non-secret env vars stay plainly visible.
+    # Track which keys came from secrets so the log line tags them as
+    # ``<redacted>``. Non-secret (caller-supplied) env keys are tagged
+    # ``<set>`` by ``_format_env_redacted`` -- same redaction, different
+    # label so operators can tell them apart. Neither leaks the value.
     secret_keys = set(secret_env.keys())
 
     # 7. Resolve the stdin payload from the ALREADY-unwrapped secret_env
