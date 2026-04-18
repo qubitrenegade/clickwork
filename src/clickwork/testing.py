@@ -72,12 +72,13 @@ Historical note: Click 8.2 removed the ``mix_stderr`` kwarg that
 ``CliRunner.__init__`` used to accept. Post-removal, all three stream
 attributes on ``Result`` are populated separately (``output`` is the
 interleaved form; ``stdout`` and ``stderr`` are kept independent).
-clickwork declares ``click>=8.1`` so in principle a consumer could be
-running on 8.1 where ``mix_stderr`` still exists. If you are looking
-at an older snippet that uses ``CliRunner(mix_stderr=False)``, check
-the Click version in your test environment rather than assuming the
-8.2+ API: 8.2+ will raise ``TypeError``; older releases still accept
-the kwarg.
+clickwork declares ``click>=8.2`` precisely so this guidance always
+applies -- snippets in older tutorials that use
+``CliRunner(mix_stderr=False)`` will raise ``TypeError`` against the
+supported Click range, and on 8.1 and earlier ``result.stderr`` would
+have raised ``ValueError: stderr not separately captured`` which is
+why we floor the dependency at 8.2 rather than documenting a
+conditional behaviour.
 """
 from __future__ import annotations
 
