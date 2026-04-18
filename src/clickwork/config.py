@@ -179,13 +179,20 @@ def _coerce_value(
             return int(value)
         except ValueError as exc:
             # For secret keys, also suppress the underlying ValueError
-            # text (``exc``) -- Python's int() error includes the raw
-            # token, so echoing ``exc`` would defeat the redaction.
+            # text (``exc``) AND suppress the exception chain -- Python's
+            # int() error message embeds the raw token, so both the
+            # chained ``__cause__`` and any naive ``str(exc)`` would
+            # defeat the redaction when a traceback is surfaced. Using
+            # ``from None`` breaks the chain so the raw token doesn't
+            # survive on the exception's ``__cause__`` attribute.
             detail = "invalid literal" if is_secret else str(exc)
-            raise ConfigError(
+            message = (
                 f"Config key '{key}' has value {display_value}, which cannot "
                 f"be parsed as int: {detail}."
-            ) from exc
+            )
+            if is_secret:
+                raise ConfigError(message) from None
+            raise ConfigError(message) from exc
 
     # String -> float: accepts scientific notation, signed, decimals.
     if expected_type is float:
@@ -193,12 +200,17 @@ def _coerce_value(
             return float(value)
         except ValueError as exc:
             # Same redaction rationale as the int branch: float()'s
-            # ValueError message contains the raw token.
+            # ValueError message contains the raw token, and both the
+            # message AND the exception chain must be scrubbed for
+            # secret keys.
             detail = "invalid literal" if is_secret else str(exc)
-            raise ConfigError(
+            message = (
                 f"Config key '{key}' has value {display_value}, which cannot "
                 f"be parsed as float: {detail}."
-            ) from exc
+            )
+            if is_secret:
+                raise ConfigError(message) from None
+            raise ConfigError(message) from exc
 
     # Unsupported target type (e.g. ``type: list``, ``type: dict``).
     # Rather than guess, return the value unchanged and let the
@@ -803,9 +815,29 @@ def load_config(
                 # non-string source that didn't match), this catches
                 # the mismatch with the original "type X, expected Y"
                 # message callers depend on.
-                if not isinstance(config[key], expected_type):
+                #
+                # Special case: ``bool`` is a subclass of ``int`` in
+                # Python, so ``isinstance(True, int)`` is True and a
+                # TOML value like ``port = true`` would silently pass
+                # ``type: int`` validation. Explicitly reject bool
+                # values when the schema wants an int (and vice versa
+                # -- an int shouldn't satisfy ``type: bool``) to match
+                # the intent of the type declaration.
+                current = config[key]
+                wrong_bool_for_int = (
+                    expected_type is int and isinstance(current, bool)
+                )
+                wrong_int_for_bool = (
+                    expected_type is bool and not isinstance(current, bool)
+                    and isinstance(current, int)
+                )
+                if (
+                    not isinstance(current, expected_type)
+                    or wrong_bool_for_int
+                    or wrong_int_for_bool
+                ):
                     raise ConfigError(
-                        f"Config key '{key}' has type {type(config[key]).__name__}, "
+                        f"Config key '{key}' has type {type(current).__name__}, "
                         f"expected {expected_type.__name__}. "
                         f"Check the value in {repo_config_path} or {user_config_path}."
                     )

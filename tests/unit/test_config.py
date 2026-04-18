@@ -797,6 +797,87 @@ class TestEnvVarTypes:
         assert config["port"] == 9090
         assert isinstance(config["port"], int)
 
+    def test_toml_bool_rejected_for_int_schema(self, tmp_path: Path):
+        """TOML `port = true` should NOT satisfy schema `type: int`.
+
+        Pins a subtle Python gotcha: ``bool`` subclasses ``int``, so a
+        naive ``isinstance(value, int)`` check would accept ``True`` /
+        ``False`` for an int-typed schema key. The type intent of
+        ``type: int`` is "numeric integer", not "any int subclass
+        including bool". This test locks the rejection so a future
+        refactor can't re-introduce the bool-is-int footgun.
+        """
+        from clickwork.config import ConfigError, load_config
+
+        config_path = tmp_path / ".my-tool.toml"
+        config_path.write_text('[default]\nport = true\n')
+
+        schema = {"port": {"type": int}}
+
+        with pytest.raises(ConfigError, match="type bool, expected int"):
+            load_config(
+                project_name="my-tool",
+                repo_config_path=config_path,
+                user_config_path=tmp_path / "user.toml",
+                schema=schema,
+            )
+
+    def test_toml_int_rejected_for_bool_schema(self, tmp_path: Path):
+        """Symmetric to the bool-for-int rejection.
+
+        Pins that ``type: bool`` rejects plain integers (0/1/etc.). A
+        caller wanting to accept "0 or 1 as a bool" must either
+        coerce to str first or use the string-allowlist bool forms
+        (``"1"`` / ``"0"`` are in the coercion allowlist).
+        """
+        from clickwork.config import ConfigError, load_config
+
+        config_path = tmp_path / ".my-tool.toml"
+        config_path.write_text('[default]\ndebug = 1\n')
+
+        schema = {"debug": {"type": bool}}
+
+        with pytest.raises(ConfigError, match="type int, expected bool"):
+            load_config(
+                project_name="my-tool",
+                repo_config_path=config_path,
+                user_config_path=tmp_path / "user.toml",
+                schema=schema,
+            )
+
+    def test_secret_coercion_error_does_not_chain_raw_value(self, tmp_path: Path, monkeypatch):
+        """Chained ConfigError's ``__cause__`` must not carry the raw token.
+
+        For ``secret: True`` keys, coercion errors use ``raise ... from None``
+        (not ``from exc``) so the underlying ``ValueError`` -- whose message
+        embeds the raw token that couldn't be parsed -- doesn't survive on
+        the exception's ``__cause__``. A traceback printer that walks the
+        cause chain would otherwise leak the token despite the redacted
+        top-level message.
+        """
+        from clickwork.config import ConfigError, load_config
+
+        monkeypatch.setenv("MY_TOOL_TOKEN", "not-a-number-at-all")
+
+        config_path = tmp_path / ".my-tool.toml"
+        config_path.write_text("[default]\n")
+
+        schema = {"token": {"type": int, "secret": True}}
+
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(
+                project_name="my-tool",
+                repo_config_path=config_path,
+                user_config_path=tmp_path / "user.toml",
+                schema=schema,
+            )
+
+        # Redacted top-level message: no leakage.
+        assert "not-a-number-at-all" not in str(excinfo.value)
+        # Exception chain: must be broken for secrets. Either no cause,
+        # or the cause is None (both satisfy "no leak via __cause__").
+        assert excinfo.value.__cause__ is None
+
 
 class TestEnvVarDottedKeys:
     """Auto-prefix env var resolution handles dotted keys correctly."""

@@ -316,9 +316,11 @@ Schema features:
 - **`required: True`** -- Raises `ConfigError` if the key is missing
   after all layers merge.
 - **`type: str`** (or `int`, `bool`, `float`) -- Validates the resolved
-  value matches the expected type. For env-sourced values, also
-  performs coercion -- see [Environment Variable Types](#environment-variable-types)
-  below for the exact rules.
+  value matches the expected type. For **any string-sourced value**
+  (env var, TOML string literal, user-supplied override), also
+  performs coercion to the declared type -- see
+  [Environment Variable Types](#environment-variable-types) below for
+  the exact rules and the bool allowlist.
 - **`default: "value"`** -- Fills missing keys after all layers merge
   but before validation.
 - **`env: "VAR_NAME"`** -- Explicit env var mapping (overrides auto-prefix).
@@ -334,7 +336,7 @@ Environment variables at the OS level are **always strings**.
 array is a list of `NAME=value` byte strings -- there is no such
 thing as an "integer environment variable." That means when a
 plugin author declares a schema key like `{"port": {"type": int}}`
-and the value arrives via `TEST_CLI_PORT=8080`, *something* has to
+and the value arrives via `MY_TOOL_PORT=8080`, *something* has to
 convert the string `"8080"` into the integer `8080` before the
 command code uses it.
 
