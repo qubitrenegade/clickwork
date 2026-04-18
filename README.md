@@ -8,6 +8,8 @@ utilities -- so your commands focus on business logic, not boilerplate.
 > real [orbit-admin](https://github.com/qubitrenegade/qbrd-orbit-widener)
 > needs -- no speculative abstractions.
 
+See [docs/API_POLICY.md](docs/API_POLICY.md) for the stable-surface promise.
+
 ## Installation
 
 ```bash
