@@ -146,13 +146,22 @@ than 1.2, giving callers at least one version of overlap where the
 symbol still works and also emits a `DeprecationWarning`.
 
 Deprecations use the `deprecated(since, removed_in, reason)` decorator
-that lives at `clickwork._deprecated.deprecated`. That module is a
-Wave 2 deliverable tracked by issue #47; it does not exist in the
-codebase yet. Plugin authors should not import from
-`clickwork._deprecated` directly (the underscore makes it private).
+that lives at `clickwork._deprecated.deprecated`. The module is
+intentionally underscore-prefixed and is NOT re-exported from
+`clickwork/__init__.py`; plugin authors should not import from it.
 The decorator is an internal tool clickwork uses on its own public
 surface; it exists so every deprecation emits a consistent warning
-with a pointer to the replacement.
+with a pointer to the replacement. The warning fires on the first
+*call* to the deprecated symbol (never at import time) and is
+deduplicated per symbol using a module-qualified key, so each
+deprecated name warns exactly once per process regardless of how many
+times it's invoked. Every warning message begins with a
+`clickwork:` prefix so downstream test suites can filter narrowly via
+pytest's message-field regex (for example,
+`filterwarnings = ['ignore:clickwork\\::DeprecationWarning']`).
+Filtering by the module field is not reliable here, because
+`stacklevel=2` attributes the warning to the caller's module rather
+than to `clickwork`.
 
 The 1.0 release itself may deprecate symbols that existed in 0.2.x,
 but it won't remove them in the same release. Anything removed in 1.0
@@ -234,9 +243,15 @@ those suites even for callers who aren't touching the deprecated
 surface. Warnings fire from the specific entry points that trigger
 the deprecated behavior (e.g. inside `create_cli()` once per CLI,
 or from the deprecated function itself). Callers who want to silence
-deprecations in their own test runs can add a targeted
-`filterwarnings = ["ignore::DeprecationWarning:clickwork"]` entry,
-or narrow further by message text.
+deprecations in their own test runs can add a targeted message-regex
+entry such as
+`filterwarnings = ['ignore:clickwork\\::DeprecationWarning']` (the
+second field is a regex against the warning text, and the
+`clickwork:` prefix on every message is what makes this match). The
+module-field form `ignore::DeprecationWarning:clickwork` looks
+plausible but does not actually match, because `stacklevel=2`
+attributes the warning to the caller's module rather than to
+`clickwork`.
 
 The 18-month window is deliberately generous. Enterprise and
 Linux-distribution Python environments lag upstream by years; a

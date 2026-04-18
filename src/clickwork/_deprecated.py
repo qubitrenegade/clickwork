@@ -35,10 +35,13 @@ call. This matters for two reasons:
    process is enough to signal intent; the changelog and migration
    guide carry the details.
 
-The already-warned set is keyed by ``__qualname__`` (falling back to
-``__name__``). That key is stable across calls to the *same* wrapped
-symbol but distinct across different wrapped symbols, so deprecating
-``foo`` does not suppress a later deprecation of ``bar``.
+The already-warned set is keyed by ``f"{__module__}.{__qualname__}"``
+(with safe fallbacks through ``__name__`` and ``repr()``). The module
+prefix matters: without it, two different modules each defining
+``def foo()`` would share a cache entry, so after module A's ``foo``
+fires its warning, module B's ``foo`` would be silenced for the rest
+of the process. The module-qualified key keeps them distinct while
+still being stable across repeated calls to the same symbol.
 
 Stacklevel rationale
 --------------------
@@ -61,7 +64,16 @@ from typing import Any, Callable, TypeVar
 # This is important for IDE hover / autocomplete: the user should still
 # see ``foo(a: int, b: int) -> int`` after the decorator is applied,
 # not an opaque ``Callable[..., Any]``.
-T = TypeVar("T", bound=Callable[..., Any])
+#
+# The TypeVar is **unbounded** so classes type-check as well as
+# functions. A bound of ``Callable[..., Any]`` would reject
+# ``@deprecated(...)`` on a class, because ``type`` is not a
+# ``Callable[..., Any]`` in typing semantics even though classes are
+# callable at runtime (calling a class invokes ``__init__``). Dropping
+# the bound costs a little precision on the parameter type but keeps
+# both the function- and class-decorator paths typeable from a single
+# overload, which is what users expect at call sites.
+T = TypeVar("T")
 
 # Module-level set of qualified names we have already warned about.
 # Lives at module scope (not per-decorator-instance) so it survives the
@@ -73,20 +85,40 @@ _warned: set[str] = set()
 
 
 def _qualname(obj: Any) -> str:
-    """Return the most specific identifier we can for a callable.
+    """Return the most specific display identifier we can for a callable.
 
     Prefer ``__qualname__`` (which encodes class nesting, e.g.
     ``OldWidget.__init__``) so two methods named ``__init__`` on
-    different classes don't collide in the warned-set. Fall back to
+    different classes read distinctly in the warning text. Fall back to
     ``__name__`` for oddball callables (e.g. ``functools.partial``
     objects don't have ``__qualname__``) and finally to ``repr()`` so
     we never raise from inside a decorator.
+
+    This is the **display** name that appears in the warning message.
+    It is deliberately not used as the dedup cache key -- see
+    ``_cache_key`` for that, which prefixes the module so two
+    identically-named functions in different modules don't collide.
     """
     return (
         getattr(obj, "__qualname__", None)
         or getattr(obj, "__name__", None)
         or repr(obj)
     )
+
+
+def _cache_key(obj: Any) -> str:
+    """Return the module-qualified key used to dedup warnings.
+
+    Keying on ``__qualname__`` alone is wrong: two modules each
+    defining ``def foo(): ...`` would share a cache entry, so once
+    module A's ``foo`` fires its warning, module B's ``foo`` would be
+    silenced for the rest of the process even though it's a different
+    symbol. Prefix the module (``fn.__module__``) to keep the entries
+    distinct. We still fall back through the same chain as
+    ``_qualname`` so an object missing ``__module__`` never raises.
+    """
+    module = getattr(obj, "__module__", None) or "<unknown-module>"
+    return f"{module}.{_qualname(obj)}"
 
 
 def deprecated(
@@ -124,9 +156,19 @@ def deprecated(
             class OldWidget: ...
     """
     # The warning text is templated once and reused every time we fire.
-    # Keeping the ``clickwork:`` prefix lets callers filter narrowly, e.g.
-    # ``filterwarnings = ["ignore::DeprecationWarning:clickwork"]`` in
-    # their pytest config.
+    # Keeping the ``clickwork:`` prefix lets callers filter narrowly by
+    # matching the **message field** (the second field of pytest's
+    # ``filterwarnings`` spec, which is a regex against the warning text).
+    # Example pytest config::
+    #
+    #     filterwarnings = [
+    #         'ignore:clickwork\\::DeprecationWarning',
+    #     ]
+    #
+    # Note: the obvious-looking ``"ignore::DeprecationWarning:clickwork"``
+    # (module field, 4th field) does NOT work, because ``stacklevel=2``
+    # attributes the warning to the CALLER's module, not to ``clickwork``.
+    # Filter by the ``clickwork:`` message prefix instead.
     def _build_message(qualname: str) -> str:
         tail = f" {reason}" if reason else ""
         return (
@@ -142,11 +184,16 @@ def deprecated(
         if inspect.isclass(target):
             cls = target
             original_init = cls.__init__
-            # Use the class's own qualified name as the cache key so the
-            # warning text reads "OldWidget is deprecated" rather than
+            # Display name drives the human-readable warning text so the
+            # message reads "OldWidget is deprecated" rather than
             # "OldWidget.__init__ is deprecated."
-            cache_key = _qualname(cls)
-            message = _build_message(cache_key)
+            display = _qualname(cls)
+            # Dedup key is module-qualified so two classes named
+            # ``OldWidget`` in different modules both get to warn on
+            # first instantiation instead of the second one being
+            # silently suppressed by the first's cache entry.
+            cache_key = _cache_key(cls)
+            message = _build_message(display)
 
             @functools.wraps(original_init)
             def new_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -162,8 +209,9 @@ def deprecated(
 
         # Function / method path.
         func = target
-        cache_key = _qualname(func)
-        message = _build_message(cache_key)
+        display = _qualname(func)
+        cache_key = _cache_key(func)
+        message = _build_message(display)
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:

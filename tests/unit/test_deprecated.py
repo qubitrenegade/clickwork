@@ -56,7 +56,17 @@ def test_function_emits_warning_on_first_call():
     assert len(record) == 1
     message = str(record[0].message)
     # The ``clickwork:`` prefix lets callers narrow warning filters to
-    # just clickwork deprecations (e.g. ``filterwarnings = ["ignore::DeprecationWarning:clickwork"]``).
+    # just clickwork deprecations. Because ``stacklevel=2`` attributes
+    # the warning to the CALLER's module (not to ``clickwork``), the
+    # correct way to filter is against the **message field** (regex),
+    # not the module field. For example, in pytest::
+    #
+    #     filterwarnings = [
+    #         'ignore:clickwork\\::DeprecationWarning',
+    #     ]
+    #
+    # The second field of that spec is a regex matched against the
+    # warning message; our ``clickwork:`` prefix is what makes it work.
     assert message.startswith("clickwork:")
     # The qualified name of the wrapped function appears in the message
     # so the user can grep their own code for the usage site.
@@ -64,6 +74,60 @@ def test_function_emits_warning_on_first_call():
     assert "1.1" in message
     assert "1.2" in message
     assert "use bar() instead" in message
+
+
+def test_cache_key_is_module_qualified():
+    """Two same-named functions in different modules both warn on first call.
+
+    The dedup cache key must include the defining module. If the key
+    were just ``__qualname__``, then declaring ``def foo()`` in module
+    A and also in module B would make them collide: A's first call
+    fires the warning, adds ``"foo"`` to the warned-set, and B's first
+    call is then silently suppressed even though it's a different
+    symbol. That's a correctness bug in any project that happens to
+    reuse short names across modules (very common for ``main``,
+    ``run``, ``helper``, etc.).
+
+    We simulate two separate modules by flipping ``__module__`` on two
+    freshly-decorated functions with the same ``__qualname__``.
+    """
+    from clickwork._deprecated import deprecated
+
+    # Two decorated functions that share a qualname but live in
+    # different (synthetic) modules. ``__module__`` is what the
+    # decorator reads for the cache key, so overriding it here is the
+    # minimal way to stage the collision scenario without having to
+    # build two throwaway .py files on disk.
+    @deprecated(since="1.1", removed_in="1.2", reason="gone")
+    def collide() -> int:
+        return 1
+
+    @deprecated(since="1.1", removed_in="1.2", reason="gone")
+    def collide_b() -> int:  # different python-level name, same qualname below
+        return 2
+
+    # Force both to look like ``def collide()`` in separate modules.
+    # We set ``__module__`` BEFORE the first call so the cache key is
+    # computed against the faked module names. (The decorator reads
+    # ``__module__`` each call, so the override has to be in place at
+    # warn-time, not just at decoration time.)
+    collide.__module__ = "pkg_a.sub"
+    collide_b.__module__ = "pkg_b.sub"
+    collide_b.__qualname__ = collide.__qualname__  # same short name
+
+    # First call of module A's ``collide`` warns.
+    with pytest.warns(DeprecationWarning) as record_a:
+        assert collide() == 1
+    assert len(record_a) == 1
+
+    # First call of module B's ``collide`` must ALSO warn -- a single
+    # DeprecationWarning is expected here, not zero. If the cache key
+    # weren't module-qualified, module A's earlier warn would have
+    # already filled the slot and this block would raise
+    # ``Failed: DID NOT WARN``.
+    with pytest.warns(DeprecationWarning) as record_b:
+        assert collide_b() == 2
+    assert len(record_b) == 1
 
 
 def test_only_warns_once():
