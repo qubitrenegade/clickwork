@@ -122,7 +122,13 @@ def _load_toml_from_bytes(data: bytes) -> dict:
 
 
 def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
-    """Raise ConfigError unless the file behind ``fd`` is owner-only (chmod 600).
+    """Raise ConfigError if the file behind ``fd`` has any group/other perms.
+
+    "Owner-only" in the informal sense: nothing outside the file's owner
+    can read, write, or execute it. The owner's own bits are NOT
+    constrained (so ``0o600``, ``0o700``, ``0o400``, etc. all pass) --
+    the helper is about keeping *other* users out, not about the owner's
+    own mode choices.
 
     Factored out of the user-config reader so the same permission guard can
     be reused by any secrets-bearing file (user config TOML, .env dotenv
@@ -190,8 +196,11 @@ def _read_checked_user_config(path: Path) -> bytes | None:
     """Open, permission-check, and read a user config file in one operation.
 
     User config may contain secrets (API tokens, personal credentials), so
-    it must be owner-only (mode ``0o600``). On Windows this check is skipped
-    because the Unix permission model does not apply.
+    no one but the file's owner may access it. Any group/other permission
+    bit -- read, write, or execute -- raises ConfigError. ``chmod 600`` is
+    the canonical remediation, but ``0o400`` or ``0o700`` also pass the
+    check; only group/other bits are forbidden. On Windows this check is
+    skipped because the Unix permission model does not apply.
 
     The entire open-check-read sequence uses a single file descriptor to
     avoid TOCTOU (time-of-check/time-of-use) races: we open first, then
