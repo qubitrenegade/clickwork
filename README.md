@@ -93,6 +93,8 @@ working example with subcommand groups.
 - **[Architecture](docs/ARCHITECTURE.md)** -- Design decisions, module
   responsibilities, security model, and the reasoning behind non-obvious
   choices.
+- **[Migrating 0.2.x to 1.0](docs/MIGRATING.md)** -- Breaking changes,
+  new opt-in surfaces, and concrete before/after diffs for upgraders.
 
 ## Features
 
