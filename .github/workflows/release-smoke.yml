@@ -140,6 +140,11 @@ jobs:
           fi
           WHEEL="${wheels[0]}"
           uv venv --python 3.13 /tmp/wheel-smoke
+          # `uv venv` creates a bare venv with only the interpreter,
+          # not pip. Use `uv pip install --python <interpreter>` to
+          # install INTO that venv without bootstrapping pip; uv's
+          # resolver handles the install directly.
+          #
           # Pin pytest/pytest-mock to the SAME versions uv.lock
           # records for the editable test.yml run. Without pins, the
           # smoke-test venv would pick up whatever PyPI has at job
@@ -147,7 +152,8 @@ jobs:
           # test.yml sees it, causing this job to flap on upstream
           # changes rather than code changes. Bumping these pins
           # should track uv.lock bumps.
-          /tmp/wheel-smoke/bin/pip install "$WHEEL" 'pytest==9.0.2' 'pytest-mock==3.15.1'
+          uv pip install --python /tmp/wheel-smoke/bin/python \
+            "$WHEEL" 'pytest==9.0.2' 'pytest-mock==3.15.1'
           cp -r tests /tmp/wheel-smoke-tests
           cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
           [pytest]
@@ -189,7 +195,11 @@ jobs:
           fi
           SDIST="${sdists[0]}"
           uv venv --python 3.13 /tmp/sdist-smoke
-          /tmp/sdist-smoke/bin/pip install "$SDIST" 'pytest==9.0.2' 'pytest-mock==3.15.1'
+          # Same uv-based install approach as the wheel step: `uv venv`
+          # creates a pip-less venv, so use `uv pip install --python`
+          # to target that interpreter from the host uv.
+          uv pip install --python /tmp/sdist-smoke/bin/python \
+            "$SDIST" 'pytest==9.0.2' 'pytest-mock==3.15.1'
           cp -r tests /tmp/sdist-smoke-tests
           cat > /tmp/sdist-smoke-tests/pytest.ini <<'INI'
           [pytest]
