@@ -18,10 +18,18 @@ The key design decisions pinned by these tests:
    propagate unmodified.
 6. Redaction -- log lines include ``[auth: <redacted>]`` when auth was used,
    never the token/password value itself.
-7. Body encoding -- any JSON-type body (dict, list, str, int, float, bool,
-   None) is ``json.dumps``-encoded and the Content-Type header is set to
-   ``application/json`` unless the caller already set one. Raw ``bytes``
-   are sent as-is.
+7. Body encoding -- ``body=None`` means "no request body is sent at all"
+   (matches ``urllib.request.Request(data=None)``; this is what GET and
+   DELETE default to). Any other JSON-type body (dict, list, str, int,
+   float, bool) is ``json.dumps``-encoded and the Content-Type header
+   is set to ``application/json`` unless the caller already set one.
+   Raw ``bytes`` are sent as-is with no Content-Type override.
+8. Scheme guard -- only http/https URLs are accepted. file://, ftp://,
+   etc. raise ValueError up front so ``clickwork.http`` can't be turned
+   into a generic URL fetcher by untrusted input.
+9. Empty-list allowlist fails closed -- ``allowed_hosts=[]`` raises
+   ValueError ("pass None to disable") rather than silently disabling
+   the check. An empty list at runtime is almost always a config bug.
 
 Every test mocks ``urllib.request.urlopen`` -- no real network traffic.
 """
@@ -384,6 +392,71 @@ class TestAllowedHosts:
             result = http.get("https://wherever.example/", allowed_hosts=None)
 
         assert result == {}
+
+    def test_allowed_hosts_empty_list_fails_closed(self):
+        """``allowed_hosts=[]`` raises ValueError instead of silently skipping.
+
+        WHY: an empty list at runtime is almost always a config bug (an
+        env var that expanded to ``""``, a TOML entry that parsed empty,
+        etc.). Earlier drafts treated ``[]`` the same as ``None`` (skip)
+        which would turn a misconfiguration into a silent security
+        regression -- every host suddenly allowed. Fail closed with a
+        clear "pass None to disable" message so the caller can tell
+        which interpretation they wanted.
+        """
+        import pytest
+        from clickwork import http
+
+        # If the allowlist DID skip (the pre-fix behaviour), urlopen
+        # would be called -- wiring the mock to raise if it is called
+        # pins that the check fires BEFORE any network activity.
+        def _urlopen_must_not_run(*args, **kwargs):
+            raise AssertionError(
+                "urlopen was called despite empty allowed_hosts; the "
+                "allowlist should have failed closed first."
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_urlopen_must_not_run):
+            with pytest.raises(ValueError, match="empty list"):
+                http.get("https://api.cloudflare.com/", allowed_hosts=[])
+
+    def test_rejects_non_http_scheme_file(self):
+        """file:// URLs are rejected before any urlopen call.
+
+        WHY: urllib.request.urlopen happily follows file:// (and ftp://
+        etc.) and reads the local filesystem. A clickwork.http caller
+        accepting URLs from user input or config would otherwise turn
+        this into a local-file-read primitive. The scheme guard makes
+        the "HTTP client" contract enforceable.
+        """
+        import pytest
+        from clickwork import http
+
+        def _urlopen_must_not_run(*args, **kwargs):
+            raise AssertionError(
+                "urlopen was called despite non-http scheme; the scheme "
+                "check should have fired first."
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_urlopen_must_not_run):
+            with pytest.raises(ValueError, match="scheme"):
+                http.get("file:///etc/passwd")
+
+    def test_rejects_non_http_scheme_ftp(self):
+        """ftp:// URLs are also rejected by the scheme guard.
+
+        Same reason as file://; documented separately so nobody later
+        decides "ftp is fine actually" without noticing the test.
+        """
+        import pytest
+        from clickwork import http
+
+        def _urlopen_must_not_run(*args, **kwargs):
+            raise AssertionError("urlopen should not have been called")
+
+        with patch("urllib.request.urlopen", side_effect=_urlopen_must_not_run):
+            with pytest.raises(ValueError, match="scheme"):
+                http.get("ftp://example.com/payload")
 
 
 # ---------------------------------------------------------------------------

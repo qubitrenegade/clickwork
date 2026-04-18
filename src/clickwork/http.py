@@ -179,21 +179,50 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
 
     Args:
         url: The target URL to validate.
-        allowed_hosts: None to skip, or a list of acceptable hostnames.
+        allowed_hosts: None to skip, or a non-empty list of acceptable
+            hostnames. An empty list is rejected as a config bug -- see
+            Raises.
 
     Raises:
         ValueError: If ``allowed_hosts`` is populated and the URL's host
-            doesn't match any entry. ``ValueError`` rather than
-            :class:`HttpError` because no HTTP response exists yet --
-            the request never left the process.
+            doesn't match any entry, OR if ``allowed_hosts`` is an empty
+            list, OR if the URL's scheme is not http/https. ``ValueError``
+            rather than :class:`HttpError` because no HTTP response
+            exists yet -- the request never left the process.
     """
-    if not allowed_hosts:
-        # ``None`` or empty list both mean "skip the check". Empty list is
-        # treated as a no-op rather than "deny everything" because an empty
-        # list arriving at runtime is almost always a config bug, not an
-        # explicit policy; failing open with a clear "you probably meant
-        # None" story is safer than silently blocking every call.
+    # Scheme guard. urlopen() will happily follow file:// and ftp://, which
+    # is a nasty surprise for callers accepting URLs from user input or
+    # config -- "HTTP client" should refuse to be turned into a generic
+    # URL fetcher. Reject anything that isn't http or https up front so
+    # the rest of the pipeline can assume we're actually making an HTTP
+    # request.
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"URL {url!r} uses scheme {scheme!r}; clickwork.http only "
+            "supports http and https. Accepting arbitrary URL schemes "
+            "from user input is a footgun (file://, ftp://, etc.). If "
+            "you genuinely need non-HTTP fetch, use urllib directly."
+        )
+
+    if allowed_hosts is None:
+        # Explicit opt-out: the caller said "no allowlist". Skip.
         return
+
+    if len(allowed_hosts) == 0:
+        # Fail CLOSED on an empty list. An empty allowed_hosts arriving at
+        # runtime is almost always a config bug (e.g. an environment
+        # variable that expanded to ""), and silently allowing every host
+        # in that case would turn a misconfiguration into a security
+        # regression. Callers who genuinely want to disable the check
+        # must pass ``None`` explicitly.
+        raise ValueError(
+            "allowed_hosts is an empty list; pass None to explicitly "
+            "disable the allowlist, or populate the list with the hosts "
+            "this call is permitted to reach. An empty list is rejected "
+            "because it's almost always a config bug and failing open "
+            "would be a silent security regression."
+        )
 
     hostname = urllib.parse.urlparse(url).hostname
     if hostname is None:
@@ -325,8 +354,12 @@ def _encode_body(
         # in ``headers``.
         return body
 
-    # JSON-type path. ``json.dumps`` handles dict/list/str/int/float/bool/None
-    # uniformly -- the JSONValue alias captures the whole surface.
+    # JSON-type path. ``json.dumps`` handles dict/list/str/int/float/bool
+    # uniformly. (A literal JSON ``null`` is NOT reachable here: Python's
+    # ``None`` was short-circuited above as "no request body at all" per
+    # the module contract. If a caller genuinely wants to send the bytes
+    # ``null`` as a JSON-encoded null body, they can pass ``b"null"``
+    # with their own Content-Type.)
     encoded = json.dumps(body).encode("utf-8")
     # Only set Content-Type if the caller didn't specify their own; this
     # lets people override with ``application/vnd.api+json`` etc.
