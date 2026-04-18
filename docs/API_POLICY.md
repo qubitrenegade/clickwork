@@ -77,6 +77,10 @@ as the symbol surface.
   Wave 4 issue #54) for the precedence table.
 - Global flag names installed by `create_cli()` (`--verbose`, `--quiet`,
   `--dry-run`, `--env`, `--yes`). Removing or renaming one is breaking.
+  `--version` / `-V` is also reserved at this level, but is only
+  installed when the caller passes `version=` or `package_name=` to
+  `create_cli()`; its presence is opt-in so existing CLIs opt in at
+  their own cadence.
 
 ## Private and unstable
 

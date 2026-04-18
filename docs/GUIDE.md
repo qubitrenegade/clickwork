@@ -99,7 +99,9 @@ python my-tool.py greet --help
 ```
 
 You get `--verbose`, `--quiet`, `--dry-run`, `--env`, and `--yes` for
-free. Every command inherits these global flags.
+free. Every command inherits these global flags. Pass `version=` or
+`package_name=` to `create_cli()` to also install `--version` / `-V`
+(see "Version flag" below).
 
 ## Using the Context
 
@@ -638,6 +640,21 @@ Highest priority wins:
 | `--dry-run` | Preview actions without executing |
 | `--env NAME` | Select config environment |
 | `--yes` / `-y` | Skip confirmation prompts |
+| `--version` / `-V` | Print the CLI's version string and exit (only installed if `create_cli()` receives `version=` or `package_name=`) |
+
+### Version flag
+
+`create_cli()` accepts two kwargs that opt into a `--version` / `-V`
+flag on the resulting group:
+
+- `version="1.2.3"` — the literal string to print.
+- `package_name="your-pypi-name"` — resolve via
+  `importlib.metadata.version(...)` at `create_cli()` call time; a
+  missing distribution raises `ValueError` so typos fail loud.
+
+When both are set, `version=` wins. When neither is set, `--version`
+is NOT installed so existing clickwork consumers see no change on
+upgrade.
 
 ### Public API
 
