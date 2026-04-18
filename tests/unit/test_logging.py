@@ -2,8 +2,10 @@
 
 The logging module configures Python's stdlib logging with consistent formatting,
 verbosity levels driven by CLI flags, and automatic color detection. It's the
-first thing the CLI sets up, so it must be reliable and have no side effects
-when imported.
+first thing the CLI sets up, so it must be reliable and avoid surprising
+import-time side effects; the only expected import-time behavior is attaching
+a ``NullHandler`` baseline to the ``clickwork`` logger (library convention --
+see the module docstring in ``clickwork/_logging.py`` for the rationale).
 
 ## Host-preserving behavior (1.0, #43)
 
@@ -53,7 +55,14 @@ def reset_logging():
 
 
 class TestSetupLogging:
-    """setup_logging() configures the root logger based on CLI verbosity flags."""
+    """setup_logging() configures the named logger (not root) based on CLI verbosity flags.
+
+    These tests predate the 1.0 host-preserving rewrite. They only check
+    return-value attributes (``logger.level``, formatter choice, etc.),
+    so they didn't need updating for the new host-preserving behavior.
+    See ``TestHostPreservingBehavior`` below for the root-touches-nothing
+    assertions.
+    """
 
     def test_default_is_warning_level(self, reset_logging):
         """With no flags, only warnings and above should show."""

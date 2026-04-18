@@ -52,7 +52,13 @@ import sys
 # propagation and reach this handler implicitly; we don't need to attach
 # a separate ``NullHandler`` to each descendant.
 _clickwork_logger = logging.getLogger("clickwork")
-_clickwork_logger.addHandler(logging.NullHandler())
+# Idempotent NullHandler attach: in reload-heavy test harnesses (or any
+# environment that re-imports clickwork), unconditionally appending here
+# would accumulate duplicate NullHandlers across imports. A single
+# NullHandler is enough -- they're no-op -- so skip the append when one
+# is already on the logger.
+if not any(isinstance(h, logging.NullHandler) for h in _clickwork_logger.handlers):
+    _clickwork_logger.addHandler(logging.NullHandler())
 # Explicit for clarity even though ``True`` is the stdlib default -- we
 # want readers of this file to see, without spelunking, that records flow
 # up to the root logger where a host handler (if installed) can pick them
@@ -148,10 +154,28 @@ def setup_logging(
             logger.addHandler(logging.NullHandler())
 
         if host_configured:
-            # Host owns output. We've set level + NullHandler; records
-            # propagate up to the host's root handler. Do NOT attach a
-            # StreamHandler -- that's what causes the duplicate-output
-            # bug this rewrite exists to fix (#43).
+            # Host owns output. Before returning, evict any
+            # clickwork-owned stderr ``StreamHandler`` that an earlier
+            # bare-root call to ``setup_logging()`` may have attached.
+            # Without this eviction, a sequence of
+            #   setup_logging()              # bare root -> attach stderr handler
+            #   logging.basicConfig()        # host takes over root
+            #   setup_logging()              # still attached to our handler
+            # produces duplicate output again (the clickwork stderr handler
+            # AND the propagated record reaching the host's root handler).
+            # We remove only stderr StreamHandlers -- NullHandler is fine
+            # to leave in place (no output) and a host-attached handler on
+            # the clickwork logger is not ours to evict.
+            for existing in list(logger.handlers):
+                if (
+                    isinstance(existing, logging.StreamHandler)
+                    and not isinstance(existing, logging.NullHandler)
+                    and getattr(existing, "stream", None) is sys.stderr
+                ):
+                    logger.removeHandler(existing)
+            # Records propagate up to the host's root handler. Do NOT
+            # attach a StreamHandler -- that's what caused the
+            # duplicate-output bug this rewrite exists to fix (#43).
             return
 
         # Standalone CLI mode: no host handler, so clickwork is
