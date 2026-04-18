@@ -48,7 +48,7 @@ every "print this thing" surface a clickwork user is likely to hit. It
 uses `__slots__`, so there's no `__dict__` to leak the value; `vars(s)`
 on a `Secret` raises `TypeError` rather than exposing it. Pickling a
 `Secret` is blocked outright (`__reduce__` raises `TypeError`), so
-serialising secrets to disk or the wire is a hard error rather than a
+serializing secrets to disk or the wire is a hard error rather than a
 "helpfully" redacted emission. The single documented escape hatch is
 `.get()`, which is trivial to grep for in review.
 
@@ -150,12 +150,17 @@ argv lists, never `bash -c`. See footgun #10.
 
 ### Cross-host credential theft on opt-out
 
-Callers can override the no-redirect policy (by not using
-`clickwork.http`) or call with `allowed_hosts=None` (the default).
-Both are legitimate in some cases, but both mean the caller has taken
-responsibility for the consequences. A misconfigured bearer token
-forwarded across a 3xx to an attacker-controlled host is not
-something clickwork can prevent once the allowlist is removed.
+The allowlist and the no-redirect policy are **independent controls**.
+`allowed_hosts=None` (the default) disables only the allowlist --
+the no-redirect opener still refuses to follow 3xx responses, so a
+hostile server can't redirect an authenticated request to an
+attacker-controlled host just because the caller didn't pin an
+allowlist. Opting out of the no-redirect policy requires stepping
+outside `clickwork.http` entirely (use `urllib.request.urlopen`
+directly or install a custom opener). A caller who does both --
+skips the allowlist AND bypasses the no-redirect opener -- has
+taken responsibility for cross-host credential forwarding
+themselves; clickwork has no way to protect that configuration.
 
 ## Threat model assumptions
 
