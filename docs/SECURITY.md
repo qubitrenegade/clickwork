@@ -43,10 +43,14 @@ Passing a `Secret` instance directly in the argv list raises
 ### Secrets leaking in logs
 
 The `Secret` wrapper renders as `***` (or `Secret(***)` for `repr`) in
-every log line, f-string, `format()`, `vars()`, and pickle path. It has
-`__slots__` so there is no attribute bag to iterate. The single
-documented escape hatch is `.get()`, which is trivial to grep for in
-review.
+`str()`, f-strings, `format()`, and the dataclass `__repr__` path --
+every "print this thing" surface a clickwork user is likely to hit. It
+uses `__slots__`, so there's no `__dict__` to leak the value; `vars(s)`
+on a `Secret` raises `TypeError` rather than exposing it. Pickling a
+`Secret` is blocked outright (`__reduce__` raises `TypeError`), so
+serialising secrets to disk or the wire is a hard error rather than a
+"helpfully" redacted emission. The single documented escape hatch is
+`.get()`, which is trivial to grep for in review.
 
 `run_with_secrets` emits exactly one log line per subprocess with every
 env var value redacted. Secret-sourced entries render as
