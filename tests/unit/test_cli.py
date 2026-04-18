@@ -315,6 +315,183 @@ class TestCreateCli:
         assert received["bucket"] == "from-config"
 
 
+class TestEnableParentPackageImports:
+    """create_cli(enable_parent_package_imports=True) inserts commands_dir.parent.parent into sys.path.
+
+    WHY this feature exists: plugin authors want their command files to be able
+    to ``from tools.lib.X import Y`` without having to add sys.path boilerplate
+    in their CLI entry script. When ``enable_parent_package_imports=True`` (opt-in), the
+    factory prepends the resolved GRANDPARENT of ``commands_dir`` (i.e., the
+    project root that contains ``tools/`` as a package) to ``sys.path`` so
+    command modules can import the parent package (``tools``) and its siblings.
+
+    Why grandparent and not parent: making ``tools/`` importable as a package
+    (so ``import tools`` or ``from tools.lib.X import Y`` works) requires the
+    directory that *contains* ``tools/`` to be on sys.path -- that's
+    ``commands_dir.parent.parent``. Inserting just ``commands_dir.parent``
+    would enable ``import lib`` style sibling imports, which is a less useful
+    feature than what issue #15 called for.
+
+    sys.path isolation: each test snapshots and restores ``sys.path`` via
+    ``monkeypatch.setattr`` to avoid leaking mutations across the suite.
+    monkeypatch auto-restores when the test finishes, which is the cleanest
+    reader pattern available in pytest.
+    """
+
+    def test_enable_parent_package_imports_false_by_default_does_not_modify_sys_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Default behaviour must leave sys.path untouched.
+
+        WHY: existing consumers of create_cli() rely on sys.path staying
+        exactly as they configured it. The new kwarg is opt-in (defaults to
+        False) so we don't change import resolution for anyone unless they
+        explicitly ask for the auto-insertion behaviour.
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch so any mutation is auto-restored.
+        # list(sys.path) copies the contents so our snapshot isn't the live
+        # reference Click/whatever else might mutate during the call.
+        monkeypatch.setattr("sys.path", list(sys.path))
+        before = list(sys.path)
+
+        create_cli(name="t", commands_dir=tmp_path)
+
+        assert sys.path == before, (
+            f"sys.path changed even though enable_parent_package_imports defaulted False: "
+            f"before={before!r}, after={sys.path!r}"
+        )
+
+    def test_enable_parent_package_imports_true_inserts_commands_dir_grandparent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """With enable_parent_package_imports=True, sys.path[0] must be the resolved grandparent.
+
+        WHY grandparent: to make ``commands_dir.parent`` importable as a
+        package (e.g. ``import tools``), ``commands_dir.parent.parent`` has
+        to be on sys.path. This test pins that relationship so a future
+        refactor can't silently regress to the easier-but-wrong "insert
+        parent" behavior -- see the module comment for the full rationale.
+
+        WHY the resolved path: the implementation calls .resolve() so
+        different unresolved spellings of the same directory (relative
+        paths from different CWDs, symlinks, etc.) don't cause duplicate
+        entries. We assert against the resolved absolute path to match
+        what the implementation inserts.
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch for auto-restoration.
+        monkeypatch.setattr("sys.path", list(sys.path))
+
+        # Build a realistic layout: tmp_path / "project" / "tools" / "commands".
+        # The commands_dir here is .../project/tools/commands, so the
+        # grandparent is .../project. We assert sys.path[0] matches that.
+        project_root = tmp_path / "project"
+        tools_dir = project_root / "tools"
+        commands_dir = tools_dir / "commands"
+        commands_dir.mkdir(parents=True)
+
+        create_cli(name="t", commands_dir=commands_dir, enable_parent_package_imports=True)
+
+        expected = str(commands_dir.parent.parent.resolve())
+        # Sanity check on the test's own assumptions: the resolved
+        # grandparent of tools/commands must equal the resolved project
+        # root we just built. If this assertion fails, the test is
+        # comparing the wrong reference value.
+        assert expected == str(project_root.resolve())
+        assert sys.path[0] == expected, (
+            f"Expected resolved grandparent at sys.path[0]: "
+            f"expected={expected!r}, got sys.path[:3]={sys.path[:3]!r}"
+        )
+
+    def test_enable_parent_package_imports_idempotent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Calling create_cli() twice must not insert the path twice.
+
+        WHY: plugin authors may instantiate create_cli() more than once in
+        tests or REPL sessions. Each call blindly prepending would bloat
+        sys.path unboundedly and shadow earlier entries with stale copies.
+        The implementation must dedupe on the resolved absolute path.
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch for auto-restoration.
+        monkeypatch.setattr("sys.path", list(sys.path))
+
+        project_root = tmp_path / "project"
+        commands_dir = project_root / "tools" / "commands"
+        commands_dir.mkdir(parents=True)
+
+        create_cli(name="t", commands_dir=commands_dir, enable_parent_package_imports=True)
+        create_cli(name="t", commands_dir=commands_dir, enable_parent_package_imports=True)
+
+        expected = str(commands_dir.parent.parent.resolve())
+        # count() on the list tells us how many times the resolved path appears.
+        # Exactly one is the correct answer -- the first insert wins, the
+        # second call is a no-op because the path is already present.
+        assert sys.path.count(expected) == 1, (
+            f"Expected resolved grandparent to appear exactly once in sys.path; "
+            f"found {sys.path.count(expected)} occurrences in {sys.path!r}"
+        )
+
+    def test_enable_parent_package_imports_inserts_before_discover_commands(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """sys.path must be updated BEFORE discover_commands() runs.
+
+        WHY this test exists: a refactor that moves the sys.path insertion
+        to *after* discover_commands() would silently break the feature --
+        command modules that import from the parent package (``from tools.lib...``)
+        would fail at discovery time with ModuleNotFoundError. The unit
+        tests above only assert the final state of sys.path, not the
+        ordering relative to discovery.
+
+        We pin the ordering by patching discover_commands() to snapshot
+        sys.path at the moment it's called. If the snapshot already
+        contains the resolved grandparent, the insertion happened first
+        (correct); if not, the insertion happened later (regression).
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch for auto-restoration.
+        monkeypatch.setattr("sys.path", list(sys.path))
+
+        project_root = tmp_path / "project"
+        commands_dir = project_root / "tools" / "commands"
+        commands_dir.mkdir(parents=True)
+        expected_inserted = str(commands_dir.parent.parent.resolve())
+
+        # Capture sys.path[0] at the instant discover_commands() is
+        # entered. We use monkeypatch on the module-level symbol that
+        # create_cli() actually calls, so our stub replaces the real
+        # function for the duration of this test.
+        captured: dict = {}
+
+        def _spy_discover_commands(**kwargs):
+            captured["sys_path_first_entry_at_discovery"] = sys.path[0]
+            return {}  # no commands -- we only care about the ordering
+
+        monkeypatch.setattr("clickwork.cli.discover_commands", _spy_discover_commands)
+
+        create_cli(
+            name="t",
+            commands_dir=commands_dir,
+            enable_parent_package_imports=True,
+        )
+
+        assert captured.get("sys_path_first_entry_at_discovery") == expected_inserted, (
+            f"Expected sys.path[0] to equal {expected_inserted!r} at the moment "
+            f"discover_commands() was called (i.e., the insertion happened "
+            f"BEFORE discovery), but observed "
+            f"{captured.get('sys_path_first_entry_at_discovery')!r}. "
+            "A regression moving the sys.path insertion after discover_commands() "
+            "would make parent-package imports fail at module-discovery time."
+        )
+
+
 class TestConvenienceMethods:
     """Convenience methods on CliContext are bound by create_cli()."""
 

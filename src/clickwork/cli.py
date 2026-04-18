@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import os
+import sys
 from pathlib import Path
 
 import click
@@ -163,6 +164,7 @@ def create_cli(
     repo_config_path: Path | None = None,
     *,
     description: str | None = None,
+    enable_parent_package_imports: bool = False,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -191,10 +193,63 @@ def create_cli(
             developer-only implementation detail. Plugin authors should
             pass something like "Admin CLI for orbit" to give users a
             one-line summary of what the CLI does.
+        enable_parent_package_imports: When True (and ``commands_dir`` is
+            provided), prepend ``commands_dir.parent.parent`` (resolved)
+            to ``sys.path`` so command files can import the parent
+            package. For example, with the conventional layout
+            ``project_root/tools/commands/*.py`` (where ``commands_dir``
+            points at ``project_root/tools/commands``), this makes the
+            ``tools`` package importable, so command files can write
+            ``from tools.lib.X import Y`` without the CLI entry script
+            having to manually poke sys.path. *Note:* we insert the
+            **grandparent** of ``commands_dir`` -- the directory that
+            *contains* the parent package -- not the parent itself; see
+            the implementation comment below for why. Defaults to False
+            (opt-in) so existing callers experience no change in import
+            resolution. Keyword-only to keep the positional signature
+            stable. Dedup uses the resolved path against ``sys.path``'s
+            existing entries; repeated calls with the same ``commands_dir``
+            don't stack duplicate entries (known limitation: the dedup
+            does not normalize *existing* ``sys.path`` entries that were
+            added via relative/unresolved spellings elsewhere).
 
     Returns:
         A configured Click group with all discovered commands registered.
     """
+
+    # Optionally make commands_dir's parent package importable.
+    #
+    # WHY: plugin authors typically lay out their project as
+    #
+    #     project_root/
+    #       tools/           (commands_dir.parent)
+    #         my_cli         (entry script)
+    #         commands/      (commands_dir -- per-command .py files)
+    #         lib/           (shared helpers)
+    #
+    # and want their command files to write ``from tools.lib.X import Y``
+    # without the entry script prepending project_root to sys.path.
+    # Setting ``enable_parent_package_imports=True`` does that prepend here, once,
+    # at CLI-construction time.
+    #
+    # WHY grandparent, not parent: to make ``tools/`` importable *as a
+    # package* (enabling ``from tools.lib.X import Y``), the directory
+    # that CONTAINS ``tools/`` has to be on sys.path -- that's
+    # ``commands_dir.parent.parent`` (project_root). Inserting just
+    # ``commands_dir.parent`` would only enable ``import lib`` (sibling
+    # top-level imports), which is a different, less useful feature
+    # than what issue #15 asked for.
+    #
+    # WHY .resolve() + dedup: the same directory can be reached via
+    # different strings -- ``./project`` vs ``/abs/path/project`` vs a
+    # symlinked path -- depending on the caller's CWD. Resolving to the
+    # absolute canonical path before comparing against sys.path ensures
+    # repeat calls don't stack duplicate entries that would shadow each
+    # other during import resolution.
+    if enable_parent_package_imports and commands_dir is not None:
+        project_root = str(commands_dir.parent.parent.resolve())
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
 
     # Resolve the help text shown by ``<cli> --help``.
     #
