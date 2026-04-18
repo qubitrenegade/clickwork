@@ -220,6 +220,7 @@ def _dispatch_request(request: urllib.request.Request, *, timeout: float):
     """
     return _opener.open(request, timeout=timeout)
 
+
 def _sanitize_url_for_log(url: str) -> str:
     """Strip credentials and query string from a URL for safe logging.
 
