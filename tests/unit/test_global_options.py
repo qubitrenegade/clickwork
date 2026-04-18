@@ -582,9 +582,9 @@ class TestAddGlobalOptionEntryPointPropagation:
             f"Expected UsageError (exit 2) on nested-subcommand flag collision; "
             f"got exit={result.exit_code}, output={result.output!r}"
         )
-        assert "sub" in result.output, (
-            f"Error message must name the colliding subcommand path; got output={result.output!r}"
-        )
+        assert (
+            "sub" in result.output
+        ), f"Error message must name the colliding subcommand path; got output={result.output!r}"
         assert "--json" in result.output
 
 

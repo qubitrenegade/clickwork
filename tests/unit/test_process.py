@@ -404,9 +404,9 @@ class TestRunWithSecrets:
 
         # Error message must reference the position (index 1) so the
         # caller knows which arg to fix.
-        assert "1" in str(exc_info.value), (
-            f"Expected error to name the offending position, got: {exc_info.value!r}"
-        )
+        assert "1" in str(
+            exc_info.value
+        ), f"Expected error to name the offending position, got: {exc_info.value!r}"
         # The raw secret value must NOT appear anywhere in the error -- a
         # regression here would mean our "don't leak secrets" helper leaks
         # secrets in its own rejection path.
@@ -511,9 +511,9 @@ class TestRunWithSecrets:
 
         # Flatten all captured log messages for substring checks.
         all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
-        assert "<redacted>" in all_log_text, (
-            f"Expected '<redacted>' marker in log output, got: {all_log_text!r}"
-        )
+        assert (
+            "<redacted>" in all_log_text
+        ), f"Expected '<redacted>' marker in log output, got: {all_log_text!r}"
         # The env-var NAME stays visible so operators can see which keys
         # were set.
         assert "K" in all_log_text
@@ -556,9 +556,9 @@ class TestRunWithSecrets:
             )
 
         all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
-        assert accidental_plaintext not in all_log_text, (
-            f"Non-secret env value leaked into log: {all_log_text!r}"
-        )
+        assert (
+            accidental_plaintext not in all_log_text
+        ), f"Non-secret env value leaked into log: {all_log_text!r}"
         # Non-secret VALUES also hidden: "us-east-1" must not appear either.
         assert "us-east-1" not in all_log_text
         # But the NAMES must still be visible so operators can see shape.
