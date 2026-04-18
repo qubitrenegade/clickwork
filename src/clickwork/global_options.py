@@ -52,7 +52,7 @@ from typing import Any
 
 import click
 # NOTE on the click.core import: at the project's declared minimum
-# Click version (``click>=8.1`` per pyproject.toml) ``ParameterSource``
+# Click version (``click>=8.2`` per pyproject.toml) ``ParameterSource``
 # lives at ``click.core.ParameterSource`` and is NOT re-exported to
 # top-level. ``click.ParameterSource`` raises AttributeError on every
 # Click 8.x release currently shipping (verified on 8.3.2, which is

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Sample plugin for clickwork -- test fixture and reference implementation"
 requires-python = ">=3.11"
 dependencies = [
-    "click>=8.1",
+    "click>=8.2",
     "clickwork",
 ]
 

@@ -529,11 +529,13 @@ assert "normal line" in result.stderr         # NO -- would fail
 > `CliRunner.__init__` that used to toggle whether stderr was folded
 > into `output`. Post-removal, `result.stdout` / `result.stderr` are
 > populated independently and `result.output` keeps providing the
-> interleaved form. clickwork declares `click>=8.1`, so in principle
-> a consumer could still be on 8.1 where the kwarg works. If you
-> are reading an older snippet that uses `CliRunner(mix_stderr=False)`,
-> check the Click version in your test environment: 8.2+ will raise
-> `TypeError`; older releases still accept it.
+> interleaved form. clickwork declares `click>=8.2` so this guidance
+> always applies: snippets in older tutorials that use
+> `CliRunner(mix_stderr=False)` will raise `TypeError`, and the
+> `result.stderr` advice above cannot fall back to Click 8.1 where,
+> under the default `CliRunner()` configuration (streams mixed unless
+> `mix_stderr=False` was passed), it would have raised
+> `ValueError: stderr not separately captured`.
 
 ### Unit Testing with CliRunner
 
