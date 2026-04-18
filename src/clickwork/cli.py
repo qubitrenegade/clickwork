@@ -164,7 +164,7 @@ def create_cli(
     repo_config_path: Path | None = None,
     *,
     description: str | None = None,
-    add_parent_to_path: bool = False,
+    enable_parent_package_imports: bool = False,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -193,7 +193,7 @@ def create_cli(
             developer-only implementation detail. Plugin authors should
             pass something like "Admin CLI for orbit" to give users a
             one-line summary of what the CLI does.
-        add_parent_to_path: When True (and ``commands_dir`` is provided),
+        enable_parent_package_imports: When True (and ``commands_dir`` is provided),
             prepend ``commands_dir.parent.parent`` (resolved) to
             ``sys.path`` so command files can ``from your_project.lib.X
             import Y`` without the CLI entry script having to manually
@@ -224,7 +224,7 @@ def create_cli(
     #
     # and want their command files to write ``from tools.lib.X import Y``
     # without the entry script prepending project_root to sys.path.
-    # Setting ``add_parent_to_path=True`` does that prepend here, once,
+    # Setting ``enable_parent_package_imports=True`` does that prepend here, once,
     # at CLI-construction time.
     #
     # WHY grandparent, not parent: to make ``tools/`` importable *as a
@@ -241,7 +241,7 @@ def create_cli(
     # absolute canonical path before comparing against sys.path ensures
     # repeat calls don't stack duplicate entries that would shadow each
     # other during import resolution.
-    if add_parent_to_path and commands_dir is not None:
+    if enable_parent_package_imports and commands_dir is not None:
         project_root = str(commands_dir.parent.parent.resolve())
         if project_root not in sys.path:
             sys.path.insert(0, project_root)

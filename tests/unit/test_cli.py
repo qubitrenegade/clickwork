@@ -315,12 +315,12 @@ class TestCreateCli:
         assert received["bucket"] == "from-config"
 
 
-class TestAddParentToPath:
-    """create_cli(add_parent_to_path=True) inserts commands_dir.parent.parent into sys.path.
+class TestEnableParentPackageImports:
+    """create_cli(enable_parent_package_imports=True) inserts commands_dir.parent.parent into sys.path.
 
     WHY this feature exists: plugin authors want their command files to be able
     to ``from tools.lib.X import Y`` without having to add sys.path boilerplate
-    in their CLI entry script. When ``add_parent_to_path=True`` (opt-in), the
+    in their CLI entry script. When ``enable_parent_package_imports=True`` (opt-in), the
     factory prepends the resolved GRANDPARENT of ``commands_dir`` (i.e., the
     project root that contains ``tools/`` as a package) to ``sys.path`` so
     command modules can import the parent package (``tools``) and its siblings.
@@ -338,7 +338,7 @@ class TestAddParentToPath:
     reader pattern available in pytest.
     """
 
-    def test_add_parent_to_path_false_by_default_does_not_modify_sys_path(
+    def test_enable_parent_package_imports_false_by_default_does_not_modify_sys_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         """Default behaviour must leave sys.path untouched.
@@ -359,14 +359,14 @@ class TestAddParentToPath:
         create_cli(name="t", commands_dir=tmp_path)
 
         assert sys.path == before, (
-            f"sys.path changed even though add_parent_to_path defaulted False: "
+            f"sys.path changed even though enable_parent_package_imports defaulted False: "
             f"before={before!r}, after={sys.path!r}"
         )
 
-    def test_add_parent_to_path_true_inserts_commands_dir_grandparent(
+    def test_enable_parent_package_imports_true_inserts_commands_dir_grandparent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
-        """With add_parent_to_path=True, sys.path[0] must be the resolved grandparent.
+        """With enable_parent_package_imports=True, sys.path[0] must be the resolved grandparent.
 
         WHY grandparent: to make ``commands_dir.parent`` importable as a
         package (e.g. ``import tools``), ``commands_dir.parent.parent`` has
@@ -393,7 +393,7 @@ class TestAddParentToPath:
         commands_dir = tools_dir / "commands"
         commands_dir.mkdir(parents=True)
 
-        create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
+        create_cli(name="t", commands_dir=commands_dir, enable_parent_package_imports=True)
 
         expected = str(commands_dir.parent.parent.resolve())
         # Sanity check on the test's own assumptions: the resolved
@@ -406,7 +406,7 @@ class TestAddParentToPath:
             f"expected={expected!r}, got sys.path[:3]={sys.path[:3]!r}"
         )
 
-    def test_add_parent_to_path_idempotent(
+    def test_enable_parent_package_imports_idempotent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         """Calling create_cli() twice must not insert the path twice.
@@ -425,8 +425,8 @@ class TestAddParentToPath:
         commands_dir = project_root / "tools" / "commands"
         commands_dir.mkdir(parents=True)
 
-        create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
-        create_cli(name="t", commands_dir=commands_dir, add_parent_to_path=True)
+        create_cli(name="t", commands_dir=commands_dir, enable_parent_package_imports=True)
+        create_cli(name="t", commands_dir=commands_dir, enable_parent_package_imports=True)
 
         expected = str(commands_dir.parent.parent.resolve())
         # count() on the list tells us how many times the resolved path appears.
