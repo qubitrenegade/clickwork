@@ -53,7 +53,15 @@ def measure_once() -> float:
     # ``check=True`` so an import failure (e.g. the package isn't
     # installed in the active env) fails the benchmark loudly instead
     # of silently reporting interpreter-only startup time.
-    subprocess.run(IMPORT_CMD, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    #
+    # We deliberately do NOT capture stderr here.  If ``import clickwork``
+    # explodes (SyntaxError in a module, missing transitive dep, etc.)
+    # the traceback is the single most useful thing a CI reader can see.
+    # Swallowing it into a ``CalledProcessError`` with no output makes
+    # "bench failed" look like a flaky benchmark when it's really a real
+    # import bug.  Letting stderr pass through to our stderr (which CI
+    # shows inline) surfaces the actual failure.
+    subprocess.run(IMPORT_CMD, check=True, stdout=subprocess.DEVNULL)
     end = time.perf_counter_ns()
     return (end - start) / 1_000_000.0  # ns -> ms
 
@@ -78,8 +86,14 @@ def run_benchmark(runs: int) -> dict[str, object]:
         # quantile buckets.  For small N this is approximate but that's
         # fine — we only use it to spot heavy-tail regressions in the
         # step summary, not as the pass/fail criterion.
+        #
+        # ``method='inclusive'`` is required here: the default
+        # ``method='exclusive'`` needs at least ``n + 1`` samples (21
+        # for n=20) and raises StatisticsError on our default 7-run
+        # batch.  Inclusive mode interpolates endpoints from the data
+        # itself, so it works with any N >= 2.
         "p95_ms": (
-            statistics.quantiles(samples_sorted, n=20)[18]
+            statistics.quantiles(samples_sorted, n=20, method="inclusive")[18]
             if len(samples_sorted) >= 2
             else samples_sorted[0]
         ),
@@ -94,6 +108,11 @@ def compare_to_baseline(current: dict[str, object], baseline_path: Path) -> int:
 
     Prints a short diff so CI logs + reviewers can see both numbers at
     a glance without having to crack open the JSON.
+
+    All human-readable output goes to **stderr**, not stdout.  Stdout is
+    reserved for the machine-readable JSON emitted by ``main()`` so the
+    CI step summary can wrap stdout in a ``json`` fence and get valid
+    JSON rather than a mix of JSON and prose.
     """
     baseline = json.loads(baseline_path.read_text())
     current_ms = float(current["import_ms"])  # type: ignore[arg-type]
@@ -102,9 +121,12 @@ def compare_to_baseline(current: dict[str, object], baseline_path: Path) -> int:
     # happen in practice but cheap insurance against ZeroDivisionError).
     delta_pct = ((current_ms - baseline_ms) / max(1e-9, baseline_ms)) * 100.0
 
-    print(f"baseline: {baseline_ms:.2f} ms  (from {baseline_path})")
-    print(f"current:  {current_ms:.2f} ms")
-    print(f"delta:    {delta_pct:+.1f}%  (threshold: +{(REGRESSION_THRESHOLD - 1) * 100:.0f}%)")
+    print(f"baseline: {baseline_ms:.2f} ms  (from {baseline_path})", file=sys.stderr)
+    print(f"current:  {current_ms:.2f} ms", file=sys.stderr)
+    print(
+        f"delta:    {delta_pct:+.1f}%  (threshold: +{(REGRESSION_THRESHOLD - 1) * 100:.0f}%)",
+        file=sys.stderr,
+    )
 
     if current_ms > baseline_ms * REGRESSION_THRESHOLD:
         print(
@@ -146,8 +168,12 @@ def main() -> int:
 
     result = run_benchmark(args.runs)
 
-    # Emit JSON first so the number is always visible, even when we go
-    # on to write a baseline or fail a comparison.
+    # Emit JSON to **stdout** first so the number is always visible,
+    # even when we go on to write a baseline or fail a comparison.
+    # Stdout is kept pure-JSON so ``bench.yml``'s step summary can wrap
+    # it in a ```json`` fence and downstream tooling (jq, etc.) can
+    # parse it without stripping prose.  Anything human-readable goes
+    # to stderr.
     print(json.dumps(result, indent=2))
 
     if args.update_baseline is not None:
@@ -155,7 +181,9 @@ def main() -> int:
         # Trailing newline is a common git-friendly convention and
         # keeps ``cat`` / diff output tidy.
         args.update_baseline.write_text(json.dumps(result, indent=2) + "\n")
-        print(f"wrote baseline to {args.update_baseline}")
+        # Human-readable confirmation goes to stderr so stdout stays
+        # pure JSON for ``--update-baseline`` runs too.
+        print(f"wrote baseline to {args.update_baseline}", file=sys.stderr)
 
     if args.baseline is not None:
         return compare_to_baseline(result, args.baseline)

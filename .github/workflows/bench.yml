@@ -20,26 +20,39 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        # Pinned to 3.13 (same as the CI matrix's "latest" rung) so the
-        # baseline number is comparable across runs. If we ever bump
-        # this, the baseline must be re-captured in the same PR.
-        run: uv python install 3.13
+        # Pinned to an exact patch version (3.13.6) rather than "3.13"
+        # because baseline.json captures are patch-sensitive: we've
+        # observed ~1-2% drift per patch release from CPython startup
+        # changes alone. Floating to 3.13.x would bake that drift into
+        # every PR delta and muddy the regression signal. The baseline
+        # records the exact Python version it was captured on; this
+        # pin must match that. If we bump the pin, the baseline must
+        # be re-captured in the same PR.
+        run: uv python install 3.13.6
 
       # Editable install so the benchmark loads *this* PR's clickwork
-      # source, not a released wheel. `uv pip install -e .` requires an
-      # active venv; `uv venv` creates one in-place.
-      - name: Create virtualenv
-        run: uv venv
-
-      - name: Install clickwork (editable)
-        run: uv pip install -e .
+      # source, not a released wheel. `uv sync` respects uv.lock so
+      # dependency versions are reproducible between the machine that
+      # captured baseline.json and CI — dependency drift could move
+      # import cost independently of our code changes, which would
+      # defeat the point of the regression check.  `--frozen` fails
+      # loudly if the lockfile is out of date rather than silently
+      # resolving new versions.
+      - name: Install clickwork (locked, editable)
+        run: uv sync --frozen
 
       - name: Run cold-start benchmark
         id: bench
-        # `uv run` uses the venv we just created. If the median regresses
-        # >20% relative to benchmarks/baseline.json the script exits 1
-        # and fails the job. The stdout JSON is tee'd so reviewers see
-        # the numbers in both the raw log and the step summary below.
+        # `uv run` uses the venv `uv sync` created. If the median
+        # regresses >20% relative to benchmarks/baseline.json the
+        # script exits 1 and fails the job.
+        #
+        # The script writes JSON to stdout and human-readable
+        # baseline/current/delta lines to stderr.  We `tee` only
+        # stdout into bench-output.txt so the step-summary file
+        # contains pure JSON (wrapped in a ```json fence below) —
+        # reviewers still see the human-readable context in the
+        # raw Actions log because stderr is interleaved there.
         run: |
           set -euo pipefail
           uv run python scripts/bench_coldstart.py \
@@ -49,7 +62,9 @@ jobs:
       - name: Publish results to step summary
         # Always run so reviewers can see the numbers even when the
         # regression gate fails — that's exactly when they're most
-        # useful.
+        # useful.  bench-output.txt is pure JSON (the script separates
+        # JSON on stdout from human-readable prose on stderr) so the
+        # ```json fence here wraps valid JSON.
         if: always()
         run: |
           {

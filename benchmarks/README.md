@@ -17,6 +17,38 @@ a warm-up. `min_ms` and `p95_ms` are the min and ~95th-percentile
 samples from the same batch; they're recorded for diagnostic context
 but the regression check only uses `import_ms` (the median).
 
+## Output channels (stdout vs stderr)
+
+`scripts/bench_coldstart.py` splits its output so machine-readable and
+human-readable consumers don't step on each other:
+
+- **stdout** is always **pure JSON** — the full result dict, exactly
+  what gets written to `baseline.json`. Pipe it to `jq`, `tee` it into
+  a file, feed it to another script; no prose will get mixed in.
+- **stderr** carries the human-readable context: the
+  `baseline: … / current: … / delta: …` diff when `--baseline` is
+  used, the `wrote baseline to …` confirmation when
+  `--update-baseline` is used, and the `REGRESSION: …` message when
+  the gate fires.
+
+So when running the script by hand you'll see the prose on your
+terminal and the JSON on its own line(s). If you want just the JSON,
+redirect stderr away:
+
+```bash
+python scripts/bench_coldstart.py --baseline benchmarks/baseline.json 2>/dev/null
+```
+
+If you want just the human-readable summary, swallow stdout instead:
+
+```bash
+python scripts/bench_coldstart.py --baseline benchmarks/baseline.json >/dev/null
+```
+
+The CI workflow relies on this split: it wraps stdout in a ` ```json `
+fence in the step summary (valid JSON inside the fence) while stderr
+shows up inline in the raw Actions log for at-a-glance context.
+
 The number represents **cold-start cost**: how long a user waits
 between hitting Enter on their `click`-based CLI and seeing the first
 byte of output. A regression here is immediately user-visible.
