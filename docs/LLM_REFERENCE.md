@@ -199,7 +199,7 @@ Why. Link out to helper docstrings or [GUIDE.md](GUIDE.md) for depth.
 
 **Pitfall:** asserting on `result.output` when you specifically want stdout-only or stderr-only content (`result.output` interleaves BOTH streams).
 **Instead:** assert on `result.stdout` or `result.stderr` directly.
-**Why:** on current Click (8.2+) `result.output` is stdout+stderr combined while `result.stdout` and `result.stderr` are populated independently; the older `CliRunner(mix_stderr=False)` kwarg referenced in some online snippets has been removed. See [GUIDE.md](GUIDE.md) "Testing commands with `clickwork.testing`" (lands on main via #16).
+**Why:** clickwork declares `click>=8.2`, where `result.output` is stdout+stderr combined while `result.stdout` and `result.stderr` are populated independently. The older `CliRunner(mix_stderr=False)` kwarg referenced in some online snippets was removed in 8.2 -- don't copy those. See [GUIDE.md](GUIDE.md) "Testing commands with `clickwork.testing`" (lands on main via #16).
 
 ### 4. URL-encoding query params
 
