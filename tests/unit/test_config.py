@@ -13,6 +13,7 @@ Key behaviors tested:
 - Secret safety (refuse secrets in repo config)
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -1002,6 +1003,250 @@ class TestUserConfigPermissions:
                 repo_config_path=repo_config,
                 user_config_path=user_config,
             )
+
+
+class TestInFileEnvPrecedence:
+    """Pin the in-file precedence rules for ``[default]`` vs ``[env.<name>]``.
+
+    clickwork's loader composes config from several layers (env var >
+    ``[env.<selected>]`` > ``[default]`` > user TOML). The broader layer
+    order is already exercised by ``TestLoadTomlConfig`` and
+    ``TestEnvVarResolution``. This class fills in the specific in-file
+    slice that the 1.0 roadmap (#52) flagged as a coverage gap: what
+    happens inside a single TOML file that defines both ``[default]``
+    and one or more ``[env.<name>]`` sections.
+
+    Each test uses ``tmp_path`` so the TOML lives in an isolated temp
+    directory -- no monkeypatching of ``Path.cwd()``, no global state.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_test_cli_env_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Remove any TEST_CLI_* env vars inherited from the developer's shell.
+
+        ``load_config`` gives auto-prefixed env vars the highest
+        precedence in the merge chain (``TEST_CLI_KEY`` wins over every
+        TOML source). If the developer running the tests has any such
+        var set, the merge assertions below would see unexpected values
+        and flap. This fixture is autouse on the class so every test in
+        TestInFileEnvPrecedence starts from a deterministic empty env.
+        """
+        for name in list(os.environ):
+            if name.startswith("TEST_CLI_"):
+                monkeypatch.delenv(name, raising=False)
+
+    def test_env_section_overrides_default_same_file(self, tmp_path: Path) -> None:
+        """A key defined in BOTH ``[default]`` and ``[env.<selected>]`` wins from env.
+
+        The canonical precedence check: when the operator selects an env
+        via ``load_config(env="staging")``, values under ``[env.staging]``
+        take priority over the same-named keys under ``[default]`` from
+        the same file. This is the whole reason the env-section feature
+        exists; locking it here prevents a future refactor from, e.g.,
+        merging sections in the wrong order.
+        """
+        from clickwork.config import load_config
+
+        # Single TOML file with the same key in both sections. [default]
+        # carries "X"; [env.staging] overrides with "Y". We then call
+        # load_config(env="staging") and expect "Y".
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text(
+            '[default]\nkey = "X"\n\n[env.staging]\nkey = "Y"\n',
+        )
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            env="staging",
+        )
+        assert config["key"] == "Y"
+
+    def test_default_fallthrough_when_env_section_missing_key(self, tmp_path: Path) -> None:
+        """Keys absent from ``[env.<selected>]`` fall through to ``[default]``.
+
+        The env section is an *overlay*, not a *replacement*. Operators
+        commonly put shared defaults (region, bucket-name prefix) in
+        ``[default]`` and only override the handful of values that differ
+        per environment in ``[env.<name>]``. The fallthrough is what makes
+        that ergonomic -- otherwise every env would have to re-declare
+        every shared key.
+        """
+        from clickwork.config import load_config
+
+        # [default] declares key1 only; [env.staging] declares key2 only.
+        # After merge, BOTH keys should be visible -- key1 via fallthrough,
+        # key2 from the env section.
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text(
+            '[default]\nkey1 = "a"\n\n[env.staging]\nkey2 = "b"\n',
+        )
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            env="staging",
+        )
+        assert config["key1"] == "a"
+        assert config["key2"] == "b"
+
+    def test_no_env_selected_uses_default_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without ``env=...``, ``[env.*]`` sections are invisible.
+
+        The env overlay only activates when an env is explicitly
+        selected (either via the ``env=`` kwarg or the
+        ``{PROJECT_NAME}_ENV`` fallback env var). If neither is set,
+        the loader must behave as if the ``[env.*]`` sections weren't
+        there at all -- otherwise a stray ``[env.staging]`` could leak
+        into unrelated invocations.
+        """
+        from clickwork.config import load_config
+
+        # Both sections present. Neither env= kwarg nor *_ENV env var is
+        # set, so [env.staging] should be ignored entirely.
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text(
+            '[default]\nkey = "from-default"\nstaging_only = "nope"\n\n'
+            '[env.staging]\nkey = "from-env-staging"\nextra = "staging-extra"\n',
+        )
+
+        # Isolate from any real ~/.config/test-cli/config.toml that the
+        # developer might have on disk, AND from a stale TEST_CLI_ENV
+        # environment variable in their shell. With env= omitted,
+        # load_config falls back to {PROJECT_NAME}_ENV to decide which
+        # section to read; if the developer has that set we'd see the
+        # wrong section and the assertions below would flap.
+        user_cfg = tmp_path / "user-config.toml"  # intentionally not created
+        monkeypatch.delenv("TEST_CLI_ENV", raising=False)
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            user_config_path=user_cfg,
+            # env= omitted intentionally -- that's the code path under test.
+        )
+        # [default] key wins because no env was selected.
+        assert config["key"] == "from-default"
+        # [default]-only keys are present.
+        assert config["staging_only"] == "nope"
+        # [env.staging]-only keys should NOT leak in when no env is active.
+        assert "extra" not in config
+
+    def test_nested_dotted_keys_respect_env_precedence(self, tmp_path: Path) -> None:
+        """Dotted-key overrides (e.g. ``cloudflare.account_id``) follow the same rule.
+
+        TOML parses ``cloudflare.account_id = "x"`` into a nested dict
+        ``{"cloudflare": {"account_id": "x"}}``, which the loader
+        flattens back to the dotted form before merging. Pins that the
+        flattening happens *inside each section* so ``[env.production]``
+        can override a nested ``[default]`` value cleanly, without the
+        two getting merged at the dict-tree level (which would produce
+        the wrong result for fields that differ only at the leaf).
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        # Dotted key in both sections. The env-section value must win.
+        config_file.write_text(
+            '[default]\ncloudflare.account_id = "dev"\n\n'
+            '[env.production]\ncloudflare.account_id = "prod"\n',
+        )
+
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            env="production",
+        )
+        assert config["cloudflare.account_id"] == "prod"
+
+    def test_unknown_env_name_raises_clear_error(self, tmp_path: Path) -> None:
+        """Selecting a non-existent env name is a fail-fast error.
+
+        WHY this matters: if the loader silently falls through to
+        ``[default]`` when ``env="production"`` doesn't match any
+        ``[env.production]`` section, the operator thinks they're on
+        production settings while actually running on dev defaults.
+        That's the classic "it worked on my machine" outcome we get
+        elsewhere by failing loud (required keys, unsafe file perms,
+        secrets-in-repo). The error message must name the missing env
+        AND list the envs that ARE defined, so the operator can pick
+        the right one or add the missing section without re-reading
+        the file.
+
+        Guardrail: if this test ever regresses to "silently returns
+        [default]", the fail-fast discipline has been weakened --
+        please restore it rather than relaxing this test.
+        """
+        from clickwork.config import ConfigError, load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        # Only [default] and [env.staging] exist; asking for "production"
+        # below must fail rather than silently fall through.
+        config_file.write_text(
+            '[default]\nkey = "d"\n\n[env.staging]\nkey = "s"\n',
+        )
+
+        # Isolate from any real user config at
+        # ``~/.config/test-cli/config.toml`` that the developer running
+        # the tests might have. Pointing user_config_path at a
+        # definitely-absent file under tmp_path means the loader sees
+        # "no user config", which is the deterministic state we want
+        # to assert against. TEST_CLI_ENV isn't relevant here because
+        # this test passes env="production" explicitly; the env-var
+        # fallback in load_config only fires when env is None.
+        user_cfg = tmp_path / "user-config.toml"  # intentionally not created
+
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                user_config_path=user_cfg,
+                env="production",
+            )
+
+        msg = str(excinfo.value)
+        # Message names the missing env so the operator knows WHAT they
+        # asked for that didn't exist.
+        assert "production" in msg
+        # Message lists the defined sections so the operator knows their
+        # choices without re-reading the TOML file.
+        assert "staging" in msg
+
+    def test_env_section_parsed_as_scalar_raises(self, tmp_path: Path) -> None:
+        """``env.<name> = "scalar"`` fails with a ``[env.<name>]``-table hint.
+
+        TOML permits dotted-key assignment (``env.production = "x"``), which
+        parses into ``{"env": {"production": "x"}}`` -- structurally the same
+        path the loader walks for a real ``[env.production]`` section, but the
+        value is a string rather than a sub-table. Without the guard added in
+        #52, ``_flatten_mapping`` would be called on the string and raise an
+        opaque ``AttributeError``. This test pins the contract that the guard
+        raises ``ConfigError`` with a message naming the env and recommending
+        the correct table syntax so the operator can fix the TOML.
+        """
+        from clickwork.config import ConfigError, load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        # TOML dotted-key form: legal syntax, wrong shape for load_config.
+        config_file.write_text('env.production = "oops"\n')
+        user_cfg = tmp_path / "user-config.toml"  # intentionally absent
+
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                user_config_path=user_cfg,
+                env="production",
+            )
+
+        msg = str(excinfo.value)
+        # Names the env the operator asked for, and the path of the offender.
+        assert "production" in msg
+        assert str(config_file) in msg
+        # Points at the correct fix: a real ``[env.production]`` table.
+        assert "[env.production]" in msg
 
 
 class TestLoadEnvFile:

@@ -753,6 +753,78 @@ Highest priority wins:
 | `--yes` / `-y` | Skip confirmation prompts |
 | `--version` / `-V` | Print the CLI's version string and exit (only installed if `create_cli()` receives `version=` or `package_name=`) |
 
+### Overriding a global option in a subcommand
+
+`add_global_option(cli, "--flag", ...)` installs the same option on the
+root group AND every subcommand that exists at call time, so users can
+pass the flag at any level. Occasionally a single subcommand needs to
+reclaim a flag name for different semantics — for example, a plugin
+subcommand that wants its own `--env` with a plugin-specific default
+instead of the framework's `--env` that selects the config environment.
+
+**The rule:** inside the overriding subcommand's scope, the subcommand's
+option wins — the value flows into that subcommand's own kwarg, and the
+global's merge callback does not run there. Outside that subcommand
+(i.e. on other subcommands that did NOT redeclare the flag, or at the
+root group level), the global remains active and continues to populate
+`ctx.find_root().meta`.
+
+**The pattern:** `add_global_option` takes a call-time snapshot of the
+command tree — only commands attached BEFORE the call get the global
+installed on them. Commands attached AFTER the call don't. So the
+right ordering is:
+
+1. Attach every subcommand that SHOULD inherit the global (or that
+   simply doesn't care about the flag).
+2. Call `add_global_option`.
+3. Attach the overriding subcommand(s) — these won't get the global
+   installed, so their own `@click.option("--region", ...)` owns the
+   flag inside their scope.
+
+```python
+import click
+from clickwork import create_cli, add_global_option
+
+cli = create_cli(name="myapp", commands_dir=None)
+
+# Step 1: attach subcommands that should inherit the global.
+@cli.command("status")
+@click.pass_context
+def status(ctx: click.Context) -> None:
+    # --region is accessible via ctx.find_root().meta because the
+    # global was installed on this subcommand (step 2 ran after the
+    # attachment).
+    region = ctx.find_root().meta.get("region")
+    click.echo(f"status for {region!r}")
+
+# Step 2: install the global AFTER every inheriting subcommand is
+# attached. Pick a name that does NOT collide with create_cli's
+# framework builtins (--verbose, --quiet, --dry-run, --env, --yes) --
+# we use --region in this example.
+add_global_option(cli, "--region", default=None, help="Target region.")
+
+# Step 3: attach the overriding subcommand. Its own --region wins
+# inside its scope; `status` above still sees the global via
+# ctx.find_root().meta because it was attached before add_global_option ran.
+@cli.command("deploy")
+@click.option("--region", default="us-east-1", help="Deploy target.")
+@click.pass_context
+def deploy(ctx: click.Context, region: str) -> None:
+    # `region` here is the subcommand's own kwarg -- "us-east-1" by
+    # default, or whatever the user passed after "deploy" on the CLI.
+    # The global's ctx.find_root().meta["region"] reflects the
+    # ROOT-level parse only; it is NOT touched by the inner --region.
+    click.echo(f"deploying to {region}")
+```
+
+The **reverse order** — subcommand declares `--region` **first**, then
+`add_global_option(cli, "--region", ...)` is called — is rejected at
+install time with `ValueError` naming the colliding flag string (e.g.
+`--region`). That failure mode is deliberate: silently picking a
+winner would make override behaviour order-dependent. If you hit this
+error, either rename one side or reorder your setup so
+`add_global_option` runs before the overriding subcommand is attached.
+
 ### Version flag
 
 `create_cli()` accepts two kwargs that opt into a `--version` / `-V`

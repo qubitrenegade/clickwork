@@ -90,12 +90,17 @@ working example with subcommand groups.
 - **[Guide](docs/GUIDE.md)** -- Step-by-step tutorial: building a CLI,
   adding config, using subprocess helpers, distributing as a package,
   testing your commands.
+- **[Plugins](docs/PLUGINS.md)** -- 15-minute walkthrough for shipping
+  a pip-installable plugin via the `clickwork.commands` entry-point
+  group.
 - **[Architecture](docs/ARCHITECTURE.md)** -- Design decisions, module
   responsibilities, security model, and the reasoning behind non-obvious
   choices.
 - **[Security](docs/SECURITY.md)** -- What clickwork defends against,
   what it leaves to the CLI author, threat model assumptions, and how
   to report vulnerabilities.
+- **[Migrating 0.2.x to 1.0](docs/MIGRATING.md)** -- Breaking changes,
+  new opt-in surfaces, and concrete before/after diffs for upgraders.
 
 ## Features
 
@@ -251,12 +256,14 @@ The framework (`clickwork`) provides:
 
 ## Development
 
-```bash
-git clone https://github.com/qubitrenegade/clickwork.git
-cd clickwork
-uv venv && uv pip install -e ".[dev]"
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the canonical local setup
+(`uv sync --extra dev`), the four-command verification suite that
+matches CI, test-writing pointers, PR conventions, and review
+expectations. The section below is a quick pytest reference for
+contributors who already have a venv.
 
-# Run tests
+```bash
+# Run tests (after uv sync --extra dev)
 uv run pytest tests/unit/ -v          # Fast unit tests
 uv run pytest tests/integration/ -v   # Slower integration tests (creates venvs)
 uv run pytest tests/ -v               # Everything

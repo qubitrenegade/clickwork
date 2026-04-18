@@ -691,6 +691,12 @@ def load_config(
         repo_config_path = Path.cwd() / f".{project_name}.toml"
 
     # Load the full TOML file once; we'll extract sections from it below.
+    # ``repo_config_exists`` tells us whether the file is actually on disk --
+    # the fail-fast unknown-env check below uses it to stay silent when
+    # there is no repo config at all (e.g. a CLI invoked outside a project
+    # dir with --env=staging from muscle memory). Only once a project has
+    # a config file does "unknown env" become an actionable misconfig.
+    repo_config_exists = repo_config_path.is_file()
     repo_data = _load_toml(repo_config_path)
 
     # The [default] section provides baseline values for all environments.
@@ -702,9 +708,75 @@ def load_config(
     # [env.production], [env.staging], etc. overlay [default] -- keys present
     # in the env section override [default], but keys absent from the env
     # section still fall through to [default].
+    #
+    # Fail-fast on unknown env names: when the caller explicitly selects an
+    # env (via ``--env production`` or the ``{PROJECT_NAME}_ENV`` fallback)
+    # but the TOML file has no matching ``[env.production]`` section, silently
+    # loading ``[default]`` is a footgun -- the operator thinks they're on
+    # "production" settings, but they're actually on dev defaults. Matching
+    # the "fail loud" discipline applied elsewhere (required keys, unsafe
+    # file perms, secret-in-repo), we raise ConfigError with a message that
+    # names the missing section AND the envs that ARE defined so the
+    # operator can pick the right one or add the section.
     repo_env: dict[str, Any] = {}
-    if env and "env" in repo_data and env in repo_data["env"]:
-        repo_env = _flatten_mapping(repo_data["env"][env])
+    # Treat empty string the same as ``None`` (no env selected). An
+    # env var like ``{PREFIX}_ENV=`` resolves to ``""``, and callers
+    # relied on pre-#52 behavior that silently fell back to
+    # ``[default]``. Raising ``ConfigError`` on empty-string env would
+    # be a breaking change beyond the typo-detection scope of #52, so
+    # the guard uses ``if env`` (truthy) rather than ``if env is not
+    # None``. This keeps the fail-fast discipline for *typos* (which
+    # arrive as non-empty strings) without regressing the
+    # unset-env-var path.
+    if env and repo_config_exists:
+        # ``env_sections`` is the set of environment names the loader found
+        # in the file. It might be empty (file declares no [env.*] tables at
+        # all) or missing the selected name. Either case is a misconfig.
+        #
+        # Guard against a malformed TOML where ``env`` isn't a table --
+        # e.g. ``env = "staging"`` at the top level instead of
+        # ``[env.staging]``. Without this check, ``env in env_sections``
+        # would iterate over the string's characters and ``_flatten_mapping``
+        # would blow up on a non-dict input. Treating any non-dict as
+        # "no env sections defined" routes it through the same error path
+        # as the missing-section case, which gives the operator an
+        # actionable message.
+        env_sections_raw = repo_data.get("env", {})
+        env_sections: dict[str, Any] = (
+            env_sections_raw if isinstance(env_sections_raw, dict) else {}
+        )
+        if env in env_sections:
+            # Also guard the selected section itself: a TOML dotted-key
+            # form like ``env.production = "x"`` (vs the intended
+            # nested table ``[env.production]``) lands as a non-dict
+            # value in env_sections[env] and would blow up
+            # ``_flatten_mapping``. Route that through the same
+            # "malformed section" error path so the operator sees a
+            # clean message instead of an AttributeError.
+            env_section_raw = env_sections[env]
+            if not isinstance(env_section_raw, dict):
+                raise ConfigError(
+                    f"Config env '{env}' is not a TOML table in "
+                    f"{repo_config_path}. Check the TOML syntax: the "
+                    f"section must be declared as [env.{env}] with "
+                    "nested keys, not as a bare dotted-key assignment."
+                )
+            repo_env = _flatten_mapping(env_section_raw)
+        else:
+            # Sort the defined-sections list so error messages are stable
+            # across dict-iteration orderings (Python 3.7+ preserves insertion
+            # order, but a user editing the TOML file shouldn't have test
+            # failures depend on the order keys were typed).
+            defined = sorted(env_sections.keys())
+            if defined:
+                defined_clause = f"Defined sections: {defined}."
+            else:
+                defined_clause = "No [env.*] sections are defined in this file."
+            raise ConfigError(
+                f"Config env '{env}' is not defined in {repo_config_path}. "
+                f"{defined_clause} "
+                f"Add an [env.{env}] section or select a defined env."
+            )
 
     # -------------------------------------------------------------------------
     # Build the merged config dict: user < default < env-specific
