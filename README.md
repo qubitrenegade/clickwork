@@ -248,12 +248,14 @@ The framework (`clickwork`) provides:
 
 ## Development
 
-```bash
-git clone https://github.com/qubitrenegade/clickwork.git
-cd clickwork
-uv venv && uv pip install -e ".[dev]"
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the canonical local setup
+(`uv sync --extra dev`), the four-command verification suite that
+matches CI, test-writing pointers, PR conventions, and review
+expectations. The section below is a quick pytest reference for
+contributors who already have a venv.
 
-# Run tests
+```bash
+# Run tests (after uv sync --extra dev)
 uv run pytest tests/unit/ -v          # Fast unit tests
 uv run pytest tests/integration/ -v   # Slower integration tests (creates venvs)
 uv run pytest tests/ -v               # Everything
