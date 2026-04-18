@@ -197,6 +197,7 @@ def create_cli(
     *,
     description: str | None = None,
     enable_parent_package_imports: bool = False,
+    strict: bool = False,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -244,9 +245,25 @@ def create_cli(
             don't stack duplicate entries (known limitation: the dedup
             does not normalize *existing* ``sys.path`` entries that were
             added via relative/unresolved spellings elsewhere).
+        strict: When True, any command-discovery failure (broken import,
+            missing ``cli`` attribute, ``cli`` not a Click command, duplicate
+            command name, or a failed entry-point wrap) raises
+            ``ClickworkDiscoveryError`` at CLI construction time instead of
+            silently dropping the command with a warning. Use this for
+            production CLIs and release validation where shipping a binary
+            with a missing command is a bug. Defaults to False to preserve
+            the forgiving dev-mode behaviour so upgraders see no change
+            unless they opt in. Keyword-only to keep the positional
+            signature stable. See issue #42 for the full rationale.
 
     Returns:
         A configured Click group with all discovered commands registered.
+
+    Raises:
+        ClickworkDiscoveryError: If ``strict=True`` and discovery observed
+            one or more failures while building the command tree. The
+            exception carries a ``.failures`` list describing each
+            problem so CI can print them all at once.
     """
 
     # Optionally make commands_dir's parent package importable.
@@ -468,9 +485,16 @@ def create_cli(
     # installed entry points, depending on the discovery_mode setting.
     # This runs at factory time (not at invocation time) so the commands
     # appear in --help output immediately.
+    #
+    # ``strict=True`` propagates through the discovery layer: any failure
+    # becomes a ClickworkDiscoveryError raised from right here, before
+    # create_cli() returns. That's the behaviour issue #42 specified --
+    # a broken discovery fails at CLI startup rather than at "user runs
+    # the missing command and gets 'no such command'" time.
     commands = discover_commands(
         commands_dir=commands_dir,
         discovery_mode=discovery_mode,
+        strict=strict,
     )
     for cmd_name, cmd in commands.items():
         cli_group.add_command(cmd, cmd_name)
