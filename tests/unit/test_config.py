@@ -1160,10 +1160,21 @@ class TestInFileEnvPrecedence:
             '[default]\nkey = "d"\n\n[env.staging]\nkey = "s"\n',
         )
 
+        # Isolate from any real user config at
+        # ``~/.config/test-cli/config.toml`` that the developer running
+        # the tests might have. Pointing user_config_path at a
+        # definitely-absent file under tmp_path means the loader sees
+        # "no user config", which is the deterministic state we want
+        # to assert against. Same applies to the TEST_CLI_ENV env var:
+        # a stale value in the developer's shell would otherwise feed
+        # env= through the auto-prefix path and surprise the test.
+        user_cfg = tmp_path / "user-config.toml"  # intentionally not created
+
         with pytest.raises(ConfigError) as excinfo:
             load_config(
                 project_name="test-cli",
                 repo_config_path=config_file,
+                user_config_path=user_cfg,
                 env="production",
             )
 

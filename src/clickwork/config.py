@@ -719,7 +719,16 @@ def load_config(
     # names the missing section AND the envs that ARE defined so the
     # operator can pick the right one or add the section.
     repo_env: dict[str, Any] = {}
-    if env is not None and repo_config_exists:
+    # Treat empty string the same as ``None`` (no env selected). An
+    # env var like ``{PREFIX}_ENV=`` resolves to ``""``, and callers
+    # relied on pre-#52 behavior that silently fell back to
+    # ``[default]``. Raising ``ConfigError`` on empty-string env would
+    # be a breaking change beyond the typo-detection scope of #52, so
+    # the guard uses ``if env`` (truthy) rather than ``if env is not
+    # None``. This keeps the fail-fast discipline for *typos* (which
+    # arrive as non-empty strings) without regressing the
+    # unset-env-var path.
+    if env and repo_config_exists:
         # ``env_sections`` is the set of environment names the loader found
         # in the file. It might be empty (file declares no [env.*] tables at
         # all) or missing the selected name. Either case is a misconfig.
