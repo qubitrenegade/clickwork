@@ -25,7 +25,8 @@ Public API:
     testing           - Submodule exposing run_cli() + make_test_cli() helpers
 """
 
-__version__ = "1.0.0"
+from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
+from importlib.metadata import version as _metadata_version
 
 # WHY ``testing`` is imported here alongside ``http`` / ``platform``: all
 # three are advertised as importable both as ``clickwork.<name>`` and as
@@ -47,6 +48,21 @@ from clickwork.discovery import ClickworkDiscoveryError
 from clickwork.global_options import add_global_option
 from clickwork.http import HttpError, delete, get, post, put
 from clickwork.platform import platform_dispatch
+
+# Single source of truth: derive the runtime version from the installed
+# package metadata so pyproject.toml is authoritative and we can't drift
+# the two again (this bit us during the 1.0 cut -- pyproject said 1.0.0,
+# __init__ still said 0.2.0, and --version reported the stale value).
+# PackageNotFoundError covers the "running from an uninstalled source
+# checkout" edge case -- shouldn't happen for ordinary consumers, but
+# falling back to "0+unknown" keeps `clickwork.__version__` available
+# instead of raising on import.
+try:
+    __version__ = _metadata_version("clickwork")
+except _PackageNotFoundError:  # pragma: no cover - editable/uninstalled checkout
+    __version__ = "0+unknown"
+
+del _metadata_version, _PackageNotFoundError
 
 __all__ = [
     "create_cli",
