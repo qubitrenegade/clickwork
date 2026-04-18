@@ -18,11 +18,18 @@ Public API:
     platform_dispatch - Decorator that routes a command to a per-OS impl
     platform          - Submodule exposing dispatch(), is_linux/macos/windows
     http              - Submodule exposing get/post/put/delete + HttpError
+    testing           - Submodule exposing run_cli() + make_test_cli() helpers
 """
 
 __version__ = "0.1.0"
 
-from clickwork import http, platform
+# WHY ``testing`` is imported here alongside ``http`` / ``platform``: all
+# three are advertised as importable both as ``clickwork.<name>`` and as
+# ``from clickwork import <name>``. The top-level import makes the
+# attribute-on-package form work without relying on implicit submodule
+# resolution (which doesn't fire until the user imports the submodule
+# explicitly somewhere else first).
+from clickwork import http, platform, testing
 from clickwork._types import CliContext, CliProcessError, PrerequisiteError, Secret, normalize_prefix
 from clickwork.cli import create_cli, pass_cli_context
 from clickwork.config import ConfigError, load_config
@@ -49,4 +56,5 @@ __all__ = [
     "post",
     "put",
     "delete",
+    "testing",
 ]

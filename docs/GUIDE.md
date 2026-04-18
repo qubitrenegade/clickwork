@@ -455,10 +455,90 @@ directly. The framework discovers commands from entry points -- no
 
 ## Testing Your Commands
 
+### Testing commands with `clickwork.testing`
+
+The `clickwork.testing` module ships two thin helpers that collapse the
+boilerplate of constructing a test CLI and invoking it through Click's
+`CliRunner`:
+
+```python
+from clickwork.testing import make_test_cli, run_cli
+
+def test_greet_says_hello(tmp_path):
+    (tmp_path / "greet.py").write_text(
+        "import click\n"
+        "@click.command()\n"
+        "def greet():\n"
+        "    click.echo('hello')\n"
+        "cli = greet\n"
+    )
+
+    cli = make_test_cli(commands_dir=tmp_path)
+    result = run_cli(cli, ["greet"])
+
+    assert result.exit_code == 0
+    assert "hello" in result.stdout
+```
+
+What the helpers do:
+
+- `make_test_cli(*, commands_dir=None, **kwargs)` wraps
+  `create_cli()` with a default `name="test-cli"`. Every other kwarg
+  forwards unchanged, so you still get `description=`, `config_schema=`,
+  etc. when you need them.
+- `run_cli(cli, args, **kwargs)` wraps `CliRunner().invoke()` with
+  `catch_exceptions=False` pinned by default. This means a bug in your
+  command surfaces as a real traceback in pytest output instead of being
+  quietly captured into `result.exception`. Pass `catch_exceptions=True`
+  explicitly when you want Click's default swallow-and-report behaviour.
+
+`run_cli` returns Click's native `click.testing.Result` -- the helpers
+deliberately do not invent a new result type, so any idiom you already
+know from Click docs keeps working.
+
+### `result.output` vs `result.stdout` vs `result.stderr`
+
+Click's `Result` exposes three stream attributes and they are **not
+interchangeable**:
+
+| Attribute | Contents |
+|-----------|----------|
+| `result.output` | stdout **and** stderr interleaved in the order the command produced them |
+| `result.stdout` | stdout only |
+| `result.stderr` | stderr only |
+
+The rule of thumb: if a test says "the error message was printed to
+stderr", it should assert on `result.stderr` -- asserting on
+`result.output` would pass even if the command wrote the error to
+stdout by mistake, because `output` contains both streams.
+
+```python
+@click.command()
+def noisy():
+    click.echo("normal line")
+    click.echo("error line", err=True)
+
+result = run_cli(noisy, [])
+assert "normal line" in result.stdout        # yes
+assert "error line" in result.stderr          # yes
+assert "error line" in result.output          # ALSO yes (interleaved)
+assert "normal line" in result.stderr         # NO -- would fail
+```
+
+> **Footgun:** old Click releases exposed a `mix_stderr` kwarg on
+> `CliRunner.__init__` that toggled whether stderr was folded into
+> `output`. That kwarg has been **removed** in current Click (8.2+).
+> Both streams are always available separately via `result.stdout` /
+> `result.stderr`, with `result.output` continuing to provide the
+> interleaved form for backwards compatibility. Do not copy snippets
+> from older docs that still reference `CliRunner(mix_stderr=False)` --
+> they will fail with `TypeError`.
+
 ### Unit Testing with CliRunner
 
-Click's `CliRunner` invokes your CLI in-process without spawning a
-subprocess:
+If you need finer control than `run_cli` gives -- custom `CliRunner`
+configuration, isolated filesystems via `runner.isolated_filesystem()`,
+and so on -- reach for Click's `CliRunner` directly:
 
 ```python
 from click.testing import CliRunner

@@ -139,6 +139,13 @@ if __name__ == "__main__":
 
 ## Testing Commands
 
+Prefer `clickwork.testing.run_cli` / `clickwork.testing.make_test_cli` for new
+test code -- they pin `catch_exceptions=False` and default `name="test-cli"`
+so real tracebacks surface in pytest output. Note that `result.output`
+contains stdout AND stderr interleaved; use `result.stdout` / `result.stderr`
+when asserting on a specific stream. See
+[GUIDE.md "Testing commands with `clickwork.testing`"](GUIDE.md#testing-commands-with-clickworktesting).
+
 ```python
 from click.testing import CliRunner
 from clickwork import create_cli
