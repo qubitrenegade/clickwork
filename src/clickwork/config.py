@@ -404,12 +404,17 @@ def load_env_file(path: Path) -> dict[str, str]:
                 f"{path}: line {lineno}: empty key (missing name before '=')"
             )
 
-        # Strip ONE layer of leading whitespace from the value before
-        # looking for quotes. Common dotenv forms like ``KEY = value`` or
+        # Strip leading whitespace from the value before looking for
+        # quotes. Common dotenv forms like ``KEY = value`` or
         # ``KEY= "value"`` would otherwise produce values like ``" value"``
         # (with a real leading space) or leave the surrounding quotes
-        # intact (because value[0] is a space, not a quote). lstrip()
-        # matches what python-dotenv / direnv / shell-source do in
+        # intact (because value[0] is a space, not a quote). ``lstrip()``
+        # removes ALL leading whitespace characters (spaces, tabs, etc.)
+        # not just one -- but that's correct here: there is no legitimate
+        # dotenv form where "two spaces before the value" means anything
+        # different from "one space before the value", and quoted values
+        # still preserve their own internal whitespace. Matches what
+        # python-dotenv / direnv / shell-source do in
         # practice, while still letting QUOTED values preserve their own
         # leading whitespace:
         #   KEY = "  value"   -> value becomes "  value" (inside quotes)
