@@ -199,22 +199,20 @@ majors.
 **Floor:** `requires-python = ">=3.11"`.
 
 The floor is 3.11 because that is the oldest still-supported CPython
-release that provides all of the following, which clickwork's code
-and type annotations rely on:
+release that ships `tomllib` (PEP 680) in the standard library, which
+`clickwork.config` uses to parse layered config without adding a
+third-party dependency. Dropping to 3.10 would mean either taking a
+`tomli` dependency just to parse config or writing a fallback import
+shim; the marginal gain in user coverage does not justify either,
+especially since 3.10 is already on its CPython EOL glide path.
 
-- PEP 654 exception groups (`ExceptionGroup`, `except*`). We use these
-  for aggregating discovery errors cleanly.
-- `tomllib` in the standard library (PEP 680). We do not want to take
-  a dependency on `tomli` just to parse config.
-- PEP 673 `Self` type for fluent APIs and dataclass methods that
-  return an instance of their own class.
-- The post-3.10 typing improvements that let us write precise
-  annotations without reaching for `typing_extensions`.
-
-3.10 lacks all four. Supporting it would mean either carrying a
-backport dependency or writing more awkward code to route around the
-gaps, and the marginal gain in user coverage does not justify that
-cost given 3.10 is already on its EOL glide path.
+Secondary reasons the 3.11 floor is comfortable (not load-bearing
+today, but available to us within the supported range as clickwork
+evolves): PEP 654 exception groups, PEP 673 `Self`, and the broader
+typing improvements that let us avoid `typing_extensions` in most
+annotations. These are not currently used in the codebase, so do not
+treat them as binding contracts — `tomllib` is the one concrete
+dependency that pins the floor.
 
 **Ceiling:** none. clickwork follows the same "no upper bound, CI
 covers the matrix" discipline as with Click. Each new CPython release
