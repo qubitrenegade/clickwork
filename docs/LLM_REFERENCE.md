@@ -178,6 +178,77 @@ def tool(ctx: CliContext, args: tuple):
     ctx.run([*base_cmd, *args])
 ```
 
+## Common Footguns
+
+Quick hits for "why is my thing broken?" Each entry is Pitfall / Instead /
+Why. Link out to helper docstrings or [GUIDE.md](GUIDE.md) for depth.
+
+### 1. Patching `ctx.require`
+
+**Pitfall:** patching `clickwork.cli._require` (old workaround).
+**Instead:** `patch("clickwork.prereqs.require")`.
+**Why:** Wave 1 #8 made the public symbol patchable; the internal alias was removed.
+
+### 2. Signalling user errors
+
+**Pitfall:** `sys.exit(1)` with manual `click.echo`.
+**Instead:** `raise click.ClickException("message")`.
+**Why:** Wave 1 #5 made `ClickException` route correctly; ad-hoc exits bypass that.
+
+### 3. CliRunner mixed output
+
+**Pitfall:** asserting on `result.output` when you specifically want stdout-only or stderr-only content (`result.output` interleaves BOTH streams).
+**Instead:** assert on `result.stdout` or `result.stderr` directly.
+**Why:** on current Click (8.2+) `output` is stdout+stderr combined; the older `mix_stderr` kwarg that some online snippets reference has been removed. See [GUIDE.md](GUIDE.md#testing-commands-with-clickworktesting) (anchor resolves once #16 merges first -- see plan's merge-order note).
+
+### 4. URL-encoding query params
+
+**Pitfall:** string-concatenating user values into URL query strings.
+**Instead:** build params as a dict and use `urllib.parse.urlencode`.
+**Why:** spaces, `&`, `#` in user values silently break URLs or enable injection.
+
+### 5. Secrets in argv
+
+**Pitfall:** `ctx.run(["wrangler", "secret", "put", name, Secret(token)])`.
+**Instead:** `ctx.run_with_secrets(...)` (Wave 3 #11).
+**Why:** argv is world-readable in `ps`; the helper enforces this and routes via env/stdin.
+
+### 6. Shell-sourceable config files
+
+**Pitfall:** hand-rolling a `.env` parser.
+**Instead:** `clickwork.config.load_env_file(path)` (Wave 2 #9).
+**Why:** parser gotchas are solved once; the helper also enforces owner-only permissions.
+
+### 7. Platform dispatch
+
+**Pitfall:** repeating `if sys.platform == "linux": ... elif sys.platform == "win32": ...`.
+**Instead:** `@clickwork.platform_dispatch(linux=..., windows=..., macos=...)` (Wave 2 #12).
+**Why:** the helper handles "unsupported platform" errors consistently.
+
+### 8. HTTP calls
+
+**Pitfall:** building a `urllib.request` helper in each command, or adding `requests`.
+**Instead:** `clickwork.http.get/post/put/delete` (Wave 3 #13).
+**Why:** stdlib-only helper with URL allowlist, JSON auto-parse, structured `HttpError`. See `clickwork.http` docstring.
+
+### 9. Missing `import sys`
+
+**Pitfall:** calling `sys.exit()` or `sys.stdin` without importing.
+**Instead:** explicit `import sys`.
+**Why:** easy to forget; `sys` is not a builtin.
+
+### 10. `bash -c`
+
+**Pitfall:** `ctx.run(["bash", "-c", "command $VAR"])`.
+**Instead:** use Python stdlib directly, or `ctx.run(["command"], env={...})`.
+**Why:** `bash -c` opens a shell-injection vector if any part of the command string is user-influenced, and creates a cross-platform dependency on `bash`.
+
+### 11. `Secret.get()` at module scope
+
+**Pitfall:** `TOKEN = Secret(...).get()` at module import.
+**Instead:** call `.get()` at the call site when you actually need the value.
+**Why:** module-scope unwrap defeats the "value stays wrapped until used" invariant.
+
 ## Lessons Learned
 
 _This section is updated as we migrate commands and discover patterns._
