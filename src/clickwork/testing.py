@@ -74,7 +74,7 @@ attributes on ``Result`` are populated separately (``output`` is the
 interleaved form; ``stdout`` and ``stderr`` are kept independent).
 clickwork declares ``click>=8.1`` so in principle a consumer could be
 running on 8.1 where ``mix_stderr`` still exists -- the pinned
-environment (see ``uv.lock``) tracks a 8.2+ release. If you are
+environment (see ``uv.lock``) tracks an 8.2+ release. If you are
 looking at an older snippet that uses ``CliRunner(mix_stderr=False)``,
 check the Click version in your test environment rather than
 assuming the 8.2+ API: 8.2+ will raise ``TypeError``, older releases
