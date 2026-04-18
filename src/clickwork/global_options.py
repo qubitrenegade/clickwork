@@ -106,6 +106,20 @@ def add_global_option(
         collision -- this is intentional: silent idempotent reinstalls
         would hide real "declared the same flag twice by mistake" bugs.
 
+    Lazy entry-point plugins:
+        The install-time flag-string conflict check is **best effort** for
+        entry-point plugins wrapped in ``LazyEntryPointCommand``. Those
+        proxies don't expose the plugin's own options until the plugin
+        module is actually loaded (that's the whole point of lazy
+        discovery), so ``add_global_option`` can't see an internal
+        ``--json`` declared by the plugin at install time. If the global
+        flag AND the plugin-internal option end up declaring the same
+        flag string, ``LazyEntryPointCommand.invoke`` catches the
+        collision at invocation time and raises ``click.UsageError``
+        with both sides named. Plugin authors who hit that error should
+        rename their internal option OR the CLI author should skip the
+        global install for that specific flag.
+
     Args:
         cli: The root Click group to install the option on. Walked recursively
             to discover nested groups and leaf commands.

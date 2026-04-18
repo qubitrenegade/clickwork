@@ -448,6 +448,72 @@ class TestAddGlobalOptionEntryPointPropagation:
             "LazyEntryPointCommand.invoke forwards parent=ctx.parent to loaded.main()."
         )
 
+    def test_global_option_flag_collision_with_plugin_raises(self, monkeypatch) -> None:
+        """If a plugin declares the same flag add_global_option installed, error.
+
+        WHY this test exists: add_global_option's conflict detection can't
+        see inside a LazyEntryPointCommand until the plugin is actually
+        loaded. So a plugin's private ``--json`` stays invisible to the
+        install-time guard. Without a runtime check in
+        LazyEntryPointCommand.invoke, Click would parse the flag at the
+        proxy level, consume the token, and the plugin would silently
+        never see its own option -- a nasty "it's ignored and I have no
+        idea why" debugging experience for plugin authors.
+
+        The runtime check in discovery.py compares the proxy's and the
+        loaded command's flag strings at invoke time and raises
+        click.UsageError on overlap. This test builds that exact collision
+        (plugin declares --json internally, CLI has add_global_option's
+        --json installed) and asserts the error fires with both sides
+        named so the caller can find the conflict quickly.
+        """
+        import click
+        from click.testing import CliRunner
+        from clickwork.discovery import discover_commands_from_entrypoints
+
+        class FakeEntryPoint:
+            name = "plugin-cmd"
+
+            def load(self):
+                # The plugin independently declares --json on its own
+                # command. This is the scenario add_global_option's
+                # install-time check can't detect because at install
+                # time the plugin hasn't been loaded yet.
+                @click.command(name="plugin-cmd")
+                @click.option("--json", is_flag=True)
+                def plugin_cmd(json: bool) -> None: ...
+
+                return plugin_cmd
+
+        monkeypatch.setattr(
+            "importlib.metadata.entry_points",
+            lambda group=None: [FakeEntryPoint()] if group == "clickwork.commands" else [],
+        )
+
+        @click.group()
+        def root() -> None: ...
+
+        commands = discover_commands_from_entrypoints()
+        for cmd_name, cmd in commands.items():
+            root.add_command(cmd, cmd_name)
+
+        # This succeeds because the proxy's params (at this point) are
+        # empty, so add_global_option sees no collision. The collision
+        # only materialises at invoke time when the plugin is loaded.
+        add_global_option(root, "--json", is_flag=True)
+
+        runner = CliRunner()
+        result = runner.invoke(root, ["plugin-cmd"])
+
+        # UsageError exit code is 2; message must name both sides so the
+        # caller can figure out where to fix it.
+        assert result.exit_code == 2, (
+            f"Expected UsageError (exit 2) on plugin flag collision; "
+            f"got exit={result.exit_code}, output={result.output!r}"
+        )
+        assert "plugin-cmd" in result.output
+        assert "--json" in result.output
+
 
 class TestAddGlobalOptionIntegration:
     """End-to-end check that add_global_option composes with create_cli()."""

@@ -142,6 +142,51 @@ class LazyEntryPointCommand(click.Command):
             Whatever the real command's ``main()`` returns.
         """
         loaded = self._load()
+
+        # Defensive flag-collision check for entry-point plugins.
+        #
+        # WHY this check exists: ``clickwork.add_global_option`` installs
+        # options on this proxy at CLI-build time, but the proxy has no
+        # way to introspect the plugin's own options until the plugin
+        # module is actually loaded (the whole point of laziness). So
+        # add_global_option's conflict detector cannot see a plugin's
+        # private ``--json`` (or whatever) -- it only sees the proxy's
+        # ``self.params``. If the plugin's loaded command declares the
+        # same flag, Click would parse that flag at the PROXY level
+        # first, consume the token, and the plugin would never see its
+        # own option. Behaviour would look like "the flag is silently
+        # ignored by the plugin", which is a nasty debugging experience.
+        #
+        # Now that we actually have ``loaded``, compare its declared
+        # flag strings against the proxy's. Any overlap is a genuine
+        # conflict between a plugin-declared option and a globally-
+        # installed option; surface it as a ``click.UsageError`` (user-
+        # classification, matches the rest of clickwork's error policy)
+        # with a pointer to both sides so the caller can fix whichever
+        # makes sense for their setup.
+        proxy_flag_strings: set[str] = set()
+        for proxy_param in self.params:
+            proxy_flag_strings.update(getattr(proxy_param, "opts", ()))
+            proxy_flag_strings.update(getattr(proxy_param, "secondary_opts", ()))
+        for loaded_param in loaded.params:
+            loaded_flag_strings: set[str] = set(
+                getattr(loaded_param, "opts", ())
+            )
+            loaded_flag_strings.update(
+                getattr(loaded_param, "secondary_opts", ())
+            )
+            overlap = proxy_flag_strings & loaded_flag_strings
+            if overlap:
+                raise click.UsageError(
+                    f"Entry-point plugin {self.name!r} declares option "
+                    f"{sorted(overlap)!r} which collides with a globally-"
+                    f"installed option on the CLI root. The global option "
+                    f"consumes the flag before the plugin sees it, so "
+                    f"whichever side you want to act on it should be the "
+                    f"only one that declares it. Either rename the plugin's "
+                    f"option or omit the global install for that flag."
+                )
+
         # Pass obj=ctx.obj so the new context created by loaded.main() carries
         # the CliContext forward.  Click forwards **extra kwargs through
         # make_context() -> Context(), and Context accepts obj as a keyword arg.
