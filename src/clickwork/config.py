@@ -732,7 +732,19 @@ def load_config(
         # ``env_sections`` is the set of environment names the loader found
         # in the file. It might be empty (file declares no [env.*] tables at
         # all) or missing the selected name. Either case is a misconfig.
-        env_sections = repo_data.get("env", {})
+        #
+        # Guard against a malformed TOML where ``env`` isn't a table --
+        # e.g. ``env = "staging"`` at the top level instead of
+        # ``[env.staging]``. Without this check, ``env in env_sections``
+        # would iterate over the string's characters and ``_flatten_mapping``
+        # would blow up on a non-dict input. Treating any non-dict as
+        # "no env sections defined" routes it through the same error path
+        # as the missing-section case, which gives the operator an
+        # actionable message.
+        env_sections_raw = repo_data.get("env", {})
+        env_sections: dict[str, Any] = (
+            env_sections_raw if isinstance(env_sections_raw, dict) else {}
+        )
         if env in env_sections:
             repo_env = _flatten_mapping(env_sections[env])
         else:

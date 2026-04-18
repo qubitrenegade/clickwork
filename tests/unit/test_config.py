@@ -1074,7 +1074,9 @@ class TestInFileEnvPrecedence:
         assert config["key1"] == "a"
         assert config["key2"] == "b"
 
-    def test_no_env_selected_uses_default_only(self, tmp_path: Path) -> None:
+    def test_no_env_selected_uses_default_only(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Without ``env=...``, ``[env.*]`` sections are invisible.
 
         The env overlay only activates when an env is explicitly
@@ -1094,10 +1096,20 @@ class TestInFileEnvPrecedence:
             '[env.staging]\nkey = "from-env-staging"\nextra = "staging-extra"\n',
         )
 
+        # Isolate from any real ~/.config/test-cli/config.toml that the
+        # developer might have on disk, AND from a stale TEST_CLI_ENV
+        # environment variable in their shell. With env= omitted,
+        # load_config falls back to {PROJECT_NAME}_ENV to decide which
+        # section to read; if the developer has that set we'd see the
+        # wrong section and the assertions below would flap.
+        user_cfg = tmp_path / "user-config.toml"  # intentionally not created
+        monkeypatch.delenv("TEST_CLI_ENV", raising=False)
+
         config = load_config(
             project_name="test-cli",
             repo_config_path=config_file,
-            # env= omitted (and TEST_CLI_ENV isn't set in this test's env).
+            user_config_path=user_cfg,
+            # env= omitted intentionally -- that's the code path under test.
         )
         # [default] key wins because no env was selected.
         assert config["key"] == "from-default"
@@ -1165,9 +1177,9 @@ class TestInFileEnvPrecedence:
         # the tests might have. Pointing user_config_path at a
         # definitely-absent file under tmp_path means the loader sees
         # "no user config", which is the deterministic state we want
-        # to assert against. Same applies to the TEST_CLI_ENV env var:
-        # a stale value in the developer's shell would otherwise feed
-        # env= through the auto-prefix path and surprise the test.
+        # to assert against. TEST_CLI_ENV isn't relevant here because
+        # this test passes env="production" explicitly; the env-var
+        # fallback in load_config only fires when env is None.
         user_cfg = tmp_path / "user-config.toml"  # intentionally not created
 
         with pytest.raises(ConfigError) as excinfo:
