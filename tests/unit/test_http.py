@@ -497,6 +497,59 @@ class TestEmptyBodyHandling:
 
         assert result == b"   \n\t  "
 
+    def test_non_utf8_body_with_json_content_type_returns_bytes(self):
+        """A non-UTF-8 payload under JSON Content-Type doesn't crash.
+
+        WHY: ``json.loads(bytes)`` on bytes that aren't valid UTF-8
+        raises UnicodeDecodeError (subclass of UnicodeError), NOT
+        JSONDecodeError. An earlier draft only caught JSONDecodeError
+        so a server sending latin-1 garbage under ``application/json``
+        would bypass the "return bytes" recovery path and propagate a
+        confusing decode error. Catching UnicodeError too closes the
+        gap.
+        """
+        from clickwork import http
+
+        # \\xff is not a valid UTF-8 start byte. json.loads(b"\\xff") raises
+        # UnicodeDecodeError on Python 3.11+, which is what we need.
+        resp = _make_response(
+            body=b"\xff\xfe\xff",
+            content_type="application/json",
+        )
+        with patch("clickwork.http._dispatch_request", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        assert result == b"\xff\xfe\xff"
+
+    def test_content_type_with_whitespace_before_semicolon_parses_json(self):
+        """``application/json ; charset=utf-8`` (note the space) auto-parses.
+
+        WHY: RFC 2045 allows optional whitespace around MIME parameter
+        delimiters. An earlier ``startswith("application/json;")``
+        check would miss this form and silently return bytes. The
+        fixed parser splits on ``;`` and strips whitespace.
+        """
+        from clickwork import http
+
+        resp = _make_response(
+            body=b'{"ok": true}',
+            content_type="application/json ; charset=utf-8",
+        )
+        with patch("clickwork.http._dispatch_request", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        assert result == {"ok": True}
+
+    def test_content_type_uppercase_parses_json(self):
+        """Case-insensitive match: ``Application/JSON`` also parses."""
+        from clickwork import http
+
+        resp = _make_response(body=b'{"ok": true}', content_type="Application/JSON")
+        with patch("clickwork.http._dispatch_request", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        assert result == {"ok": True}
+
     def test_malformed_json_with_json_content_type_returns_bytes(self):
         """A server sending garbage under Content-Type: application/json
         gets the raw bytes back instead of a JSONDecodeError.

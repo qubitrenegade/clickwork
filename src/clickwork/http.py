@@ -510,12 +510,19 @@ def _is_json_content_type(content_type: str | None) -> bool:
     """
     if not content_type:
         return False
-    # Strip whitespace and lowercase for robust matching; a server sending
-    # ``Application/JSON ; charset=utf-8`` should still auto-parse.
-    normalized = content_type.strip().lower()
-    return normalized == "application/json" or normalized.startswith(
-        "application/json;"
-    )
+    # Parse by splitting on the MIME parameter delimiter (``;``) and
+    # comparing only the type/subtype portion. This handles:
+    #   "application/json"                   -> ["application/json"]
+    #   "application/json; charset=utf-8"    -> ["application/json", " charset=utf-8"]
+    #   "application/json ; charset=utf-8"   -> ["application/json ", " charset=utf-8"]
+    #   "Application/JSON"                   -> ["Application/JSON"]
+    # The earlier "startswith" approach missed the third case because
+    # it left a trailing space on the type portion. Splitting + strip
+    # + lowercase is the RFC-aligned way to compare MIME types: the
+    # type/subtype is insensitive to case and to surrounding whitespace
+    # around the parameter delimiter.
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    return media_type == "application/json"
 
 
 def _headers_to_dict(raw_headers) -> dict[str, str]:
@@ -580,10 +587,12 @@ def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool
             return body
         try:
             return json.loads(body)
-        except json.JSONDecodeError:
-            # Server sent JSON Content-Type with a non-JSON payload.
-            # Don't pretend we understand it; hand back the raw bytes
-            # so the caller can log / inspect / error out with full
+        except (json.JSONDecodeError, UnicodeError):
+            # Server sent JSON Content-Type with a payload that either
+            # isn't valid JSON (JSONDecodeError) or isn't valid UTF-8
+            # (UnicodeError / UnicodeDecodeError). Either way, hand back
+            # the raw bytes so the caller can log / inspect / error out
+            # with full
             # context. Particularly important on the HttpError path --
             # a misbehaving server replying to a 500 with HTML under a
             # JSON Content-Type shouldn't obscure the status code by
@@ -815,11 +824,19 @@ def post(
     """Issue an HTTP POST. See :func:`get` for shared kwargs.
 
     Args:
-        body: The request body. Any :data:`JSONValue` (dict, list, str,
-            int, float, bool, None) is ``json.dumps``-encoded and the
-            Content-Type header is set to ``application/json`` unless the
-            caller already supplied one. Raw ``bytes`` are sent as-is
-            (the caller owns the framing). ``None`` sends no body.
+        body: The request body.
+
+            * ``None`` (the default) sends NO request body at all --
+              same wire behaviour as ``urllib.request.Request(data=None)``.
+              This is NOT the same as sending a JSON-encoded ``null``
+              payload; if you genuinely want that, pass ``b"null"`` and
+              set Content-Type yourself.
+            * Any other :data:`JSONValue` (dict, list, str, int, float,
+              bool) is ``json.dumps``-encoded and the Content-Type
+              header is set to ``application/json`` unless the caller
+              already supplied one.
+            * Raw ``bytes`` are sent as-is (the caller owns the framing
+              and must supply their own Content-Type if appropriate).
     """
     return _send(
         "POST", url,
