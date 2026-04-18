@@ -223,6 +223,7 @@ def create_cli(
     *,
     description: str | None = None,
     enable_parent_package_imports: bool = False,
+    strict: bool = False,
     version: str | None = None,
     package_name: str | None = None,
 ) -> click.Group:
@@ -277,6 +278,27 @@ def create_cli(
             don't stack duplicate entries (known limitation: the dedup
             does not normalize *existing* ``sys.path`` entries that were
             added via relative/unresolved spellings elsewhere).
+        strict: When True, any command-discovery failure raises
+            ``ClickworkDiscoveryError`` at CLI construction time instead of
+            silently dropping the command with a warning. Failure modes
+            that count: broken import, missing ``cli`` attribute, ``cli``
+            not a Click command, duplicate command name WITHIN a single
+            discovery mechanism (two files in the same ``commands/`` dir,
+            or two installed entry points), and failed entry-point wraps.
+
+            Scope note: in ``discovery_mode="auto"``, a name conflict
+            BETWEEN a local command file and an installed entry point is
+            intentional shadowing (local wins, the installed command is
+            still reachable via fully-qualified import). This cross-
+            mechanism shadowing is NOT a strict-mode failure; only
+            same-mechanism duplicates are.
+
+            Use this flag for production CLIs and release validation
+            where shipping a binary with a missing command is a bug.
+            Defaults to False to preserve the forgiving dev-mode
+            behaviour so upgraders see no change unless they opt in.
+            Keyword-only to keep the positional signature stable. See
+            issue #42 for the full rationale.
         version: Explicit version string (e.g. ``"1.2.3"``). If provided,
             it is used verbatim as the value displayed by ``--version``.
             Takes precedence over ``package_name`` when both are set.
@@ -292,6 +314,10 @@ def create_cli(
         A configured Click group with all discovered commands registered.
 
     Raises:
+        ClickworkDiscoveryError: If ``strict=True`` and discovery observed
+            one or more failures while building the command tree. The
+            exception carries a ``.failures`` list describing each
+            problem so CI can print them all at once.
         ValueError: If ``package_name`` is provided (and ``version`` is
             ``None``) but the named distribution cannot be found by
             :mod:`importlib.metadata`.
@@ -600,9 +626,16 @@ def create_cli(
     # installed entry points, depending on the discovery_mode setting.
     # This runs at factory time (not at invocation time) so the commands
     # appear in --help output immediately.
+    #
+    # ``strict=True`` propagates through the discovery layer: any failure
+    # becomes a ClickworkDiscoveryError raised from right here, before
+    # create_cli() returns. That's the behaviour issue #42 specified --
+    # a broken discovery fails at CLI startup rather than at "user runs
+    # the missing command and gets 'no such command'" time.
     commands = discover_commands(
         commands_dir=commands_dir,
         discovery_mode=discovery_mode,
+        strict=strict,
     )
     for cmd_name, cmd in commands.items():
         cli_group.add_command(cmd, cmd_name)

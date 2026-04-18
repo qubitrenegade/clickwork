@@ -24,13 +24,13 @@ intentionally exercise the warning path use
 ``warnings.catch_warnings()`` or ``pytest.warns()`` to observe without
 propagating.
 """
+
 from __future__ import annotations
 
 import inspect
 import warnings
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Function-decorator path
@@ -110,6 +110,7 @@ def test_cache_key_is_module_qualified():
     # the cache key were qualname-only they'd collide.
     def collide() -> int:
         return 1
+
     collide.__module__ = "pkg_a.sub"
     decorated_a = deprecated(since="1.1", removed_in="1.2", reason="gone")(collide)
 
@@ -118,6 +119,7 @@ def test_cache_key_is_module_qualified():
     # in DIFFERENT modules don't share a dedup entry.
     def collide() -> int:  # noqa: F811 -- intentional name reuse
         return 2
+
     collide.__module__ = "pkg_b.sub"
     decorated_b = deprecated(since="1.1", removed_in="1.2", reason="gone")(collide)
 
@@ -293,6 +295,5 @@ def test_stacklevel_points_to_caller():
     # We compare on basenames to avoid absolute-path brittleness across
     # worktrees and CI runners.
     assert w.filename.endswith("test_deprecated.py"), (
-        f"expected stacklevel=2 to attribute warning to the caller; "
-        f"got filename={w.filename!r}"
+        f"expected stacklevel=2 to attribute warning to the caller; " f"got filename={w.filename!r}"
     )

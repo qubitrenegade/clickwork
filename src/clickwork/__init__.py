@@ -15,6 +15,10 @@ Public API:
     PrerequisiteError - Exception raised when a required tool is missing
     ConfigError       - Exception raised when config validation fails
     HttpError         - Exception raised when an HTTP call returns non-2xx
+    ClickworkDiscoveryError - Exception raised when strict discovery finds
+                              a broken import, missing cli attribute, or
+                              similar command-discovery failure (opt-in via
+                              create_cli(..., strict=True))
     platform_dispatch - Decorator that routes a command to a per-OS impl
     platform          - Submodule exposing dispatch(), is_linux/macos/windows
     http              - Submodule exposing get/post/put/delete + HttpError
@@ -39,6 +43,7 @@ from clickwork._types import (
 )
 from clickwork.cli import create_cli, pass_cli_context
 from clickwork.config import ConfigError, load_config
+from clickwork.discovery import ClickworkDiscoveryError
 from clickwork.global_options import add_global_option
 from clickwork.http import HttpError, delete, get, post, put
 from clickwork.platform import platform_dispatch
@@ -54,6 +59,7 @@ __all__ = [
     "ConfigError",
     "PrerequisiteError",
     "HttpError",
+    "ClickworkDiscoveryError",
     "normalize_prefix",
     "platform",
     "platform_dispatch",
