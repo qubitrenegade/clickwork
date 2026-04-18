@@ -323,18 +323,40 @@ def run(
             # of exactly when during the call the signal arrived.
             # Without this, the KI would propagate up past ``proc``
             # entirely and leave the child running until OS cleanup.
+            #
+            # Every child-process interaction below is guarded against
+            # ProcessLookupError / OSError because the Ctrl-C could have
+            # arrived right *after* the child already exited on its own
+            # (signals and fast-exiting children race). When that happens
+            # we still want the KeyboardInterrupt to propagate cleanly to
+            # the caller -- not be masked by an ignored "no such process"
+            # error during cleanup.
             try:
                 proc.stdin.close()
-            except BrokenPipeError:
+            except (BrokenPipeError, OSError):
                 pass
-            proc.send_signal(signal.SIGINT)
+            try:
+                proc.send_signal(signal.SIGINT)
+            except (ProcessLookupError, OSError):
+                # Child already exited; SIGINT delivery is moot.
+                pass
             try:
                 proc.wait(timeout=SIGINT_TIMEOUT_SECONDS)
             except subprocess.TimeoutExpired:
                 # Child ignored SIGINT; escalate to SIGKILL so we don't
                 # hang the terminal waiting on a wedged child.
-                proc.kill()
-                proc.wait()
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
+                try:
+                    proc.wait()
+                except OSError:
+                    pass
+            except OSError:
+                # wait() itself can raise on some platforms if the child
+                # is already gone -- also fine, we're done either way.
+                pass
             raise
         finally:
             # Close in a finally so a successful-but-partial write still
