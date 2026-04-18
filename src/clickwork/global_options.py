@@ -106,6 +106,20 @@ def add_global_option(
             the callback slot to implement the merge semantics. Wrap the
             click.Option yourself and register it manually if you need a
             custom callback.
+        TypeError: If ``option_kwargs`` contains ``expose_value=True`` -- we
+            force ``expose_value=False`` so the installed option doesn't
+            appear as a kwarg on every command's callback signature. If
+            you need the value injected into a specific command's function,
+            use ``click.option()`` directly on that command instead.
+        ValueError: If Click cannot derive a Python name from
+            ``param_decls`` (typically because no long-form flag like
+            ``--foo`` was provided).
+        ValueError: If any command or group in the tree already has an
+            option with the same Python name or flag string -- catches
+            both "called ``add_global_option()`` twice with the same flag"
+            and "command has the option hand-declared already". The error
+            message names the specific command and conflict so the caller
+            can locate the issue immediately.
 
     Examples:
         Flag with OR semantics, read anywhere in your code::

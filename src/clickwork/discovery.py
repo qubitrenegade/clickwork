@@ -115,15 +115,23 @@ class LazyEntryPointCommand(click.Command):
         real command's context and ``@pass_cli_context`` / ``@click.pass_obj``
         keep working.
 
-        We also pass ``parent=ctx`` so the loaded command's context joins the
-        existing context chain instead of rooting a fresh one. WHY this
-        matters: anything that walks to the root via ``ctx.find_root()``
-        -- notably ``clickwork.add_global_option`` writing to
-        ``ctx.find_root().meta`` -- needs to see the REAL root's meta dict,
-        not a detached one. Without ``parent=ctx`` the loaded plugin
-        command's ``find_root()`` would return its own fresh context and
-        global-option values written at the parent level would be silently
-        invisible to the plugin.
+        We also pass ``parent=ctx.parent`` (NOT ``parent=ctx``) so the
+        loaded command's context joins the existing context chain without
+        becoming a child of the proxy. WHY this matters: anything that
+        walks to the root via ``ctx.find_root()`` -- notably
+        ``clickwork.add_global_option`` writing to ``ctx.find_root().meta``
+        -- needs to see the REAL root's meta dict, not a detached one. If
+        we passed no parent at all, the loaded plugin command's
+        ``find_root()`` would return its own fresh context and global-
+        option values written at the root level would be silently invisible
+        to the plugin. If we passed ``parent=ctx`` (the proxy itself),
+        Click would double-count the command name in ``command_path``
+        (proxy + loaded both contribute the same info_name to the chain),
+        producing duplicated Usage/help text like "myapp plugin-cmd
+        plugin-cmd". Passing ``ctx.parent`` threads the chain correctly:
+        the loaded command *replaces* the proxy at the plugin-cmd level,
+        inheriting the proxy's own parent so ``find_root()`` still reaches
+        the true root.
 
         Args:
             ctx: The Click context, whose ``ctx.args`` contains the
