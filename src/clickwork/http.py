@@ -497,11 +497,22 @@ def _encode_body(
 def _is_json_content_type(content_type: str | None) -> bool:
     """Decide whether a response Content-Type triggers JSON auto-parse.
 
-    We use a prefix match against ``application/json`` so that the common
-    ``application/json; charset=utf-8`` variant parses the same way as a
-    bare ``application/json``. Case-insensitive because Content-Type is
-    an HTTP header and HTTP header values for media-types are defined to
-    be case-insensitive on the type/subtype portion.
+    We split off any MIME parameters (for example ``; charset=utf-8``)
+    and require an EXACT media-type match against ``application/json``
+    (case-insensitive). This means:
+
+      - ``application/json``                -> True
+      - ``application/json; charset=utf-8`` -> True (parameters are dropped)
+      - ``application/json ; charset=utf-8``-> True (whitespace tolerated)
+      - ``Application/JSON``                -> True (case-insensitive)
+      - ``application/jsonx``               -> **False** (NOT a prefix match)
+      - ``application/vnd.api+json``        -> False (different media type)
+
+    This is deliberately stricter than a ``startswith`` check: the
+    earlier draft used one, which would have matched ``application/jsonx``
+    and silently parsed anything whose type string happened to begin
+    with "application/json". The split-and-compare approach matches
+    the RFC 2045 media-type grammar and avoids that footgun.
 
     Args:
         content_type: The raw Content-Type header value (may be ``None``
@@ -594,11 +605,10 @@ def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool
             # isn't valid JSON (JSONDecodeError) or isn't valid UTF-8
             # (UnicodeError / UnicodeDecodeError). Either way, hand back
             # the raw bytes so the caller can log / inspect / error out
-            # with full
-            # context. Particularly important on the HttpError path --
-            # a misbehaving server replying to a 500 with HTML under a
-            # JSON Content-Type shouldn't obscure the status code by
-            # crashing inside our error construction.
+            # with full context. Particularly important on the HttpError
+            # path -- a misbehaving server replying to a 500 with HTML
+            # under a JSON Content-Type shouldn't obscure the status code
+            # by crashing inside our error construction.
             return body
     return body
 

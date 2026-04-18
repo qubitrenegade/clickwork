@@ -34,7 +34,11 @@ The key design decisions pinned by these tests:
    ValueError ("pass None to disable") rather than silently disabling
    the check. An empty list at runtime is almost always a config bug.
 
-Every test mocks ``urllib.request.urlopen`` -- no real network traffic.
+Every test mocks ``clickwork.http._dispatch_request`` -- no real
+network traffic. ``_dispatch_request`` is the module-level wrapper
+around the custom no-redirect opener; patching it gives tests a
+single, stable seam (see ``clickwork.http._dispatch_request`` for
+why the custom opener exists).
 """
 from __future__ import annotations
 
@@ -854,3 +858,49 @@ class TestBodyMethods:
         assert req.get_method() == "DELETE"
         assert req.data == b'{"key": "val"}'
         assert req.get_header("Content-type") == "application/json"
+
+    def test_post_preserves_caller_supplied_content_type_for_json_body(self):
+        """Explicit Content-Type survives JSON body encoding.
+
+        WHY this regression test exists: the contract says auto-setting
+        Content-Type only happens when the caller didn't supply one,
+        so APIs that require a specific content type (e.g.
+        ``application/vnd.api+json``) can opt out of our default.
+        Without this test, a refactor that unconditionally overwrites
+        to ``application/json`` would silently break those callers.
+        """
+        from clickwork import http
+
+        mock, captured = _capture_request()
+        with patch("clickwork.http._dispatch_request", mock):
+            http.post(
+                "https://example.com/api",
+                body={"key": "val"},
+                headers={"Content-Type": "application/vnd.api+json"},
+            )
+
+        req, _ = captured[0]
+        assert req.data == b'{"key": "val"}'
+        # Caller's header wins; we did NOT overwrite to application/json.
+        assert req.get_header("Content-type") == "application/vnd.api+json"
+
+    def test_post_bytes_body_does_not_set_content_type(self):
+        """Raw bytes bodies never get an auto-Content-Type.
+
+        WHY: bytes could be anything (gzip, protobuf, form-encoded,
+        image data). Auto-setting ``Content-Type: application/json``
+        on a bytes body would be actively wrong for every non-JSON
+        use case. The contract says "caller owns the framing" for
+        bytes. This test pins that.
+        """
+        from clickwork import http
+
+        mock, captured = _capture_request()
+        with patch("clickwork.http._dispatch_request", mock):
+            http.post("https://example.com/api", body=b"raw-binary-payload")
+
+        req, _ = captured[0]
+        assert req.data == b"raw-binary-payload"
+        # No Content-Type auto-set; the request goes out with whatever
+        # default (or none) urllib would apply to raw bytes.
+        assert req.get_header("Content-type") is None
