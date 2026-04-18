@@ -357,3 +357,477 @@ class TestRunWithConfirm:
                 stdin_text="hello",
                 stdin_bytes=b"world",
             )
+
+
+class TestRunWithSecrets:
+    """run_with_secrets() delivers secrets via env (always) and stdin (optional).
+
+    The helper is a thin, safety-focused wrapper around run(). It exists to
+    make the "subprocess needs a secret" contract explicit at every call
+    site, and to centralise two guardrails:
+      - reject any ``Secret`` instance that appears directly in ``cmd``
+        (argv is world-readable in ``ps``);
+      - redact secret-sourced env vars in the log line this helper emits
+        before delegating to ``run()``.
+
+    Child processes running under this helper always see ``secrets`` in
+    their env; optionally, one of those secrets can ALSO be piped through
+    stdin (for tools like ``wrangler secret put --env-stdin`` or
+    ``docker login --password-stdin``). The dual-channel delivery is
+    deliberate: some tools prefer env, some prefer stdin, and this helper
+    lets the caller support both without re-plumbing secret handling.
+    """
+
+    def test_run_with_secrets_rejects_Secret_in_argv(self):
+        """A Secret instance appearing in cmd is a footgun; reject it loudly.
+
+        WHY: argv is visible via ``ps`` / ``/proc/*/cmdline`` to other
+        processes on the same host. If a caller accidentally writes
+        ``run_with_secrets(["curl", "-H", f"Authorization: Bearer {tok}",
+        ...])`` where ``tok`` is a Secret, the token lands in argv and
+        leaks. Rejecting the explicit Secret-in-argv case catches the
+        most common mistake.
+
+        The error message must name the offending arg by **position**
+        (its index in cmd), NOT by value -- the whole point is to avoid
+        leaking the secret, and an error message that echoes .get() back
+        would undermine that.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        secret = Secret("supersecret-leaky")
+        with pytest.raises(ValueError) as exc_info:
+            run_with_secrets(["cmd", secret], secrets={})
+
+        # Error message must reference the position (index 1) so the
+        # caller knows which arg to fix.
+        assert "1" in str(exc_info.value), (
+            f"Expected error to name the offending position, got: {exc_info.value!r}"
+        )
+        # The raw secret value must NOT appear anywhere in the error -- a
+        # regression here would mean our "don't leak secrets" helper leaks
+        # secrets in its own rejection path.
+        assert "supersecret-leaky" not in str(exc_info.value)
+
+    def test_run_with_secrets_routes_via_env(self):
+        """Secrets are delivered to the child subprocess via environment variables.
+
+        WHY env-as-default: tools like ``CLOUDFLARE_API_TOKEN`` expect
+        credentials in env; forcing every caller to build an env dict
+        themselves is error-prone. Giving ``secrets=`` its own channel
+        makes the "this is sensitive" signal visible at each call site.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        # Child reads the env var we claim to have set and exits 0 iff
+        # the value matches -- we assert exit code here. The companion
+        # test below (``..._env_value_reaches_child``) pins the exact
+        # child stdout via ``capfd``; this one only verifies the
+        # successful-exit path so a regression where the env var never
+        # reaches the child still fails loudly (the child would exit
+        # non-zero with KeyError before ever writing to stdout).
+        result = run_with_secrets(
+            [
+                sys.executable,
+                "-c",
+                "import os, sys; sys.stdout.write(os.environ['TOKEN'])",
+            ],
+            secrets={"TOKEN": Secret("supersecret")},
+        )
+        assert result is not None
+        assert result.returncode == 0
+
+    def test_run_with_secrets_env_value_reaches_child(self, capfd):
+        """Second form of the env-delivery test using capfd to verify payload.
+
+        WHY a second test: the first asserts the happy path without
+        capturing. This one pins the exact value the child sees,
+        guaranteeing Secret.get() was called and the value was placed
+        into env under the right key.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        run_with_secrets(
+            [
+                sys.executable,
+                "-c",
+                "import os, sys; sys.stdout.write(os.environ['TOKEN'])",
+            ],
+            secrets={"TOKEN": Secret("supersecret")},
+        )
+        captured = capfd.readouterr()
+        assert captured.out == "supersecret"
+
+    def test_run_with_secrets_routes_via_stdin_when_stdin_secret_set(self, capfd):
+        """stdin_secret="NAME" routes secrets[NAME].get() through the child's stdin.
+
+        WHY dual-channel: tools like ``wrangler secret put --env-stdin``
+        and ``docker login --password-stdin`` want the secret on stdin
+        (keeping it out of argv AND out of env, where a child process
+        inspection might surface it). The same value is ALSO placed in
+        env -- that's intentional; some tools read from one channel, some
+        from the other, and the caller shouldn't have to pick.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        run_with_secrets(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.write(sys.stdin.read())",
+            ],
+            secrets={"PW": Secret("hunter2")},
+            stdin_secret="PW",
+        )
+        captured = capfd.readouterr()
+        assert captured.out == "hunter2"
+
+    def test_run_with_secrets_logs_redacted(self, caplog):
+        """The helper's log line shows env-var NAMES but never VALUES.
+
+        WHY: operators debugging a subprocess launch need to see WHICH
+        environment variables were set (to spot misspellings, missing
+        keys, etc.) but must never see the values. The redaction token
+        ``<redacted>`` is the canonical placeholder.
+        """
+        import logging
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        # caplog captures records from the clickwork logger. INFO level
+        # so the helper's own info-level message is retained.
+        with caplog.at_level(logging.INFO, logger="clickwork"):
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"K": Secret("v")},
+            )
+
+        # Flatten all captured log messages for substring checks.
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert "<redacted>" in all_log_text, (
+            f"Expected '<redacted>' marker in log output, got: {all_log_text!r}"
+        )
+        # The env-var NAME stays visible so operators can see which keys
+        # were set.
+        assert "K" in all_log_text
+        # The value must NOT appear anywhere in the captured log output.
+        # (A one-character value like "v" might false-match in other log
+        # text, so we check it appears only as part of "<redacted>" --
+        # which has no 'v' -- or inside words like "secrets" / "env" /
+        # "delegate". For safety, grep for "=v" which would be the shape
+        # of a leaked "K=v" pair.)
+        assert "=v" not in all_log_text, (
+            f"Secret value leaked into log: {all_log_text!r}"
+        )
+
+    def test_run_with_secrets_does_not_leak_non_secret_env_values(self, caplog):
+        """Non-secret env values ALSO redacted (tightened after Copilot PR #28).
+
+        WHY: a caller can pass ``env={"REGION": "us-east-1", "API_KEY":
+        "accidentally-not-wrapped"}`` -- we can't tell which of those
+        the caller considers sensitive. The helper's contract is "this
+        invocation carries secrets", so treating the whole env as
+        potentially-sensitive is the safer default. Non-secret values
+        render as ``<set>`` so the log still shows which keys were set
+        (useful for debugging missing/mistyped keys) without exposing
+        the values.
+
+        This test pins the behaviour: pass a non-secret env value that
+        would be embarrassing to leak, assert it NEVER appears in the
+        log output.
+        """
+        import logging
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        accidental_plaintext = "ghp_totallyNotWrappedInSecret_12345"
+
+        with caplog.at_level(logging.INFO, logger="clickwork"):
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"REAL_TOKEN": Secret("also-hidden")},
+                env={"BAD_TOKEN": accidental_plaintext, "REGION": "us-east-1"},
+            )
+
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert accidental_plaintext not in all_log_text, (
+            f"Non-secret env value leaked into log: {all_log_text!r}"
+        )
+        # Non-secret VALUES also hidden: "us-east-1" must not appear either.
+        assert "us-east-1" not in all_log_text
+        # But the NAMES must still be visible so operators can see shape.
+        assert "BAD_TOKEN" in all_log_text
+        assert "REGION" in all_log_text
+        assert "REAL_TOKEN" in all_log_text
+        # And the tags differ so the operator can tell WHICH were secret-sourced.
+        assert "REAL_TOKEN=<redacted>" in all_log_text
+        assert "BAD_TOKEN=<set>" in all_log_text
+
+    def test_run_with_secrets_stdin_secret_must_be_in_secrets_dict(self):
+        """stdin_secret must name a key that exists in secrets={}.
+
+        WHY: if the caller typos the key name, silently routing None or
+        empty through stdin would produce a confusing failure from the
+        child process. Raising early with a ValueError makes the mistake
+        obvious. The error message must NOT leak any secret value.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        # Case 1: secrets dict is empty.
+        with pytest.raises(ValueError) as exc_info:
+            run_with_secrets(
+                ["cmd"],
+                secrets={},
+                stdin_secret="MISSING",
+            )
+        # Name the missing key so the caller knows what to fix.
+        assert "MISSING" in str(exc_info.value)
+
+        # Case 2: secrets present but none matching. Ensure existing
+        # Secret values don't leak into the rejection message.
+        with pytest.raises(ValueError) as exc_info:
+            run_with_secrets(
+                ["cmd"],
+                secrets={"OTHER": Secret("do-not-leak-me")},
+                stdin_secret="MISSING",
+            )
+        assert "do-not-leak-me" not in str(exc_info.value)
+
+    def test_run_with_secrets_respects_dry_run(self):
+        """dry_run=True must short-circuit before any subprocess starts.
+
+        WHY: same policy as run(stdin_text=..., dry_run=True) -- dry-run
+        is a safety net, and spawning a child just to throw away its
+        output would defeat the purpose (and could leak the secret to
+        the child even if we never read its output).
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        with patch("subprocess.Popen") as mock_popen:
+            result = run_with_secrets(
+                [sys.executable, "-c", "import sys; sys.exit(1)"],
+                secrets={"TOKEN": Secret("v")},
+                dry_run=True,
+            )
+
+        assert result is None
+        mock_popen.assert_not_called()
+
+    def test_run_with_secrets_dry_run_does_not_unwrap_secrets(self):
+        """dry_run=True must not call Secret.get() on any secret.
+
+        WHY: dry-run is "nothing happens" -- no subprocess, no file
+        writes, and (this test) no secret values pulled into memory.
+        A Secret whose .get() would otherwise raise (e.g. one backed by
+        a lazy source that errors during dry-run) must pass cleanly
+        through dry-run. We pin this by wrapping a Secret in a spy that
+        tracks every .get() call; the assertion is that it was called
+        ZERO times.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        unwrap_count = {"count": 0}
+
+        class _SpySecret(Secret):
+            """Secret that records every .get() invocation.
+
+            Inherits Secret so isinstance checks still fire; overrides
+            .get to increment the counter. We do NOT want the counter
+            touched during dry-run.
+            """
+
+            def get(self) -> str:
+                unwrap_count["count"] += 1
+                return super().get()
+
+        result = run_with_secrets(
+            [sys.executable, "-c", "print('never runs')"],
+            secrets={"TOKEN": _SpySecret("the-secret-value")},
+            stdin_secret="TOKEN",
+            dry_run=True,
+        )
+        assert result is None
+        assert unwrap_count["count"] == 0, (
+            f"dry_run=True must not unwrap any Secret; got "
+            f"{unwrap_count['count']} .get() call(s). A regression here "
+            "would mean dry-run is pulling secret values into process "
+            "memory, contradicting the docstring contract."
+        )
+
+    def test_run_with_secrets_rejects_non_str_non_secret_argv(self):
+        """cmd elements that aren't str and aren't Secret raise TypeError.
+
+        WHY: an earlier implementation silently dropped non-str elements
+        from cmd via an isinstance-filter, which could change the
+        command the child sees (if a PathLike, bytes, or int sneaked
+        through). The new guard validates every element is str after
+        the Secret-rejection step so the caller gets a loud error at
+        the offending index instead of a mysterious "command did the
+        wrong thing" bug at runtime.
+        """
+        from clickwork.process import run_with_secrets
+        from pathlib import Path
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                ["echo", Path("/tmp/nope")],
+                secrets={},
+            )
+        # The error must name the offending index so the caller can
+        # locate the bad arg without a traceback hunt.
+        assert "cmd[1]" in str(exc_info.value)
+        # Mention the type so the fix (str(path)) is obvious.
+        assert "PosixPath" in str(exc_info.value) or "WindowsPath" in str(exc_info.value) or "Path" in str(exc_info.value)
+
+    def test_run_with_secrets_rejects_non_str_env_value_before_unwrap(self):
+        """Non-str env values must raise BEFORE any Secret.get() runs.
+
+        WHY: if caller's ``env={"X": 1}`` or ``env={1: "x"}`` reaches
+        subprocess.Popen, it raises TypeError -- but by that point
+        every Secret in ``secrets`` has already been unwrapped into
+        memory. Validating env types up front keeps the "minimal
+        touch" promise: no Secret ever gets unwrapped on a call that
+        was doomed anyway. The Spy-Secret counter pins that.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        unwrap_count = {"count": 0}
+
+        class _SpySecret(Secret):
+            def get(self) -> str:
+                unwrap_count["count"] += 1
+                return super().get()
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"TOKEN": _SpySecret("must-not-leak")},
+                env={"REGION": 42},  # type: ignore[dict-item]
+            )
+
+        assert "REGION" in str(exc_info.value)
+        assert "int" in str(exc_info.value)
+        # Most important assertion: no Secret.get() happened. Earlier
+        # flow would have unwrapped TOKEN into full_env, then crashed
+        # on Popen's env validation. We want to catch this before any
+        # secret material leaves the wrapper.
+        assert unwrap_count["count"] == 0, (
+            f"Expected zero Secret.get() calls before the env validation "
+            f"fires; got {unwrap_count['count']}. A regression here would "
+            "mean env-type failures unwrap secrets unnecessarily."
+        )
+        # Secret value must also not appear in the error text.
+        assert "must-not-leak" not in str(exc_info.value)
+
+    def test_run_with_secrets_rejects_non_str_env_key(self):
+        """Non-str env keys also rejected up front (same rationale)."""
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        with pytest.raises(TypeError, match="env keys must be str"):
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"TOKEN": Secret("v")},
+                env={42: "value"},  # type: ignore[dict-item]
+            )
+
+    def test_run_with_secrets_rejects_non_str_key_in_secrets_dict(self):
+        """secrets keys must be str (env-var names), not int / tuple / etc.
+
+        WHY: an earlier draft only validated the values. A caller passing
+        ``secrets={1: Secret("x")}`` would then unwrap the Secret (pulling
+        it into memory!) and fail mid-subprocess launch with a confusing
+        ``TypeError: expected str, bytes or os.PathLike object, not int``
+        far from the real cause. Validate key types up front so the
+        Secret.get() never happens on the bad call.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={1: Secret("value-must-not-leak")},  # type: ignore[dict-item]
+            )
+        # Error names the offending type but NEVER the value.
+        assert "int" in str(exc_info.value)
+        assert "value-must-not-leak" not in str(exc_info.value)
+
+    def test_run_with_secrets_rejects_non_Secret_value_in_secrets_dict(self):
+        """secrets={"K": "plain-string"} fails with a clear TypeError.
+
+        WHY: if the caller forgets to wrap a value in Secret, .get()
+        would raise AttributeError mid-execution. Through clickwork's
+        wrapped_invoke that surfaces as exit 2 "Internal error:
+        'str' object has no attribute 'get'" -- classified as a
+        framework bug when it's really a user-side wrapping miss.
+        The up-front TypeError keeps the error close to the cause and
+        doesn't echo the value (which might be sensitive even
+        unwrapped).
+        """
+        from clickwork.process import run_with_secrets
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"TOKEN": "plain-string-not-wrapped"},  # type: ignore[dict-item]
+            )
+        # Must name the offending key AND its type so the fix is
+        # obvious, but NEVER the value (a caller who passed a token
+        # un-Secret-wrapped shouldn't see it echoed in the error
+        # message -- same redaction discipline as everywhere else).
+        assert "TOKEN" in str(exc_info.value)
+        assert "str" in str(exc_info.value)  # type name, not value
+        assert "plain-string-not-wrapped" not in str(exc_info.value)
+
+    def test_run_with_secrets_rejects_non_list_cmd(self):
+        """cmd must be a list, not a tuple/str/other iterable.
+
+        WHY: matches the _validate_cmd guard run()/capture() already
+        enforce. A tuple would iterate fine in plain Python but
+        signals the caller is treating argv as something other than a
+        mutable list -- often a sign they came from a string.format
+        chain that should have been a list[str] to begin with. The
+        same list-only rule catches raw string commands (which is the
+        shell-injection footgun _validate_cmd was originally written
+        to prevent).
+        """
+        from clickwork.process import run_with_secrets
+
+        with pytest.raises(TypeError, match="cmd must be a list"):
+            run_with_secrets(
+                "echo hello",  # type: ignore[arg-type] -- the point of the test
+                secrets={},
+            )
+
+    def test_run_with_secrets_merges_caller_env(self, capfd):
+        """Caller-supplied env is merged with secrets; secrets win on key conflict.
+
+        WHY: callers often want to set non-secret env vars (region,
+        config path) alongside secrets. The helper should layer them,
+        and secrets should win if a caller foolishly passes the same
+        key in both env and secrets -- the secrets value is what the
+        call was set up to deliver.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        run_with_secrets(
+            [
+                sys.executable,
+                "-c",
+                "import os, sys; sys.stdout.write(os.environ['REGION'] + ':' + os.environ['TOKEN'])",
+            ],
+            secrets={"TOKEN": Secret("t")},
+            env={"REGION": "us-east-1"},
+        )
+        captured = capfd.readouterr()
+        assert captured.out == "us-east-1:t"

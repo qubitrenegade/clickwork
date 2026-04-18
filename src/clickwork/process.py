@@ -24,7 +24,7 @@ import shlex
 import signal
 import subprocess
 
-from clickwork._types import CliProcessError
+from clickwork._types import CliProcessError, Secret
 from clickwork.prompts import confirm as _prompt_confirm
 
 logger = logging.getLogger("clickwork")
@@ -500,4 +500,379 @@ def run_with_confirm(
         env=env,
         stdin_text=stdin_text,
         stdin_bytes=stdin_bytes,
+    )
+
+
+def _validate_no_secret_in_argv(cmd: list[str | Secret]) -> None:
+    """Reject any ``Secret`` instance that appears as an argv element.
+
+    WHY an explicit-instance check and NOT a deep value scan:
+    argv is world-readable via ``ps`` / ``/proc/*/cmdline`` on most
+    POSIX systems. The goal of this guard is to catch the common
+    footgun -- a caller writing ``run_with_secrets(["curl", "-H",
+    f"Authorization: Bearer {tok}"], ...)`` where ``tok`` is a
+    ``Secret`` -- and surface it loudly before the subprocess starts.
+
+    We deliberately do NOT scan string elements for values that
+    happen to match some ``Secret.get()``. That would either require
+    the caller to declare every secret in advance (defeating the
+    ``secrets=`` signature) or scan every string against every known
+    Secret globally (brittle, performance-hostile, and prone to
+    false positives on short secrets). The explicit-Secret check
+    catches the realistic mistake without the deep-scan pitfalls.
+
+    The error message names the offending arg's POSITION (its index
+    in ``cmd``), never its value. Leaking ``.get()`` in our own
+    rejection path would undermine the whole point of the helper.
+
+    Args:
+        cmd: Argv list whose elements may be ``str`` or ``Secret``.
+
+    Raises:
+        ValueError: If any element is a ``Secret`` instance. The
+            message names the first offending position.
+    """
+    for idx, arg in enumerate(cmd):
+        if isinstance(arg, Secret):
+            # NOTE: no str(arg) here -- Secret.__str__ returns "***"
+            # which is safe, but we also don't want the error message
+            # to hint at the arg beyond its position. Position alone
+            # is enough for the caller to fix the call site.
+            raise ValueError(
+                f"cmd[{idx}] is a Secret instance. Do not place secrets "
+                "in argv (visible in `ps` output). Pass them via "
+                "`secrets={...}` (env) or `stdin_secret=\"NAME\"` (stdin) instead."
+            )
+
+
+def _format_env_redacted(
+    env: dict[str, str] | None,
+    secret_keys: set[str],
+) -> str:
+    """Render an env dict for logging with ALL values redacted.
+
+    Keys that came from ``secrets={}`` are tagged ``<redacted>``; keys
+    that came from the caller's own ``env`` dict are tagged ``<set>``.
+    Either way, no value content reaches the log.
+
+    WHY we redact non-secret values too (tightened after Copilot review
+    on PR #28): even env vars the caller didn't explicitly wrap in
+    ``Secret`` may be sensitive -- a caller might forget to wrap an
+    ``API_TOKEN`` before dropping it into ``env=``, and printing that
+    to a log would compound the mistake. ``run_with_secrets`` is by
+    definition the "secrets in play" path; treating every env var on
+    that codepath as potentially-sensitive is the safer default.
+    Operators who need to see non-secret env values for debugging can
+    use ``ctx.run`` directly, which doesn't log env at all.
+
+    Names stay visible so operators can confirm WHICH env was set
+    (detect missing / mistyped keys) without seeing the values.
+
+    Args:
+        env: The extra / override env dict that ``_build_env()`` will
+            merge into the inherited ``os.environ`` for the subprocess
+            (NOT the full inherited environment -- this helper only
+            sees and formats the entries the caller / secrets dict
+            explicitly supplied). ``None`` if no extra env was built.
+        secret_keys: The set of keys whose values came from ``secrets``.
+            Used to tag those keys as ``<redacted>`` vs ``<set>`` for
+            caller-supplied env, so the log clearly shows which keys
+            were secret-sourced.
+
+    Returns:
+        A single-line string representation suitable for a log message.
+    """
+    if env is None:
+        return "{}"
+    parts: list[str] = []
+    for name in env:
+        if name in secret_keys:
+            parts.append(f"{name}=<redacted>")
+        else:
+            # Still hide the value (see WHY above) but tag it so the
+            # log distinguishes "secret-sourced" from "caller env".
+            parts.append(f"{name}=<set>")
+    return "{" + ", ".join(parts) + "}"
+
+
+def run_with_secrets(
+    cmd: list[str | Secret],
+    *,
+    secrets: dict[str, Secret],
+    stdin_secret: str | None = None,
+    dry_run: bool = False,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess | None:
+    """Execute a command with secrets delivered via env and/or stdin, never argv.
+
+    This is a safety-focused wrapper over :func:`run` for subprocesses that
+    need sensitive data. It centralises two guardrails that are easy to
+    forget at individual call sites:
+
+    1. **Explicit-Secret rejection in argv.** Any ``Secret`` instance that
+       appears directly in ``cmd`` raises :class:`ValueError` before the
+       subprocess starts. Argv is world-readable via ``ps`` and
+       ``/proc/*/cmdline`` on most POSIX systems, so putting a secret
+       there leaks it to any local user. The check is intentionally
+       shallow: we reject *explicit Secret instances only*, not string
+       arguments whose value happens to match some ``Secret.get()``. The
+       rationale -- and why a deep scan is NOT the right choice here --
+       is spelled out on :func:`_validate_no_secret_in_argv`.
+    2. **Redacted logging.** The helper emits its own log line BEFORE
+       delegating to :func:`run`, with EVERY env-var value redacted.
+       Secret-sourced entries render as ``NAME=<redacted>``; caller-
+       supplied ``env`` entries render as ``NAME=<set>``. Env-var names
+       stay visible so operators can see what environment the
+       subprocess sees (missing / mistyped keys); values are uniformly
+       hidden because on this codepath any non-secret value might ALSO
+       be sensitive (a caller could forget to wrap a token in Secret
+       and drop it into ``env=``; printing that would compound the
+       mistake). ``run()`` itself has no knowledge of Secret semantics
+       and emits no env-echoing logs during normal execution, so no
+       redaction is needed there.
+
+    Delivery:
+
+    - **Env (always).** Every key in ``secrets`` is placed in the
+      subprocess's environment with its unwrapped value. Caller-supplied
+      ``env`` is merged underneath; on key conflict, ``secrets`` wins.
+    - **Stdin (optional).** If ``stdin_secret="NAME"`` is set, the value
+      of ``secrets["NAME"]`` is ALSO piped to the child's stdin (via
+      Wave 1's ``stdin_text=`` helper on :func:`run`). The same value
+      is in env -- some tools prefer one channel, some the other.
+
+    Args:
+        cmd: Argv list. Elements are typed as ``str | Secret`` so the
+            Secret-in-argv check is meaningful at the type level, but
+            after validation argv is guaranteed to be plain strings.
+        secrets: Keyword-only. Mapping of env-var names to ``Secret``
+            instances. Passing an empty dict is legal (no secrets
+            delivered) but in that case you probably want :func:`run`
+            directly -- using this helper when there are no secrets
+            just adds ceremony with no safety benefit.
+        stdin_secret: Keyword-only. If set, the name of the key in
+            ``secrets`` whose value should ALSO be piped through stdin.
+            Must be a key in ``secrets`` -- otherwise raises
+            :class:`ValueError` without leaking any secret value.
+        dry_run: Keyword-only. If True, log what would happen and return
+            ``None`` without spawning a subprocess or reading any
+            secret value into a child's env / stdin. Matches the
+            :func:`run` dry-run semantics.
+        env: Keyword-only. Additional (non-secret) env vars to pass
+            through to the subprocess. Merged UNDER ``secrets`` so the
+            secret value always wins on key conflict.
+
+    Returns:
+        :class:`subprocess.CompletedProcess` on success, or ``None`` in
+        dry-run mode.
+
+    Raises:
+        ValueError: If any ``Secret`` appears in ``cmd``, or if
+            ``stdin_secret`` names a key that isn't in ``secrets``.
+        CliProcessError: Propagated from :func:`run` if the child
+            exits non-zero.
+
+    Example -- ``wrangler secret put`` reads the secret from stdin so
+    it never appears in argv::
+
+        ctx.run_with_secrets(
+            ["wrangler", "secret", "put", "API_TOKEN"],
+            secrets={"CLOUDFLARE_API_TOKEN": Secret(token)},
+            stdin_secret="CLOUDFLARE_API_TOKEN",
+        )
+
+    Example -- ``docker login --password-stdin`` uses the same pattern::
+
+        ctx.run_with_secrets(
+            ["docker", "login", "-u", username, "--password-stdin",
+             "registry.example.com"],
+            secrets={"DOCKER_REG_PASSWORD": Secret(password)},
+            stdin_secret="DOCKER_REG_PASSWORD",
+        )
+
+    Follow-up (deliberately out of scope here):
+        A global ``--log-insecure-secrets`` flag / env var would let
+        operators opt in to unredacted logging during local debugging.
+        That's tracked as a separate issue; this helper always redacts.
+    """
+    # 1. Same list-not-string guardrail as run() / capture() /
+    # run_with_confirm. Callers who pass a tuple or a raw string would
+    # otherwise slip past the argv iteration below and bypass the
+    # shell-injection contract the other helpers enforce. _validate_cmd
+    # only checks isinstance(cmd, list), so our declared
+    # list[str | Secret] element typing still goes through it cleanly.
+    _validate_cmd(cmd)
+
+    # 2. Argv guardrail. Run this BEFORE any logging / env building so
+    # the rejection happens as early as possible and can't accidentally
+    # surface the secret through a pre-check log line.
+    _validate_no_secret_in_argv(cmd)
+
+    # 3. After the Secret check, every element must be a plain str. A
+    # PathLike, bytes, or int sneaking through would otherwise get
+    # silently dropped by the old filter-comprehension, changing the
+    # command the child sees. Fail loudly with the offending index so
+    # the caller knows exactly what to fix.
+    for idx, arg in enumerate(cmd):
+        if not isinstance(arg, str):
+            raise TypeError(
+                f"cmd[{idx}] must be a str; got {type(arg).__name__}. "
+                "run_with_secrets only accepts str (and Secret, which is "
+                "rejected separately as a guardrail). Convert paths with "
+                "str(path), ints with str(n), etc."
+            )
+
+    # 4. Validate every KEY in ``secrets`` is a str and every VALUE is
+    # a Secret instance. Two distinct failure modes this prevents:
+    #   a) Non-str keys (e.g. ``secrets={1: Secret("x")}``) would
+    #      become env-var names and later fail mid-subprocess launch
+    #      with ``TypeError: expected str, bytes or os.PathLike
+    #      object, not int``. By that point we've already unwrapped
+    #      the Secret into memory -- too late for a clean recovery.
+    #   b) Non-Secret values (e.g. ``secrets={"T": "raw string"}``)
+    #      would crash on ``.get()`` below, misclassified as a
+    #      framework bug through clickwork.cli's wrapped_invoke.
+    # Error messages name the offending key/type but never the
+    # VALUE (which might be sensitive even in its unwrapped form).
+    for sname, sval in secrets.items():
+        if not isinstance(sname, str):
+            raise TypeError(
+                f"secrets keys must be str (env-var names); got key of "
+                f"type {type(sname).__name__}. Every entry in the "
+                "secrets dict maps an env-var NAME (str) to a Secret."
+            )
+        if not isinstance(sval, Secret):
+            raise TypeError(
+                f"secrets[{sname!r}] must be a Secret instance; got "
+                f"{type(sval).__name__}. Wrap sensitive values as "
+                "Secret(...) before passing them into run_with_secrets."
+            )
+
+    # 4b. Same discipline for caller-supplied ``env``: if it contains a
+    # non-str key or non-str value, subprocess.Popen raises TypeError
+    # AFTER we'd already unwrapped every Secret into memory -- a wasted
+    # .get() that contradicts the "minimal touch" / safe-failure promise
+    # this function makes elsewhere. Validate env types now so a bad
+    # env dict never triggers a Secret unwrap. Error names the offending
+    # key/type but never any value (a caller's env might itself contain
+    # something sensitive they forgot to wrap; same policy as the
+    # run_with_secrets log redaction).
+    if env is not None:
+        for ekey, eval_ in env.items():
+            if not isinstance(ekey, str):
+                raise TypeError(
+                    f"env keys must be str; got key of type "
+                    f"{type(ekey).__name__}. Every entry in the env "
+                    "dict maps an env-var NAME (str) to its string value."
+                )
+            if not isinstance(eval_, str):
+                raise TypeError(
+                    f"env[{ekey!r}] must be str; got "
+                    f"{type(eval_).__name__}. subprocess.Popen rejects "
+                    "non-str env values -- convert ints/paths with "
+                    "str(...) before passing."
+                )
+
+    # 5. stdin_secret must be a str (or None) before we use it in a
+    # dict-membership test. Without this check a caller who passes
+    # a list/dict (common typo: ``stdin_secret=["TOKEN"]`` when they
+    # meant the string) would crash on the ``in secrets`` check below
+    # with an opaque ``TypeError: unhashable type: 'list'`` far from
+    # the real cause. Validate the type up front with an actionable
+    # message.
+    if stdin_secret is not None and not isinstance(stdin_secret, str):
+        raise TypeError(
+            f"stdin_secret must be a str (or None); got "
+            f"{type(stdin_secret).__name__}. Pass the KEY name from "
+            "your ``secrets={}`` dict, e.g. stdin_secret=\"TOKEN\"."
+        )
+
+    # 6. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
+    # we touch Secret.get() for any reason, so a typo surfaces as a
+    # clear ValueError with no secret material in flight.
+    if stdin_secret is not None and stdin_secret not in secrets:
+        # Include the requested key name (safe -- the caller typed it)
+        # but NEVER iterate the secrets dict values into the message.
+        raise ValueError(
+            f"stdin_secret={stdin_secret!r} is not a key in secrets={{...}}. "
+            "The name must match one of the keys you pass in `secrets`."
+        )
+
+    # After validation, every cmd element is a plain str -- the element
+    # typing is list[str | Secret] at the API boundary, but the runtime
+    # is guaranteed narrower. Cast via list() so downstream helpers
+    # (run, _format_cmd) get the concrete list[str] they expect.
+    plain_cmd: list[str] = list(cmd)  # type: ignore[arg-type]
+
+    stdin_display = (
+        f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
+    )
+
+    # 7. Dry-run short-circuit. Docstring promises dry_run does not
+    # pull secret values into memory. Honouring that means bailing out
+    # BEFORE Secret.get() on any entry of ``secrets`` -- only the
+    # caller-supplied ``env`` (which is already plain strings) and the
+    # secret KEYS (not values) appear in the dry-run log.
+    if dry_run:
+        base_env_for_log: dict[str, str] = dict(env) if env is not None else {}
+        # Show the secret keys as NAME=<redacted> in the dry-run log so
+        # an operator inspecting a dry-run can see the full env shape
+        # without any values having been read off the Secret objects.
+        redacted_secret_env = {name: "<redacted>" for name in secrets}
+        display_env = {**base_env_for_log, **redacted_secret_env}
+        logger.info(
+            "run_with_secrets [dry-run]: cmd=%s env=%s stdin=%s",
+            _format_cmd(plain_cmd),
+            # secret_keys = names we'd redact; in dry-run every secret
+            # is redacted regardless because we haven't unwrapped them.
+            _format_env_redacted(display_env, set(secrets)),
+            stdin_display,
+        )
+        return None
+
+    # 8. Build the full env for the subprocess. Caller's env goes first
+    # so secrets win on key conflict -- the helper's job is to deliver
+    # the secret, and a stale override from ``env`` would silently break
+    # that contract. Each Secret.get() is called EXACTLY ONCE and the
+    # result reused below for stdin delivery if needed.
+    base_env: dict[str, str] = dict(env) if env is not None else {}
+    secret_env = {name: s.get() for name, s in secrets.items()}
+    full_env: dict[str, str] = {**base_env, **secret_env}
+    # Track which keys came from secrets so the log line tags them as
+    # ``<redacted>``. Non-secret (caller-supplied) env keys are tagged
+    # ``<set>`` by ``_format_env_redacted`` -- same redaction, different
+    # label so operators can tell them apart. Neither leaks the value.
+    secret_keys = set(secret_env.keys())
+
+    # 9. Resolve the stdin payload from the ALREADY-unwrapped secret_env
+    # dict rather than calling Secret.get() a second time -- one unwrap
+    # per secret keeps the "minimal touch" contract explicit.
+    stdin_payload: str | None = None
+    if stdin_secret is not None:
+        stdin_payload = secret_env[stdin_secret]
+
+    # 10. Emit the helper's own log line. This is the SINGLE place where
+    # the "secrets-in-play" subprocess launch is recorded. We log
+    # BEFORE delegating to run() so:
+    #   - the argv (already validated Secret-free and all-str) appears
+    #     once, here, with full context (env + stdin redacted);
+    #   - run()'s own logging stays unchanged -- it never sees Secret
+    #     objects, only plain strings, and during normal (non-dry-run)
+    #     execution it doesn't log env at all (see process.run()).
+    logger.info(
+        "run_with_secrets: cmd=%s env=%s stdin=%s",
+        _format_cmd(plain_cmd),
+        _format_env_redacted(full_env, secret_keys),
+        stdin_display,
+    )
+
+    # 11. Delegate. run() handles signal forwarding and stdin piping --
+    # we reuse all of it instead of reinventing the wheel (and instead
+    # of teaching run() about Secret). dry_run was already handled
+    # above so we pass False here to make that explicit.
+    return run(
+        plain_cmd,
+        dry_run=False,
+        env=full_env,
+        stdin_text=stdin_payload,
     )

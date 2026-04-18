@@ -604,6 +604,51 @@ class TestConvenienceMethods:
         captured = capfd.readouterr()
         assert captured.out == "confirm-token"
 
+    def test_ctx_run_with_secrets_forwards_stdin_secret(self, tmp_path: Path, capfd):
+        """ctx.run_with_secrets(stdin_secret=...) must round-trip through the ctx binding.
+
+        WHY this test exists (in addition to the process-level tests in
+        test_process.py): the ctx.run_with_secrets binding in create_cli()
+        is a forwarding lambda; if a future refactor silently drops
+        ``stdin_secret`` from its signature, process-level tests would
+        still pass but the CLI surface would break. This test pins the
+        ctx-level forwarding shape, mirroring the symmetry of
+        test_ctx_run_forwards_stdin_text / test_ctx_run_with_confirm_forwards_stdin_text.
+        """
+        from clickwork.cli import create_cli
+        from clickwork._types import Secret
+
+        received = {}
+
+        @click.command()
+        @click.pass_obj
+        def echo_stdin_secret(ctx):
+            # Round-trip a secret through the child's stdin via ctx.run_with_secrets.
+            # The secret is ALSO placed in env under "PW" (dual-channel
+            # delivery), but for this test we only assert the stdin side.
+            result = ctx.run_with_secrets(
+                [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+                secrets={"PW": Secret("ctx-secret-via-stdin")},
+                stdin_secret="PW",
+            )
+            received["returncode"] = result.returncode if result is not None else None
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(echo_stdin_secret)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["echo-stdin-secret"])
+        assert result.exit_code == 0, f"CLI failed: {result.output!r}"
+        assert received["returncode"] == 0
+        captured = capfd.readouterr()
+        assert captured.out == "ctx-secret-via-stdin", (
+            f"Expected stdin payload to round-trip through ctx.run_with_secrets; "
+            f"got {captured.out!r}"
+        )
+
     def test_ctx_run_respects_dry_run(self, tmp_path: Path):
         """ctx.run() in dry-run mode should not execute the command (returns None).
 
