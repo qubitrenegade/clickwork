@@ -60,7 +60,7 @@
 2. **Green.** Implement in `src/clickwork/process.py`:
    ```python
    def run_with_secrets(
-       cmd: list[str],
+       cmd: list[str | Secret],
        *,
        secrets: dict[str, Secret],
        stdin_secret: str | None = None,
@@ -118,9 +118,9 @@ def get(url: str, *,
         parse_json: bool = True,
         timeout: float = 30.0) -> JSONValue | bytes: ...
 
-def post(url, *, body: JSONValue | bytes | None = None, ...) -> JSONValue | bytes: ...
-def put(url, *, body: JSONValue | bytes | None = None, ...) -> JSONValue | bytes: ...
-def delete(url, *, ...) -> JSONValue | bytes: ...
+def post(url: str, *, body: JSONValue | bytes | None = None, ...) -> JSONValue | bytes: ...
+def put(url: str, *, body: JSONValue | bytes | None = None, ...) -> JSONValue | bytes: ...
+def delete(url: str, *, ...) -> JSONValue | bytes: ...
 
 # JSONValue is a recursive alias for every top-level type json.loads may
 # return. Narrow to the concrete type at the call site with isinstance /
@@ -167,9 +167,9 @@ Use `pytest-mock` (already in dev deps) or monkeypatch `urllib.request.urlopen` 
    - `_send(method, url, *, body, headers, bearer_token, basic_auth, allowed_hosts, parse_json, timeout)` — shared core.
    - Allowlist check up front: parse `url` via `urllib.parse.urlparse`, compare `.hostname` to the list (case-insensitive).
    - Header merge: start with user-supplied `headers` (defensive copy); if user didn't set `Authorization` AND caller passed `bearer_token` or `basic_auth`, add it.
-   - Body encoding: dicts → JSON with `Content-Type: application/json` set (if not already set); bytes → send as-is.
+   - Body encoding: any `JSONValue` (dict, list, str, int, float, bool, None) → `json.dumps(body).encode("utf-8")` with `Content-Type: application/json` set (if not already set); bytes → send as-is. Tests should cover at least dict and list body values so nobody accidentally narrows the accepted types later.
    - Execute via `urllib.request.Request` + `urllib.request.urlopen`. Catch `urllib.error.HTTPError` to populate `HttpError` (non-2xx responses arrive there). For other errors (timeout, DNS failure), let them propagate — they're not "the server said no", they're framework-level.
-   - Response: read body. If Content-Type matches `application/json` and `parse_json=True`, `json.loads(body)` the dict. Else return bytes.
+   - Response: read body. If Content-Type matches `application/json` and `parse_json=True`, return the parsed JSON value via `json.loads(body)` (may be dict, list, str, number, bool, or None). Else return bytes.
    - Each public method (`get`/`post`/`put`/`delete`) is a thin call to `_send`.
 
 3. **Refactor.** Module docstring explains:
