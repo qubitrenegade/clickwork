@@ -231,3 +231,83 @@ class TestHostPreservingBehavior:
         assert logging.getLogger("clickwork").propagate is True
         # And the named CLI logger should also propagate.
         assert logging.getLogger("test_propagate").propagate is True
+
+    def test_standalone_mode_attaches_stderr_handler(self, reset_logging, capsys):
+        """No host root handlers -> setup_logging attaches a stderr StreamHandler.
+
+        Pins the bare-script path: when a consumer runs a clickwork CLI
+        directly (no embedding framework, no ``logging.basicConfig()``),
+        clickwork MUST attach its own stderr StreamHandler so records
+        actually get printed. Without this path the record would only
+        propagate to root, which has no handlers, and stdlib would fall
+        back to the "handler of last resort" or silently drop below-WARN
+        records.
+        """
+        # Start from a bare root: no handlers at all.
+        root = logging.getLogger()
+        root.handlers = []
+        # Reload so the module-load baseline runs against the cleared
+        # root. Without the reload, module state from an earlier test
+        # could pre-attach handlers and mask the "bare root" scenario.
+        import importlib
+        import clickwork._logging
+        importlib.reload(clickwork._logging)
+
+        from clickwork._logging import setup_logging
+
+        logger = setup_logging(verbose=1, quiet=False, name="test_standalone")
+
+        # The named CLI logger should have a clickwork-owned
+        # StreamHandler attached. Identified by the marker attribute we
+        # set at attach time (more robust than ``handler.stream is
+        # sys.stderr``, which breaks under pytest capture).
+        owned_handlers = [
+            h
+            for h in logger.handlers
+            if getattr(h, "_clickwork_owned", False)
+            and isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.NullHandler)
+        ]
+        assert len(owned_handlers) == 1, (
+            f"standalone mode must attach exactly one clickwork-owned "
+            f"StreamHandler; got: {logger.handlers}"
+        )
+
+        # Emit a record and confirm the installed handler actually
+        # prints it. pytest's capsys captures fd-level stderr so this
+        # works even with the _clickwork_owned marker-based seam.
+        logger.warning("standalone warn record")
+        captured = capsys.readouterr()
+        assert "standalone warn record" in captured.err
+
+    def test_stderr_handler_marker_survives_setup_logging_reinvocation(self, reset_logging):
+        """setup_logging is idempotent: a second call updates-in-place, not stacks.
+
+        Without the ``_clickwork_owned`` marker, the old
+        ``handler.stream is sys.stderr`` identity check would fail under
+        frameworks that swap ``sys.stderr`` (pytest capture, uvicorn's
+        stream wrapping, etc.). This test confirms a second
+        ``setup_logging()`` call finds and updates the original handler
+        via the marker instead of stacking a duplicate.
+        """
+        root = logging.getLogger()
+        root.handlers = []
+        import importlib
+        import clickwork._logging
+        importlib.reload(clickwork._logging)
+
+        from clickwork._logging import setup_logging
+
+        name = "test_no_dup"
+        setup_logging(verbose=0, quiet=False, name=name)
+        setup_logging(verbose=2, quiet=False, name=name)  # second call, -vv
+        setup_logging(verbose=1, quiet=False, name=name)  # third call, -v
+
+        logger = logging.getLogger(name)
+        owned = [h for h in logger.handlers if getattr(h, "_clickwork_owned", False)]
+        assert len(owned) == 1, (
+            f"setup_logging must not stack handlers on re-invocation; "
+            f"got: {logger.handlers}"
+        )
+        # Final level should reflect the LAST call (-v -> INFO).
+        assert owned[0].level == logging.INFO

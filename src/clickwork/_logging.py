@@ -1,13 +1,23 @@
 """Logging setup for clickwork CLIs.
 
 This module is the *host-friendly* logging entry point for clickwork. The
-name of the game here: **never silently override a host application's
-logging configuration.** clickwork is a library as well as a CLI
-framework; when a host app (think: an orbit-admin plugin imported from
-another tool, or a test harness that calls ``clickwork.http.get`` directly)
-has already run ``logging.basicConfig()`` or installed its own root
-handler, clickwork must NOT attach a second handler that duplicates every
-log line.
+name of the game here: **respect the host's root logging configuration,
+and only touch loggers inside the ``clickwork`` namespace.** clickwork is
+a library as well as a CLI framework; when a host app (think: an
+orbit-admin plugin imported from another tool, or a test harness that
+calls ``clickwork.http.get`` directly) has already run
+``logging.basicConfig()`` or installed its own root handler, clickwork
+must NOT attach a second stderr handler that duplicates every log line.
+
+Scope of clickwork's overrides: we DO set the ``propagate`` flag to
+``True`` on the ``clickwork`` logger and any CLI-named logger, because
+records flowing up to the root is how the host-preserving design
+delivers output. A host that wants to break propagation intentionally
+(e.g., it attaches its own handler to ``clickwork`` and sets
+``propagate=False`` to avoid double-emission to root) should do that
+AFTER calling ``setup_logging()``; the helper is meant for the common
+case and documents this tradeoff rather than trying to autodetect
+every host configuration pattern.
 
 ## The rules
 
@@ -163,15 +173,15 @@ def setup_logging(
             #   setup_logging()              # still attached to our handler
             # produces duplicate output again (the clickwork stderr handler
             # AND the propagated record reaching the host's root handler).
-            # We remove only stderr StreamHandlers -- NullHandler is fine
-            # to leave in place (no output) and a host-attached handler on
-            # the clickwork logger is not ours to evict.
+            # We identify OUR handlers by the ``_clickwork_owned``
+            # attribute set at attach time below, NOT by ``handler.stream
+            # is sys.stderr`` -- the latter is fragile under frameworks
+            # that swap ``sys.stderr`` (pytest capture, uvicorn, etc.).
+            # NullHandler is fine to leave in place (no output); any host-
+            # attached handler on the clickwork logger is not ours to
+            # evict (no ``_clickwork_owned`` flag).
             for existing in list(logger.handlers):
-                if (
-                    isinstance(existing, logging.StreamHandler)
-                    and not isinstance(existing, logging.NullHandler)
-                    and getattr(existing, "stream", None) is sys.stderr
-                ):
+                if getattr(existing, "_clickwork_owned", False):
                     logger.removeHandler(existing)
             # Records propagate up to the host's root handler. Do NOT
             # attach a StreamHandler -- that's what caused the
@@ -189,22 +199,28 @@ def setup_logging(
             fmt = "%(name)s %(message)s"
         formatter = logging.Formatter(fmt)
 
-        # Find an existing stderr StreamHandler we previously attached so
-        # re-invocations (e.g., nested test runs, or the CLI callback
-        # running twice in-process) just update its level + format
-        # rather than doubling up.
+        # Find an existing clickwork-owned StreamHandler so re-invocations
+        # (nested test runs, or the CLI callback running twice in-process)
+        # update its level + format rather than stacking. Identity is
+        # tracked via the ``_clickwork_owned`` marker attribute (set when
+        # we first attach). Again, we deliberately don't compare
+        # ``existing.stream is sys.stderr`` -- pytest capture replaces
+        # ``sys.stderr`` so the identity check would miss our own handler.
         stream_handler = next(
             (
                 existing
                 for existing in logger.handlers
-                if isinstance(existing, logging.StreamHandler)
+                if getattr(existing, "_clickwork_owned", False)
+                and isinstance(existing, logging.StreamHandler)
                 and not isinstance(existing, logging.NullHandler)
-                and getattr(existing, "stream", None) is sys.stderr
             ),
             None,
         )
         if stream_handler is None:
             stream_handler = logging.StreamHandler(sys.stderr)
+            # Mark this handler as ours so future calls can find/evict it
+            # via a robust identity check that survives sys.stderr swaps.
+            stream_handler._clickwork_owned = True  # type: ignore[attr-defined]
             logger.addHandler(stream_handler)
 
         stream_handler.setLevel(level)
