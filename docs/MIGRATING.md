@@ -76,7 +76,7 @@ work-around-coerced the value with `type: str` plus a manual
 `int(ctx.config["port"])`, the workaround keeps working unchanged;
 switching to native `type: int` in the schema is optional cleanup.
 
-### 2. Logger propagation is now the default
+### 2. `setup_logging()` no longer attaches its own stderr handler under host config
 
 **What changed.** In 0.2.x, `setup_logging()` attached a
 `StreamHandler` to clickwork's logger unconditionally. If the embedding
@@ -309,11 +309,11 @@ filterwarnings = ["ignore:clickwork\\::DeprecationWarning"]
 
 ## Cross-references
 
-- [CHANGELOG.md](../CHANGELOG.md) — full per-release change ledger.
-- [API_POLICY.md](API_POLICY.md) — the post-1.0 compatibility promise,
+- [CHANGELOG.md](../CHANGELOG.md) -- full per-release change ledger.
+- [API_POLICY.md](API_POLICY.md) -- the post-1.0 compatibility promise,
   Click and Python version-range policy, deprecation runway length.
-- [LLM_REFERENCE.md](LLM_REFERENCE.md) "Common Footguns" section —
+- [LLM_REFERENCE.md](LLM_REFERENCE.md) "Common Footguns" section --
   every-day mistakes (patching prereqs, `ClickException` routing,
   `CliRunner` streams, URL-encoding, secrets-in-argv, and more).
-- [GUIDE.md](GUIDE.md) — full tutorial for a clean-slate setup, kept up
+- [GUIDE.md](GUIDE.md) -- full tutorial for a clean-slate setup, kept up
   to date with the 1.0 API.
