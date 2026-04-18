@@ -185,9 +185,9 @@ Why. Link out to helper docstrings or [GUIDE.md](GUIDE.md) for depth.
 
 ### 1. Patching `ctx.require`
 
-**Pitfall:** patching `clickwork.cli._require` (old workaround).
+**Pitfall:** patching a private `clickwork.cli` helper to fake out prereq checks.
 **Instead:** `patch("clickwork.prereqs.require")`.
-**Why:** Wave 1 #8 made the public symbol patchable; the internal alias was removed.
+**Why:** `CliContext.require` routes through `clickwork.cli._require_via_prereqs`, which dispatches to `clickwork.prereqs.require` at call time. Patch the public prereqs function so your mock intercepts the actual lookup, not a stale internal alias.
 
 ### 2. Signalling user errors
 
@@ -199,7 +199,7 @@ Why. Link out to helper docstrings or [GUIDE.md](GUIDE.md) for depth.
 
 **Pitfall:** asserting on `result.output` when you specifically want stdout-only or stderr-only content (`result.output` interleaves BOTH streams).
 **Instead:** assert on `result.stdout` or `result.stderr` directly.
-**Why:** on current Click (8.2+) `output` is stdout+stderr combined; the older `mix_stderr` kwarg that some online snippets reference has been removed. See [GUIDE.md](GUIDE.md#testing-commands-with-clickworktesting) (anchor resolves once #16 merges first -- see plan's merge-order note).
+**Why:** on current Click (8.2+) `result.output` is stdout+stderr combined while `result.stdout` and `result.stderr` are populated independently; the older `CliRunner(mix_stderr=False)` kwarg referenced in some online snippets has been removed. See [GUIDE.md](GUIDE.md) "Testing commands with `clickwork.testing`" (lands on main via #16).
 
 ### 4. URL-encoding query params
 
@@ -209,7 +209,7 @@ Why. Link out to helper docstrings or [GUIDE.md](GUIDE.md) for depth.
 
 ### 5. Secrets in argv
 
-**Pitfall:** `ctx.run(["wrangler", "secret", "put", name, Secret(token)])`.
+**Pitfall:** `ctx.run(["wrangler", "secret", "put", name, token.get()])`.
 **Instead:** `ctx.run_with_secrets(...)` (Wave 3 #11).
 **Why:** argv is world-readable in `ps`; the helper enforces this and routes via env/stdin.
 
