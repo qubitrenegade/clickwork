@@ -30,9 +30,12 @@ The post-1.0 compatibility promise is defined in
 
 **What changed.** In 0.2.x, an env var (always a string at the OS level)
 whose schema declared `type: int` / `float` / `bool` raised
-`ConfigError` during `load_config` or the first `ctx.config.get()` with
-typed access. In 1.0, the loader coerces the string to the declared
-type.
+`ConfigError` during `load_config()` itself -- schema validation runs
+once as part of loading, not on each `ctx.config.get()` call
+(`ctx.config` is a plain `dict`, so `.get()` never raises on type
+mismatch). In 1.0, `load_config()` coerces the string to the declared
+type before it writes to the merged dict, so downstream
+`ctx.config.get()` calls just see the already-typed value.
 
 Before:
 
