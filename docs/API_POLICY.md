@@ -45,17 +45,22 @@ if Python's import system happens to make it reachable.
 
 ### Documented submodules
 
-Callers can import these directly or reach them as attributes on the
-`clickwork` package. Names exported by each submodule are part of the
-public surface when they appear in the submodule's own docstring and
-public symbols; names prefixed with an underscore are private.
+`clickwork.http`, `clickwork.platform`, and `clickwork.testing` are
+re-exported from the top-level package, so callers can reach them as
+attributes (`clickwork.http.get`, etc.) after `import clickwork`.
+`clickwork.config` is NOT re-exported at the top level for historical
+reasons; reach it via an explicit `import clickwork.config` or
+`from clickwork import config` / `from clickwork.config import load_config`.
+Names exported by each submodule are part of the public surface when
+they appear in the submodule's own docstring and public symbols; names
+prefixed with an underscore are private.
 
-| Submodule | Public surface |
-|-----------|----------------|
-| `clickwork.http` | `get`, `post`, `put`, `delete`, `HttpError`. URL allowlist, no-redirect security, JSON auto-parse. |
-| `clickwork.platform` | `platform_dispatch`, `dispatch`, `is_linux`, `is_macos`, `is_windows`, `find_repo_root`. |
-| `clickwork.testing` | `run_cli`, `make_test_cli`. Helpers for writing plugin test suites against a real CLI. |
-| `clickwork.config` | `load_config`, `load_env_file`, `ConfigError`. Layered TOML and dotenv helpers. |
+| Submodule | Public surface | Import style |
+|-----------|----------------|---------------|
+| `clickwork.http` | `get`, `post`, `put`, `delete`, `HttpError`. URL allowlist, no-redirect security, JSON auto-parse. | attribute on `clickwork` |
+| `clickwork.platform` | `platform_dispatch`, `dispatch`, `is_linux`, `is_macos`, `is_windows`, `find_repo_root`. | attribute on `clickwork` |
+| `clickwork.testing` | `run_cli`, `make_test_cli`. Helpers for writing plugin test suites against a real CLI. | attribute on `clickwork` |
+| `clickwork.config` | `load_config`, `load_env_file`, `ConfigError`. Layered TOML and dotenv helpers. | explicit import required |
 
 ### Protocol-level surfaces
 
