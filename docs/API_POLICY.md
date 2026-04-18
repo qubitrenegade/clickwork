@@ -72,9 +72,10 @@ as the symbol surface.
   The group name and the expected shape of a registered entry point (a
   Click `Command` or `Group` exposed as `cli`) are stable.
 - The layered config precedence order (environment variables, then
-  `[env.<name>]`, then `[default]`, then user-level config). Changing
-  the precedence is a breaking change. See `GUIDE.md` (to be updated by
-  Wave 4 issue #54) for the precedence table.
+  `[env.<name>]`, then `[default]`, then user-level config, then
+  schema defaults). Changing the precedence is a breaking change. See
+  [`GUIDE.md#config-precedence`](GUIDE.md#config-precedence) for the
+  authoritative ordered table and a worked example.
 - Global flag names installed by `create_cli()` (`--verbose`, `--quiet`,
   `--dry-run`, `--env`, `--yes`). Removing or renaming one is breaking.
   `--version` / `-V` is also reserved at this level, but is only
