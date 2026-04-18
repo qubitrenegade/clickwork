@@ -66,10 +66,19 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+        # Install the matrix Python AND pin the workspace to it so every
+        # subsequent `uv run` / `uv sync` uses that specific interpreter.
+        # Without `uv python pin`, `uv run` would resolve to whatever
+        # Python it already found on the runner (often a different minor),
+        # and the matrix would be observationally meaningless.
+        run: |
+          uv python install ${{ matrix.python-version }}
+          uv python pin ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        # `--python` makes the interpreter selection explicit per row so
+        # the matrix actually tests what it advertises.
+        run: uv sync --extra dev --python ${{ matrix.python-version }}
 
       - name: Upgrade click to latest release (click-edge canary)
         # Only runs on the click-edge matrix entry. `uv pip install -U click`
