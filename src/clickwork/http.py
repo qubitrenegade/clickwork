@@ -223,9 +223,14 @@ def _sanitize_url_for_log(url: str) -> str:
     if parts.port is not None:
         netloc = f"{netloc}:{parts.port}"
 
-    # Drop query and fragment entirely.
+    # Drop QUERY and FRAGMENT entirely (those are the credential-leak
+    # vectors). Preserve ``params`` -- the rarely-used semicolon-
+    # separated path-params component, e.g. ``/path;session=abc``.
+    # params aren't credential-carrying the way query strings are, and
+    # the path-level semantics still go out on the wire, so the log
+    # should show the same shape.
     return urllib.parse.urlunparse(
-        (parts.scheme, netloc, parts.path, "", "", "")
+        (parts.scheme, netloc, parts.path, parts.params, "", "")
     )
 
 
@@ -258,11 +263,16 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
     # request.
     scheme = urllib.parse.urlparse(url).scheme.lower()
     if scheme not in ("http", "https"):
+        # Sanitize the URL in the error message so a caller's embedded
+        # credentials (userinfo or query params) can't leak through the
+        # exception / traceback. Same discipline as the per-request log
+        # line and HttpError.url.
         raise ValueError(
-            f"URL {url!r} uses scheme {scheme!r}; clickwork.http only "
-            "supports http and https. Accepting arbitrary URL schemes "
-            "from user input is a footgun (file://, ftp://, etc.). If "
-            "you genuinely need non-HTTP fetch, use urllib directly."
+            f"URL {_sanitize_url_for_log(url)!r} uses scheme {scheme!r}; "
+            "clickwork.http only supports http and https. Accepting "
+            "arbitrary URL schemes from user input is a footgun "
+            "(file://, ftp://, etc.). If you genuinely need non-HTTP "
+            "fetch, use urllib directly."
         )
 
     if allowed_hosts is None:
@@ -289,9 +299,11 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
         # urlparse returns None for URLs without a host component (e.g.
         # ``file:///foo``). Treat this as a denied-by-default case rather
         # than letting it sneak through -- the allowlist exists precisely
-        # to gate on host identity.
+        # to gate on host identity. Sanitize the URL in the error for
+        # the same reason as the scheme error above.
         raise ValueError(
-            f"URL {url!r} has no hostname component; cannot be allowlisted."
+            f"URL {_sanitize_url_for_log(url)!r} has no hostname "
+            "component; cannot be allowlisted."
         )
 
     hostname_lower = hostname.lower()
