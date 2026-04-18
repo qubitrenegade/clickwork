@@ -270,7 +270,7 @@ class TestAddGlobalOptionGuards:
 
         add_global_option(root, "--json", is_flag=True)
 
-        with pytest.raises(ValueError, match="already has a parameter"):
+        with pytest.raises(ValueError, match="Cannot install global option"):
             add_global_option(root, "--json", is_flag=True)
 
     def test_rejects_conflict_with_existing_manual_option(self) -> None:
@@ -288,7 +288,7 @@ class TestAddGlobalOptionGuards:
         @click.option("--json", is_flag=True)
         def sub(json: bool) -> None: ...
 
-        with pytest.raises(ValueError, match="already has a parameter"):
+        with pytest.raises(ValueError, match="Cannot install global option"):
             add_global_option(root, "--json", is_flag=True)
 
     def test_slash_flag_uses_innermost_wins(self) -> None:
@@ -331,6 +331,93 @@ class TestAddGlobalOptionGuards:
         result = runner.invoke(root, ["--shout", "sub-cmd"])
         assert result.exit_code == 0, result.output
         assert captured.get("shout") is True
+
+
+class TestAddGlobalOptionConflictDetection:
+    """The conflict check catches flag-string collisions too, not just name collisions."""
+
+    def test_rejects_conflict_by_flag_string_even_when_names_differ(self) -> None:
+        """A pre-existing @click.option('output_json', '--json') collides on '--json'.
+
+        The Python name 'output_json' does NOT match add_global_option's
+        derived 'json', so a name-only conflict check would miss this. The
+        flag-string check catches it.
+        """
+        import pytest
+
+        @click.group()
+        def root() -> None: ...
+
+        @root.command("sub-cmd")
+        @click.option("output_json", "--json", is_flag=True)
+        def sub(output_json: bool) -> None: ...
+
+        with pytest.raises(ValueError, match="already uses flag string"):
+            add_global_option(root, "--json", is_flag=True)
+
+
+class TestAddGlobalOptionEntryPointPropagation:
+    """ctx.meta values propagate into entry-point plugin commands.
+
+    LazyEntryPointCommand.invoke creates a fresh Click context for the
+    loaded plugin command; without parent= wiring, the plugin's
+    ctx.find_root() would return a detached root and miss values that
+    add_global_option wrote to the true root's meta. This test pins the
+    parent=ctx forwarding we added in discovery.py.
+    """
+
+    def test_global_option_value_reaches_entry_point_plugin(self, monkeypatch) -> None:
+        """A plugin command loaded via entry point sees ctx.find_root().meta['json']."""
+        import click
+        from click.testing import CliRunner
+        from clickwork.discovery import discover_commands_from_entrypoints
+
+        captured: dict = {}
+
+        class FakeEntryPoint:
+            """Imitates importlib.metadata.EntryPoint's name + load() interface."""
+
+            name = "plugin-cmd"
+
+            def load(self):
+                @click.command(name="plugin-cmd")
+                @click.pass_context
+                def plugin_cmd(ctx: click.Context) -> None:
+                    # The key assertion: the plugin's find_root() returns
+                    # the parent CLI's context, so meta values from
+                    # add_global_option are visible here.
+                    captured["json"] = ctx.find_root().meta.get("json")
+
+                return plugin_cmd
+
+        # Replace the real importlib.metadata.entry_points with our stub so
+        # discover_commands_from_entrypoints returns the fake above.
+        monkeypatch.setattr(
+            "importlib.metadata.entry_points",
+            lambda group=None: [FakeEntryPoint()] if group == "clickwork.commands" else [],
+        )
+
+        @click.group()
+        def root() -> None: ...
+
+        # Attach the lazy entry-point proxy to the root group. Normally
+        # create_cli() does this, but we build a minimal root here so the
+        # test stays focused on the meta-propagation invariant.
+        commands = discover_commands_from_entrypoints()
+        for cmd_name, cmd in commands.items():
+            root.add_command(cmd, cmd_name)
+
+        add_global_option(root, "--json", is_flag=True)
+
+        runner = CliRunner()
+        result = runner.invoke(root, ["--json", "plugin-cmd"])
+
+        assert result.exit_code == 0, result.output
+        assert captured.get("json") is True, (
+            "Global option value did not propagate into the entry-point "
+            f"plugin command; got captured={captured!r}. Check that "
+            "LazyEntryPointCommand.invoke forwards parent=ctx to loaded.main()."
+        )
 
 
 class TestAddGlobalOptionIntegration:

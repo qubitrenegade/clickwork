@@ -72,8 +72,12 @@ def add_global_option(
           at ANY level wins, so ``meta[name]`` is ``True`` if the user passed
           the flag at root OR group OR subcommand (or any combination).
         * Value options (strings, ints, enums, ...) use **innermost-wins**:
-          the deepest level that explicitly supplied the option on the
-          command line provides the final value. Levels that parsed only the
+          the deepest level that *explicitly* supplied the option provides
+          the final value. "Explicit" here means any Click
+          ``ParameterSource`` other than ``DEFAULT`` -- command line is
+          the common case, but environment variables and
+          ``default_map``-sourced values also count as explicit and can
+          override outer levels. Levels that parsed only the Click
           default do NOT overwrite an already-set value.
         * Not passed anywhere: ``meta[name]`` is ``False`` for flags and the
           Click-resolved default (usually ``None``) for value options.
@@ -376,17 +380,36 @@ def _install_on_command(
             command. Message identifies the command so the caller can
             locate the conflict.
     """
+    # We check for conflicts two ways because Click decouples a parameter's
+    # Python identifier from its flag strings. ``@click.option("output_json",
+    # "--json")`` has ``name == "output_json"`` but opts ``["--json"]``, so a
+    # name-only check would miss the flag-string collision and the caller
+    # would hit Click's own "option already registered" error later.
+    new_opts = {d for d in param_decls if d.startswith("-")}
     for existing in command.params:
-        if getattr(existing, "name", None) == name:
+        existing_opts = set(getattr(existing, "opts", ()))
+        # Collect secondary_opts too (the "--no-foo" side of a slash-flag).
+        existing_opts.update(getattr(existing, "secondary_opts", ()))
+        flag_conflict = new_opts & existing_opts
+        name_conflict = getattr(existing, "name", None) == name
+        if flag_conflict or name_conflict:
             # Help the caller find the conflict: command.name is Click's
             # own identifier for the command (set via @click.command(name=)
             # or derived from the function name).
             cmd_label = getattr(command, "name", None) or type(command).__name__
+            # Name the specific reason so the caller can locate the issue
+            # even when names and flag strings disagree.
+            if flag_conflict:
+                reason = (
+                    f"already uses flag string(s) {sorted(flag_conflict)!r} "
+                    f"on parameter {getattr(existing, 'name', '?')!r}"
+                )
+            else:
+                reason = f"already has a parameter named {name!r}"
             raise ValueError(
                 f"Cannot install global option {param_decls!r}: command "
-                f"{cmd_label!r} already has a parameter named {name!r}. "
-                "Either rename the conflicting option, remove the manual "
-                "declaration, or don't call add_global_option() twice for "
-                "the same flag."
+                f"{cmd_label!r} {reason}. Either rename the conflicting "
+                "option, remove the manual declaration, or don't call "
+                "add_global_option() twice for the same flag."
             )
     command.params.append(click.Option(list(param_decls), **option_kwargs))

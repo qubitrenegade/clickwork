@@ -115,6 +115,16 @@ class LazyEntryPointCommand(click.Command):
         real command's context and ``@pass_cli_context`` / ``@click.pass_obj``
         keep working.
 
+        We also pass ``parent=ctx`` so the loaded command's context joins the
+        existing context chain instead of rooting a fresh one. WHY this
+        matters: anything that walks to the root via ``ctx.find_root()``
+        -- notably ``clickwork.add_global_option`` writing to
+        ``ctx.find_root().meta`` -- needs to see the REAL root's meta dict,
+        not a detached one. Without ``parent=ctx`` the loaded plugin
+        command's ``find_root()`` would return its own fresh context and
+        global-option values written at the parent level would be silently
+        invisible to the plugin.
+
         Args:
             ctx: The Click context, whose ``ctx.args`` contains the
                 unparsed extra arguments collected by the proxy and whose
@@ -127,11 +137,14 @@ class LazyEntryPointCommand(click.Command):
         # Pass obj=ctx.obj so the new context created by loaded.main() carries
         # the CliContext forward.  Click forwards **extra kwargs through
         # make_context() -> Context(), and Context accepts obj as a keyword arg.
+        # parent=ctx wires the loaded command's context into this proxy's
+        # context chain -- see the docstring above for why that matters.
         return loaded.main(
             args=list(ctx.args),
             prog_name=ctx.command_path,
             standalone_mode=False,
             obj=ctx.obj,
+            parent=ctx,
         )
 
     def get_short_help_str(self, limit: int = 45) -> str:
