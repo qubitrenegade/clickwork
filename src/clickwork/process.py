@@ -24,6 +24,7 @@ import os
 import shlex
 import signal
 import subprocess
+from typing import Any
 
 from clickwork._types import CliProcessError, Secret
 from clickwork.prompts import confirm as _prompt_confirm
@@ -37,16 +38,21 @@ logger = logging.getLogger("clickwork")
 SIGINT_TIMEOUT_SECONDS = 10
 
 
-def _validate_cmd(cmd: list[str] | str) -> None:
+def _validate_cmd(cmd: list[Any] | str) -> None:
     """Reject string commands to prevent shell injection.
 
     Accepting a raw string like "echo hello" would require shell=True, which
     opens the door to injection (e.g., "echo hello; rm -rf /"). Enforcing a
     list forces callers to be explicit about each argument boundary.
 
+    The parameter is typed as ``list[Any]`` rather than ``list[str]`` because
+    ``run_with_secrets`` also routes through this guard with
+    ``list[str | Secret]`` elements (the Secret-in-argv check runs separately
+    afterwards). Element-type enforcement happens at the call sites, not here.
+
     Args:
-        cmd: The command to validate. Must be a ``list[str]``; raises if it
-            is a string, tuple, or any other type.
+        cmd: The command to validate. Must be a ``list``; raises if it is a
+            string, tuple, or any other type.
 
     Raises:
         TypeError: If cmd is not a list.
@@ -99,7 +105,7 @@ def _format_cmd(cmd: list[str]) -> str:
     return " ".join(shlex.quote(arg) for arg in cmd)
 
 
-def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
+def _wait_with_signal_forwarding(proc: subprocess.Popen[bytes]) -> int:
     """Wait for a child process, forwarding SIGINT before re-raising.
 
     This preserves Ctrl-C semantics for long-running deploy/build commands:
@@ -180,7 +186,7 @@ def run(
     *,
     stdin_text: str | None = None,
     stdin_bytes: bytes | None = None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[Any] | None:
     """Execute a command, streaming output in real-time.
 
     Args:
@@ -265,7 +271,7 @@ def run(
     # closed stdin as a signal). When neither was provided, we inherit
     # the parent's stdin (the existing behavior) so interactive tools
     # that read from the TTY still work.
-    popen_kwargs: dict = {"env": full_env, "shell": False}
+    popen_kwargs: dict[str, Any] = {"env": full_env, "shell": False}
     if stdin_payload is not None:
         popen_kwargs["stdin"] = subprocess.PIPE
         # Deliberately NOT setting text=True: we normalized to bytes above
@@ -445,7 +451,7 @@ def run_with_confirm(
     *,
     stdin_text: str | None = None,
     stdin_bytes: bytes | None = None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[Any] | None:
     """Prompt for confirmation, then execute a destructive command.
 
     Combines confirmation + execution so command authors don't forget either
@@ -602,7 +608,7 @@ def run_with_secrets(
     stdin_secret: str | None = None,
     dry_run: bool = False,
     env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[Any] | None:
     """Execute a command with secrets delivered via env and/or stdin, never argv.
 
     This is a safety-focused wrapper over :func:`run` for subprocesses that

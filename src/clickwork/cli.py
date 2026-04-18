@@ -19,7 +19,9 @@ from __future__ import annotations
 import functools
 import os
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -74,7 +76,7 @@ EXIT_FRAMEWORK_ERROR = 2
 # can introspect it. The wrapper's *body* still goes through
 # ``_prereqs.require`` on every call, so patching remains effective.
 @functools.wraps(_prereqs.require)
-def _require_via_prereqs(*args, **kwargs):
+def _require_via_prereqs(*args: Any, **kwargs: Any) -> None:
     return _prereqs.require(*args, **kwargs)
 
 
@@ -92,7 +94,12 @@ class MutuallyExclusive(click.Option):
     are parsed, so it sees the complete picture regardless of order.
     """
 
-    def __init__(self, *args, mutually_exclusive: list[str] | None = None, **kwargs):
+    def __init__(
+        self,
+        *args: Any,
+        mutually_exclusive: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Create a Click option that enforces mutual exclusivity.
 
         Stores the list of conflicting option names for later checking in
@@ -109,7 +116,12 @@ class MutuallyExclusive(click.Option):
         self._mutually_exclusive = mutually_exclusive or []
         super().__init__(*args, **kwargs)
 
-    def handle_parse_result(self, ctx, opts, args):
+    def handle_parse_result(
+        self,
+        ctx: click.Context,
+        opts: Mapping[str, Any],
+        args: list[str],
+    ) -> tuple[Any, list[str]]:
         """Check for mutual exclusivity conflicts after all options are parsed.
 
         Raises a UsageError only when BOTH this option and a conflicting option
@@ -129,6 +141,12 @@ class MutuallyExclusive(click.Option):
             click.UsageError: If this option and any option in
                 ``_mutually_exclusive`` are both truthy.
         """
+        # ``self.name`` is Optional[str] in Click's stubs but always set by
+        # the time ``handle_parse_result`` runs (Click assigns it from the
+        # declared param decls during Parameter.__init__); the guard below
+        # keeps mypy happy without changing runtime behaviour.
+        if self.name is None:
+            return super().handle_parse_result(ctx, opts, args)
         current_value = opts.get(self.name)
         for other in self._mutually_exclusive:
             other_value = opts.get(other)
@@ -137,7 +155,7 @@ class MutuallyExclusive(click.Option):
         return super().handle_parse_result(ctx, opts, args)
 
 
-def pass_cli_context(f):
+def pass_cli_context(f: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator that injects a CliContext into a Click command function.
 
     Safer than ``@click.pass_obj`` because it traverses the full Click
@@ -162,7 +180,7 @@ def pass_cli_context(f):
 
     @click.pass_context
     @functools.wraps(f)
-    def wrapper(click_ctx, *args, **kwargs):
+    def wrapper(click_ctx: click.Context, *args: Any, **kwargs: Any) -> Any:
         """Resolve CliContext from the Click context chain and call f.
 
         Traverses the context chain with ``find_object(CliContext)`` so this
@@ -199,7 +217,7 @@ def create_cli(
     name: str,
     commands_dir: Path | None = None,
     discovery_mode: str = "auto",
-    config_schema: dict | None = None,
+    config_schema: dict[str, Any] | None = None,
     repo_config_path: Path | None = None,
     *,
     description: str | None = None,
@@ -446,15 +464,17 @@ def create_cli(
         # cli_ctx's flags. This keeps the logic single-sourced in process.py
         # (confirmation + execution + dry-run + signal forwarding) while still
         # letting ctx.run_with_confirm(cmd, msg) work without extra args.
-        cli_ctx.run_with_confirm = lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: (  # noqa: E501
-            _run_with_confirm(
-                cmd,
-                msg,
-                yes=cli_ctx.yes,
-                dry_run=cli_ctx.dry_run,
-                env=env,
-                stdin_text=stdin_text,
-                stdin_bytes=stdin_bytes,
+        cli_ctx.run_with_confirm = (
+            lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: (  # noqa: E501
+                _run_with_confirm(
+                    cmd,
+                    msg,
+                    yes=cli_ctx.yes,
+                    dry_run=cli_ctx.dry_run,
+                    env=env,
+                    stdin_text=stdin_text,
+                    stdin_bytes=stdin_bytes,
+                )
             )
         )
 
@@ -499,7 +519,7 @@ def create_cli(
     # unexpected RuntimeError and similar bugs.
     original_invoke = cli_group.invoke
 
-    def wrapped_invoke(ctx: click.Context):
+    def wrapped_invoke(ctx: click.Context) -> Any:
         """Invoke the CLI group and classify any unhandled exceptions.
 
         Known exception types are routed by semantic category:
@@ -560,6 +580,13 @@ def create_cli(
             click.echo(f"Internal error: {e}", err=True)
             ctx.exit(EXIT_FRAMEWORK_ERROR)
 
-    cli_group.invoke = wrapped_invoke
+    # Deliberate method assignment: wrapped_invoke intercepts unhandled
+    # exceptions before they reach Click's default handler. Standard library
+    # method-assignment is the least-invasive way to splice in the wrapper
+    # without subclassing click.Group (which would force every caller into a
+    # custom class hierarchy). mypy flags this as [method-assign] in strict
+    # mode because instance-level method overrides bypass normal method-
+    # resolution -- here that's the point.
+    cli_group.invoke = wrapped_invoke  # type: ignore[method-assign]
 
     return cli_group

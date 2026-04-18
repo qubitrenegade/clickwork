@@ -111,7 +111,7 @@ else:
 
 
 def run_cli(
-    cli: click.BaseCommand,
+    cli: click.Command,
     args: str | Sequence[str] | None = None,
     **kwargs: Any,
 ) -> _ClickResult:
@@ -125,9 +125,11 @@ def run_cli(
 
     Args:
         cli: The Click command or group to invoke. Accepts any
-            ``click.BaseCommand`` subclass so tests can pass a raw
-            ``@click.command``-decorated function or a group built with
-            :func:`clickwork.create_cli`.
+            ``click.Command`` (including ``click.Group``) so tests can pass a
+            raw ``@click.command``-decorated function or a group built with
+            :func:`clickwork.create_cli`. ``click.BaseCommand`` was the
+            documented base in earlier Click 8.x but is deprecated in 8.2+
+            and slated for removal in 9.0, so we use ``click.Command``.
         args: The command-line arguments to pass, as you would write them
             after the CLI name. The preferred form is a list/tuple of
             already-tokenised strings (``["deploy", "--env", "staging"]``);

@@ -72,6 +72,7 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any, cast
 
 from clickwork._types import Secret
 
@@ -188,7 +189,15 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     header from ``HttpError.headers`` and decide whether to follow.
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         # Returning None signals "do not redirect"; urllib converts the
         # 3xx into an HTTPError that propagates out of opener.open().
         return None
@@ -203,7 +212,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirectHandler())
 
 
-def _dispatch_request(request: urllib.request.Request, *, timeout: float):
+def _dispatch_request(request: urllib.request.Request, *, timeout: float) -> Any:
     """Send ``request`` through the no-redirect opener; return the response.
 
     WHY a thin module-level wrapper exists: tests need a single obvious
@@ -562,7 +571,7 @@ def _is_json_content_type(content_type: str | None) -> bool:
     return media_type == "application/json"
 
 
-def _headers_to_dict(raw_headers) -> dict[str, str]:
+def _headers_to_dict(raw_headers: Any) -> dict[str, str]:
     """Flatten an HTTPMessage-like headers object into a plain dict.
 
     ``http.client.HTTPResponse.headers`` is an ``HTTPMessage`` which supports
@@ -625,7 +634,9 @@ def _parse_response_body(
         if not body.strip():
             return body
         try:
-            return json.loads(body)
+            # json.loads returns Any; cast to the declared JSONValue union so
+            # the function's return type is honoured under mypy --strict.
+            return cast("JSONValue", json.loads(body))
         except (json.JSONDecodeError, UnicodeError):
             # Server sent JSON Content-Type with a payload that either
             # isn't valid JSON (JSONDecodeError) or isn't valid UTF-8

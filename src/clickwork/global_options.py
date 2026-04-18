@@ -389,7 +389,10 @@ def _derive_option_name(
             f"Click failed to derive a name for option {param_decls!r}; "
             "pass an explicit 'param_decls' that includes a long-form flag."
         )
-    return probe.name
+    # Click types Option.name as Optional[str]; after the None guard above
+    # the value is always a str, but mypy needs the explicit cast because
+    # Click's own stubs mark the attribute as Optional.
+    return str(probe.name)
 
 
 def _install_on_group(
