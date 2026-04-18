@@ -52,11 +52,11 @@ my-deploy-tools/
 ```
 
 `pyproject.toml` carries the entry-point declaration. The examples in
-this guide target the **1.0 release and later** -- before 1.0 shipped,
-the canonical dependency was `clickwork>=0.2,<1` and the APIs
-referenced below (`strict=`, `package_name=`, `clickwork._deprecated`,
-etc.) didn't all exist. If you are still on 0.2.x, [MIGRATING.md](MIGRATING.md)
-walks through the upgrade.
+this guide target the **1.0 release and later**. On the 0.2.x series
+the canonical dependency was `clickwork>=0.2,<1` and several APIs
+referenced below (`strict=`, `package_name=`, etc.) were not yet
+public. If you are upgrading from 0.2.x, [MIGRATING.md](MIGRATING.md)
+walks through the breaking changes.
 
 The important parts of the example are the `clickwork>=1.0` dependency
 (so pip refuses to install your plugin against an unsupported framework
