@@ -16,6 +16,7 @@ Plugin authors call this once in their entry point script:
 from __future__ import annotations
 
 import functools
+import importlib.metadata
 import os
 import sys
 from pathlib import Path
@@ -197,6 +198,8 @@ def create_cli(
     *,
     description: str | None = None,
     enable_parent_package_imports: bool = False,
+    version: str | None = None,
+    package_name: str | None = None,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -210,6 +213,11 @@ def create_cli(
       --dry-run       (flag -- preview without executing)
       --env           (string -- select config environment)
       --yes / -y      (flag -- skip confirmation prompts)
+
+    If ``version`` or ``package_name`` is provided, the CLI also gains
+    ``-V`` / ``--version`` at the root level (wired via
+    :func:`click.version_option`). When neither kwarg is set, no
+    version flag is installed -- existing callers see no change.
 
     Args:
         name: CLI name (e.g., "orbit-admin"). Used for config paths and logging.
@@ -244,10 +252,70 @@ def create_cli(
             don't stack duplicate entries (known limitation: the dedup
             does not normalize *existing* ``sys.path`` entries that were
             added via relative/unresolved spellings elsewhere).
+        version: Explicit version string (e.g. ``"1.2.3"``). If provided,
+            it is used verbatim as the value displayed by ``--version``.
+            Takes precedence over ``package_name`` when both are set.
+        package_name: Installed distribution name to auto-resolve the
+            version from via :func:`importlib.metadata.version`. Only
+            used when ``version`` is ``None``. Raises ``ValueError`` at
+            ``create_cli()`` call time if the named distribution is not
+            installed -- we prefer failing loud to silently omitting the
+            flag, since a misspelled package name would otherwise go
+            unnoticed until someone happened to run ``--version``.
 
     Returns:
         A configured Click group with all discovered commands registered.
+
+    Raises:
+        ValueError: If ``package_name`` is provided (and ``version`` is
+            ``None``) but the named distribution cannot be found by
+            :mod:`importlib.metadata`.
+
+    Example:
+        Explicit version string::
+
+            cli = create_cli(name="orbit-admin", version="1.2.3")
+
+        Auto-resolve from the installing package's metadata::
+
+            cli = create_cli(name="orbit-admin", package_name="orbit-admin")
     """
+
+    # Resolve the version string to display via --version, if any.
+    #
+    # Three cases:
+    #   1. ``version`` is set -> use it verbatim. Wins over package_name.
+    #   2. ``version`` is None and ``package_name`` is set -> look it up
+    #      via importlib.metadata. PackageNotFoundError is wrapped as
+    #      ValueError so the caller gets a loud, actionable error at
+    #      create_cli() time instead of a silent "no --version flag".
+    #   3. Both None -> no --version flag is installed at all. This is
+    #      the default and preserves behaviour for pre-#48 callers.
+    #
+    # WHY eagerly resolve (instead of letting click.version_option do it
+    # at --version invocation time via its own ``package_name=``): Click
+    # only consults importlib.metadata when the user actually runs
+    # ``--version``. A typo in ``package_name`` would go undetected until
+    # someone hits that code path (possibly in production). Eager
+    # resolution at create_cli() call time surfaces the error at CLI
+    # construction, which is always exercised on startup.
+    resolved_version: str | None = None
+    if version is not None:
+        resolved_version = version
+    elif package_name is not None:
+        try:
+            resolved_version = importlib.metadata.version(package_name)
+        except importlib.metadata.PackageNotFoundError as e:
+            # Re-raise as ValueError with a message that names both the
+            # missing distribution and the ``create_cli`` context, so
+            # stack traces point at the real problem (a wrong
+            # package_name=) rather than the internal metadata lookup.
+            raise ValueError(
+                f"create_cli(package_name={package_name!r}) could not resolve a version: "
+                f"distribution {package_name!r} is not installed. "
+                "Pass an explicit version= string, or ensure the package name matches "
+                "the distribution name on PyPI / in pyproject.toml's [project] table."
+            ) from e
 
     # Optionally make commands_dir's parent package importable.
     #
@@ -463,6 +531,36 @@ def create_cli(
         # Attach the CliContext to Click's ctx.obj so all subcommands can
         # receive it via @click.pass_obj or @pass_cli_context.
         ctx.obj = cli_ctx
+
+    # Install --version / -V if a version string was resolved above.
+    #
+    # WHY this lives here (after the @click.group decorator ran, before
+    # discover_commands): click.version_option() returns a decorator that
+    # wraps a Command. We already have the decorated group object
+    # ``cli_group``, so applying the decorator in-place (``cli_group =
+    # click.version_option(...)(cli_group)``) installs the option on the
+    # exact group we're about to return. Doing this after command
+    # discovery would also work, but grouping all group-level option
+    # wiring in one place keeps the factory's structure easier to read.
+    #
+    # WHY we pass the already-resolved string (not package_name) to
+    # click.version_option: Click would otherwise defer the
+    # importlib.metadata lookup until --version is actually invoked --
+    # see the resolution block at the top of this function for why we
+    # want the error surfaced at construction time instead.
+    #
+    # WHY prog_name=name: without it, Click derives the prog name from
+    # the command's invocation path (e.g. ``python -m orbit_admin``),
+    # which is rarely what the end user expects. Forcing ``name`` makes
+    # ``--version`` output read ``<cli-name>, version <version>`` no
+    # matter how the CLI was launched.
+    if resolved_version is not None:
+        cli_group = click.version_option(
+            resolved_version,
+            "-V",
+            "--version",
+            prog_name=name,
+        )(cli_group)
 
     # Discover and register commands from the commands directory and/or
     # installed entry points, depending on the discovery_mode setting.
