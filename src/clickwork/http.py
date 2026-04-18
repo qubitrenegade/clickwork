@@ -206,7 +206,20 @@ def _sanitize_url_for_log(url: str) -> str:
     # any "user:pass@" prefix the original might have had.
     if parts.hostname is None:
         return "<unparseable URL>"
-    netloc = parts.hostname
+
+    # IPv6 addresses need bracket-wrapping in netloc to be unambiguous.
+    # parts.hostname strips the brackets (``[::1]`` -> ``::1``), so
+    # reassembling naively produces ``::1:8443`` which is ambiguous
+    # between "IPv6 ::1 on port 8443" and "IPv6 ::1:8443". The colon
+    # count is the hint: any host with colons is IPv6 and must be
+    # wrapped before appending a port. This matches what urlunparse
+    # does for netloc round-trips in the standard library's own test
+    # suite.
+    if ":" in parts.hostname:
+        host_for_netloc = f"[{parts.hostname}]"
+    else:
+        host_for_netloc = parts.hostname
+    netloc = host_for_netloc
     if parts.port is not None:
         netloc = f"{netloc}:{parts.port}"
 
@@ -615,12 +628,21 @@ def _send(
             snippet = err_response_body[:200].decode("utf-8", errors="replace")
         else:
             snippet = json.dumps(err_response_body)[:200]
-        message = f"HTTP {err.code} for {url}: {snippet}"
+        # Sanitize the URL for both the human-readable message AND the
+        # .url attribute on HttpError. A caller who embeds credentials
+        # in the URL (userinfo or query params) would otherwise see
+        # those secrets leak via ``str(HttpError)`` or
+        # ``HttpError.url`` -- e.g. when a traceback is logged by an
+        # operator. The sanitized form drops userinfo/query/fragment
+        # and keeps scheme + host + port + path, matching what the
+        # per-request log line shows.
+        safe_url_for_error = _sanitize_url_for_log(url)
+        message = f"HTTP {err.code} for {safe_url_for_error}: {snippet}"
         raise HttpError(
             status_code=err.code,
             response_body=err_response_body,
             headers=err_headers,
-            url=url,
+            url=safe_url_for_error,
             message=message,
         ) from err
 

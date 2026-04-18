@@ -579,6 +579,72 @@ class TestLogSanitization:
         all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
         assert "internal.example:8443" in all_log_text
 
+    def test_ipv6_netloc_kept_bracketed_in_log(self, caplog):
+        """IPv6 hosts round-trip through the sanitizer with correct brackets.
+
+        WHY: urlparse().hostname strips the brackets from IPv6 addresses
+        (``[::1]`` -> ``::1``), so naively rebuilding the netloc as
+        ``::1:8443`` would produce an ambiguous form (is that
+        ``::1:8443`` as an IPv6 address, or IPv6 ``::1`` on port 8443?).
+        The sanitizer must re-bracket any hostname containing a colon
+        before appending a port.
+        """
+        from clickwork import http
+
+        resp = _make_response(body=b"{}")
+        with patch("urllib.request.urlopen", return_value=resp):
+            with caplog.at_level(logging.INFO, logger="clickwork.http"):
+                http.get("https://[::1]:8443/metrics")
+
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        # Brackets must be present; naive netloc reconstruction would
+        # produce ``::1:8443`` without them.
+        assert "[::1]:8443" in all_log_text
+
+
+class TestHttpErrorMessageSanitization:
+    """HttpError's .url attribute and str() must not leak URL credentials.
+
+    WHY: a caller who embeds credentials in the URL (``user:pass@host``
+    or ``?api_key=xxx``) would otherwise see those secrets leak through
+    ``str(HttpError)`` or ``HttpError.url`` when a traceback is logged
+    on an unhandled exception. Log-line sanitization alone isn't enough
+    because the exception object itself carries the URL.
+    """
+
+    def test_http_error_url_attribute_is_sanitized(self):
+        """HttpError.url strips userinfo and query string."""
+        import urllib.error
+        from clickwork import http
+
+        def _raise_404(req, *args, **kwargs):
+            raise urllib.error.HTTPError(
+                url=req.full_url,
+                code=404,
+                msg="Not Found",
+                hdrs={"Content-Type": "application/json"},  # type: ignore[arg-type]
+                fp=BytesIO(b'{"error": "nope"}'),
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_raise_404):
+            try:
+                http.get("https://alice:token@api.example.com/thing?api_key=xxx")
+            except http.HttpError as e:
+                # Credentials must not survive on .url
+                assert "alice" not in e.url
+                assert "token" not in e.url
+                assert "api_key" not in e.url
+                assert "xxx" not in e.url
+                # Legitimate parts must be there
+                assert "api.example.com" in e.url
+                assert "/thing" in e.url
+                # Same sanitization flows into the string form
+                assert "alice" not in str(e)
+                assert "token" not in str(e)
+                assert "api_key" not in str(e)
+            else:
+                raise AssertionError("Expected HttpError to be raised")
+
 
 class TestTimeout:
 
