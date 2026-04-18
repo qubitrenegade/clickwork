@@ -290,6 +290,7 @@ def load_env_file(path: Path) -> dict[str, str]:
 
     Example usage::
 
+        from pathlib import Path
         from clickwork.config import load_env_file
 
         env = load_env_file(Path(".env"))

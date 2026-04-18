@@ -604,6 +604,33 @@ class TestLoadEnvFile:
         with pytest.raises(ConfigError, match="permission"):
             load_env_file(env_file)
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX file-mode semantics don't apply on Windows",
+    )
+    def test_load_env_file_rejects_group_writable_file(self, tmp_path: Path):
+        """Group-WRITE alone (0o620) must also fail -- tampering risk.
+
+        WHY: a group-writable secrets file lets another user replace or
+        modify our secrets even when they can't read them directly. The
+        permission guard rejects ANY group/other bit, not just readability.
+        This regression test pins that -- without it, someone could
+        accidentally relax the check back to S_IRGRP|S_IROTH and lose
+        tamper-resistance without any test failing.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("K=v\n")
+        # 0o620 = owner rw, group w only, other ---. Not group-readable,
+        # so a pre-tightening check (S_IRGRP | S_IROTH) would let this
+        # through. The current S_IRWXG | S_IRWXO check catches it.
+        os.chmod(env_file, 0o620)
+
+        with pytest.raises(ConfigError, match="permission"):
+            load_env_file(env_file)
+
     def test_load_env_file_raises_on_malformed_line(self, tmp_path: Path):
         """A line without '=' is ambiguous -- the parser refuses it rather
         than silently dropping or misinterpreting. The error message must
