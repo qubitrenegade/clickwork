@@ -686,6 +686,33 @@ class TestRunWithSecrets:
         # Mention the type so the fix (str(path)) is obvious.
         assert "PosixPath" in str(exc_info.value) or "WindowsPath" in str(exc_info.value) or "Path" in str(exc_info.value)
 
+    def test_run_with_secrets_rejects_non_Secret_value_in_secrets_dict(self):
+        """secrets={"K": "plain-string"} fails with a clear TypeError.
+
+        WHY: if the caller forgets to wrap a value in Secret, .get()
+        would raise AttributeError mid-execution. Through clickwork's
+        wrapped_invoke that surfaces as exit 2 "Internal error:
+        'str' object has no attribute 'get'" -- classified as a
+        framework bug when it's really a user-side wrapping miss.
+        The up-front TypeError keeps the error close to the cause and
+        doesn't echo the value (which might be sensitive even
+        unwrapped).
+        """
+        from clickwork.process import run_with_secrets
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"TOKEN": "plain-string-not-wrapped"},  # type: ignore[dict-item]
+            )
+        # Must name the offending key AND its type so the fix is
+        # obvious, but NEVER the value (a caller who passed a token
+        # un-Secret-wrapped shouldn't see it echoed in the error
+        # message -- same redaction discipline as everywhere else).
+        assert "TOKEN" in str(exc_info.value)
+        assert "str" in str(exc_info.value)  # type name, not value
+        assert "plain-string-not-wrapped" not in str(exc_info.value)
+
     def test_run_with_secrets_rejects_non_list_cmd(self):
         """cmd must be a list, not a tuple/str/other iterable.
 
