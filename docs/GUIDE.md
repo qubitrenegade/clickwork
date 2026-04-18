@@ -187,6 +187,86 @@ my-tool runner --help
 
 ## Configuration
 
+### Config Precedence
+
+clickwork merges config from six ordered sources. The table below is
+the authoritative precedence contract -- it is part of the public 1.0
+surface (see [`API_POLICY.md`](API_POLICY.md#protocol-level-surfaces)),
+so changing the order is a breaking change requiring a major version
+bump. Highest priority wins; when the same key is set in multiple
+sources, the higher row's value is what `ctx.config[key]` returns.
+
+| # | Source | How it's set | Notes / gotchas |
+|---|--------|--------------|-----------------|
+| 1 (highest) | Explicit env-var mapping | `CLOUDFLARE_ACCOUNT_ID=abc` with `{"env": "CLOUDFLARE_ACCOUNT_ID"}` in schema | Only applies to keys whose schema entry declares an `env:` name. Beats the auto-prefix form for the same key. |
+| 2 | Auto-prefixed env var | `MY_TOOL_R2_BUCKET=bucket-x` | Prefix is the project name uppercased with hyphens replaced by `_`; suffix is the dotted config key with `.` and `-` replaced by `_`, uppercased. `my-tool` + `r2.bucket` -> `MY_TOOL_R2_BUCKET`. |
+| 3 | `[env.<selected>]` section | `[env.staging]` in `.my-tool.toml`, selected via `--env staging` or `MY_TOOL_ENV=staging` | Only the section matching the selected env applies; other `[env.*]` sections are ignored. Selecting an undefined env raises `ConfigError` when the repo config file exists but has no matching `[env.<name>]` section. If there is no repo config file at all, the env selection is silently a no-op. |
+| 4 | `[default]` section | `[default]` in `.my-tool.toml` | Shared defaults for all envs. Keys absent from the selected `[env.<x>]` fall through to here. |
+| 5 | User config | `~/.config/my-tool/config.toml` | Must be `chmod 600` (or stricter) on POSIX -- any group/other bit raises `ConfigError`. On Windows the permission check is skipped. |
+| 6 (lowest) | Schema default | `{"port": {"default": 8080}}` in the schema passed to `create_cli()` | Applied only if the key is declared in the schema AND still absent after all higher layers merge. No schema => no defaults. |
+
+The rationale for this order:
+
+- **Env vars win** because they are the canonical escape hatch for
+  one-off overrides and per-process CI injection. An operator should
+  be able to override any checked-in value without editing a file.
+- **Repo config beats user config** because clickwork targets project
+  automation: the `.my-tool.toml` committed to the repo defines the
+  project's canonical behaviour, so teammates and CI get the same
+  result. If you want a *personal* override, use an env var (layer 1
+  or 2), not your user config.
+- **Schema defaults sit at the bottom** so they only fire when no
+  real source provided a value. This matches the "documented
+  fallback" role defaults play -- a schema default should never
+  shadow a value the operator explicitly set anywhere else.
+
+#### Worked example
+
+Given the schema, repo file, user file, and env below:
+
+```python
+# in create_cli(config_schema=...)
+CONFIG_SCHEMA = {
+    "r2.bucket": {"type": str, "default": "releases-fallback"},
+    "region":    {"type": str, "default": "us-east-1"},
+}
+```
+
+```toml
+# .my-tool.toml (checked in)
+[default]
+r2.bucket = "releases-staging"
+region    = "us-east-1"
+
+[env.production]
+r2.bucket = "releases-prod"
+```
+
+```toml
+# ~/.config/my-tool/config.toml
+r2.bucket = "releases-personal"
+region    = "eu-west-1"
+```
+
+```bash
+MY_TOOL_REGION=ap-south-1 my-tool --env production deploy
+```
+
+Resolution:
+
+| Key | Value | Chosen by |
+|-----|-------|-----------|
+| `r2.bucket` | `"releases-prod"` | Layer 3 (`[env.production]`) beats user config (layer 5) and `[default]` (layer 4). |
+| `region` | `"ap-south-1"` | Layer 2 (auto-prefixed `MY_TOOL_REGION`) beats every TOML layer and the schema default. |
+
+Drop the env var (`unset MY_TOOL_REGION`) and `region` falls to
+`"us-east-1"` from `[default]` (layer 4), NOT `"eu-west-1"` from the
+user file (layer 5) -- because repo config overrides user config. Drop
+`[env.production]` and `r2.bucket` falls to `"releases-staging"` from
+`[default]`. Drop every source for a key entirely and it resolves to
+its schema default (`"releases-fallback"`) or raises `ConfigError` if
+the schema marks it `required: True`.
+
 ### Repo Config
 
 Create a `.my-tool.toml` file in your project root. The `[default]`
@@ -243,9 +323,11 @@ on every command.
 ### User Config
 
 Personal settings (credentials, local overrides) go in
-`~/.config/my-tool/config.toml`. This file has the **lowest** priority
--- repo config overrides it. To override a repo value locally, use an
-environment variable instead.
+`~/.config/my-tool/config.toml`. This file sits **below** repo config
+in the precedence order -- repo config overrides it. (Schema-declared
+defaults are the only thing lower; see
+[Config Precedence](#config-precedence) for the full table.) To
+override a repo value locally, use an environment variable instead.
 
 User config may contain secrets, so the framework enforces owner-only
 permissions on Unix (`chmod 600`). Files that are group- or
@@ -724,15 +806,11 @@ def test_something(make_cli_context):
 
 ### Config Resolution Order
 
-Highest priority wins:
-
-| Priority | Source | Example |
-|----------|--------|---------|
-| 1 (highest) | Explicit env var mapping | `CLOUDFLARE_ACCOUNT_ID` |
-| 1 | Auto-prefixed env var | `MY_TOOL_BUCKET` |
-| 2 | Env-specific section | `[env.staging]` in `.my-tool.toml` |
-| 3 | Default section | `[default]` in `.my-tool.toml` |
-| 4 (lowest) | User config | `~/.config/my-tool/config.toml` |
+See [Config Precedence](#config-precedence) above for the authoritative
+ordered table (layers 1-6, from highest to lowest priority) and a
+worked example showing which source wins each tiebreaker. The ordering
+is part of the 1.0 stability contract -- see
+[`API_POLICY.md`](API_POLICY.md#protocol-level-surfaces).
 
 ### Exit Codes
 
