@@ -119,7 +119,60 @@ def compare_to_baseline(current: dict[str, object], baseline_path: Path) -> int:
     # CI, which always runs in utf-8. Without this the default decoder
     # would use locale.getencoding() and deltas could depend on where
     # the script was last run, not what changed in the code.
-    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    #
+    # Wrap the load in try/except so CI gets an actionable error
+    # instead of a raw traceback when the baseline is missing or
+    # malformed. Each error path below prints a short message to
+    # stderr and returns non-zero so the CI step fails cleanly.
+    try:
+        baseline_text = baseline_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        print(
+            f"ERROR: baseline file not found at {baseline_path}. "
+            "Either commit one (capture via --update-baseline) or "
+            "remove the --baseline flag to skip the regression check.",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        baseline = json.loads(baseline_text)
+    except json.JSONDecodeError as exc:
+        print(
+            f"ERROR: baseline at {baseline_path} is not valid JSON: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    if "import_ms" not in baseline:
+        print(
+            f"ERROR: baseline at {baseline_path} is missing the "
+            "'import_ms' key. Re-capture via "
+            "`--update-baseline <path>`.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Warn -- but don't fail -- if the environment that captured the
+    # baseline materially differs from the current environment.
+    # Python patch and platform string are cheap to compare and both
+    # affect cold-start timing enough to show up in the delta. A
+    # mismatch doesn't fail because the real reconciliation is
+    # "re-capture on the CI runner" (see benchmarks/README.md); the
+    # warning lets a reviewer spot that a delta is environment-driven
+    # rather than code-driven.
+    for field in ("python", "platform"):
+        baseline_val = baseline.get(field)
+        current_val = current.get(field)
+        if baseline_val and current_val and baseline_val != current_val:
+            print(
+                f"WARNING: baseline was captured under "
+                f"{field}={baseline_val!r} but this run is on "
+                f"{field}={current_val!r}. Delta below may reflect "
+                "environment differences rather than code changes. "
+                "Consider re-capturing baseline via the bench "
+                "workflow's manual dispatch.",
+                file=sys.stderr,
+            )
+
     current_ms = float(current["import_ms"])  # type: ignore[arg-type]
     baseline_ms = float(baseline["import_ms"])
     # ``max(1e-9, ...)`` guards against a zero baseline (shouldn't
