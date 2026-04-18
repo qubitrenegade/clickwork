@@ -805,15 +805,15 @@ add_global_option(cli, "--region", default=None, help="Target region.")
 
 # Step 3: attach the overriding subcommand. Its own --region wins
 # inside its scope; `status` above still sees the global via
-# ctx.meta because it was attached before add_global_option ran.
+# ctx.find_root().meta because it was attached before add_global_option ran.
 @cli.command("deploy")
 @click.option("--region", default="us-east-1", help="Deploy target.")
 @click.pass_context
 def deploy(ctx: click.Context, region: str) -> None:
     # `region` here is the subcommand's own kwarg -- "us-east-1" by
     # default, or whatever the user passed after "deploy" on the CLI.
-    # The global's ctx.meta["region"] reflects the ROOT-level parse
-    # only; it is NOT touched by the inner --region.
+    # The global's ctx.find_root().meta["region"] reflects the
+    # ROOT-level parse only; it is NOT touched by the inner --region.
     click.echo(f"deploying to {region}")
 ```
 

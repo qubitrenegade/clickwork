@@ -608,7 +608,7 @@ class TestOverrideSemantics:
 
       - Inside the overriding subcommand's scope, Click only sees the
         subcommand's OWN ``--env`` declaration, and the subcommand's handler
-        receives ``--env=foo`` via its own kwarg. ``ctx.meta['env']`` stays
+        receives ``--env=foo`` via its own kwarg. ``ctx.find_root().meta['env']`` stays
         untouched by that subcommand's parse (no global callback runs there).
       - On other subcommands (those that DID exist at snapshot time and
         didn't redeclare ``--env``), the global is installed normally and
@@ -634,7 +634,7 @@ class TestOverrideSemantics:
         Concrete assertion:
 
           - Subcommand's own kwarg receives ``"foo"``.
-          - ``ctx.meta['env']`` is still the ROOT-level resolution (which
+          - ``ctx.find_root().meta['env']`` is still the root-level resolution (which
             is the global's Click default, ``None``, since the caller did
             not pass ``--env`` BEFORE the subcommand name). The value
             ``"foo"`` must NOT appear in meta; that would indicate the
@@ -690,7 +690,7 @@ class TestOverrideSemantics:
         assert captured["meta_env"] is None, (
             "Global --env meta slot should still be None at the root "
             f"(no --env passed before the subcommand); got "
-            f"ctx.meta['env']={captured['meta_env']!r}. Any non-None "
+            f"ctx.find_root().meta['env']={captured['meta_env']!r}. Any non-None "
             "value means the global's callback ran on the subcommand "
             "parse, which would be a regression of the override "
             "contract."
