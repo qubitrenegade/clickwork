@@ -231,14 +231,19 @@ startup instead of silently dropping the command. What strict catches
 depends on the discovery mechanism:
 
 - **Directory scan**: missing `cli` attribute, import error, invalid
-  `cli` type, duplicate command name -- all caught at startup.
-- **Entry-point scan**: same categories, plus entry-point metadata
-  failures and duplicate entry-point names. Per-plugin runtime failures
-  (e.g. a lazy-loaded plugin's `cli` attribute raising when Click
-  eventually imports it) surface at invocation time, since
-  `LazyEntryPointCommand` doesn't load the target until the command
-  runs. This is the lazy-loading tradeoff -- startup stays fast but
-  some defects move to first-use time.
+  `cli` type, duplicate command name -- all caught at startup, because
+  directory-scanned modules are imported eagerly.
+- **Entry-point scan**: entry-point enumeration failures (e.g. a
+  malformed installed distribution's metadata) and duplicate
+  entry-point names, because those are the two categories visible
+  without loading a plugin. Categories that require importing the
+  plugin -- missing `cli` attribute, import error, invalid `cli`
+  type, per-plugin flag collisions -- are deferred to invocation
+  time, since `LazyEntryPointCommand` does not load its target until
+  the command actually runs. Startup stays fast; some defects move
+  to first-use time. If you want those caught at release-validation
+  time rather than by operators, run your plugin's own test suite
+  in CI (the plugin author's responsibility).
 
 Strict discovery is opt-in for compatibility with existing CLIs; new
 deployments should turn it on.
