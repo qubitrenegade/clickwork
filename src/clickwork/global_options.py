@@ -133,17 +133,24 @@ def add_global_option(
             #   myapp sub-cmd --json
             #   myapp group --json sub-cmd
 
-        Value option with innermost-wins::
+        Value option with innermost-wins. Note this example uses
+        ``--region`` rather than ``--env``: ``create_cli`` already
+        installs ``--env`` at the root (alongside ``--verbose``,
+        ``--quiet``, ``--dry-run``, ``--yes``), so calling
+        ``add_global_option(cli, "--env", ...)`` against a
+        ``create_cli`` root would raise ``ValueError`` for a
+        flag-string collision. Pick a name that is not one of the
+        clickwork-reserved built-ins::
 
-            clickwork.add_global_option(cli, "--env", default=None,
-                                        help="Target environment.")
+            clickwork.add_global_option(cli, "--region", default=None,
+                                        help="Target region.")
 
-            # myapp --env=prod sub-cmd --env=staging
-            #   => ctx.find_root().meta['env'] == 'staging'   (inner wins)
-            # myapp --env=prod sub-cmd
-            #   => ctx.find_root().meta['env'] == 'prod'      (outer alone)
+            # myapp --region=us-east sub-cmd --region=eu-west
+            #   => ctx.find_root().meta['region'] == 'eu-west'   (inner wins)
+            # myapp --region=us-east sub-cmd
+            #   => ctx.find_root().meta['region'] == 'us-east'   (outer alone)
             # myapp sub-cmd
-            #   => ctx.find_root().meta['env'] is None        (Click default)
+            #   => ctx.find_root().meta['region'] is None        (Click default)
     """
     # Guard: we install our own callback to implement the merge. If the
     # caller supplies one, silently dropping it would lead to confusing bugs
