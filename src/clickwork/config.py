@@ -122,7 +122,7 @@ def _load_toml_from_bytes(data: bytes) -> dict:
 
 
 def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
-    """Raise ConfigError if the file behind ``fd`` is readable by group/others.
+    """Raise ConfigError unless the file behind ``fd`` is owner-only (chmod 600).
 
     Factored out of the user-config reader so the same permission guard can
     be reused by any secrets-bearing file (user config TOML, .env dotenv
@@ -150,8 +150,13 @@ def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
             caller sees which file failed the check.
 
     Raises:
-        ConfigError: If the file is readable by group or other users
-            (i.e., mode bits include S_IRGRP or S_IROTH).
+        ConfigError: If ANY group or other permission bits are set on the
+            file (read, write, OR execute). A group-writable file is a
+            tampering risk even when not group-readable, so the rejection
+            matches the "chmod 600" remediation -- owner rwx only, every
+            other bit off. The check looks at
+            ``stat.S_IRWXG | stat.S_IRWXO`` rather than just the read
+            bits for this reason.
     """
     # Skip the check entirely on Windows -- POSIX mode bits are meaningless
     # there, and fstat() on Windows typically returns 0o666 for any file.
@@ -160,8 +165,6 @@ def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
 
     st = os.fstat(fd)
     mode = stat.S_IMODE(st.st_mode)
-    # S_IRGRP = group-read bit, S_IROTH = other-read bit. Either being set
-    # means the file is too permissive for secrets.
     # Reject ANY group/other permission bits (not just read). A file with
     # mode 0o620 (owner rw, group w, other ---) has group-write, which
     # means another user could *tamper* with our secrets file -- still a
@@ -262,10 +265,13 @@ def load_env_file(path: Path) -> dict[str, str]:
     without reading the parser.
 
     Security: the file must be owner-only (``chmod 600``) on POSIX
-    platforms. Because ``.env`` files typically hold secrets, looser
-    permissions (anything readable by group or other) raise ConfigError.
-    On Windows the check is skipped -- POSIX mode bits do not apply there,
-    and callers are expected to protect the file via NTFS ACLs instead.
+    platforms. Because ``.env`` files typically hold secrets, any
+    group or other permission bit (read, write, OR execute) raises
+    ConfigError -- not just group/other readability. A group-writable
+    file is a tampering risk even when not group-readable, so the
+    rejection matches what ``chmod 600`` actually enforces. On Windows
+    the check is skipped -- POSIX mode bits do not apply there, and
+    callers are expected to protect the file via NTFS ACLs instead.
 
     Example usage::
 
