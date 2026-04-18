@@ -43,7 +43,7 @@
 
 ### #11 — `ctx.run_with_secrets(cmd, secrets={...}, stdin_secret=...)`
 
-**Signature:** `cmd` is typed as `Sequence[str | Secret]` (not just `list[str]`) at the function signature so the runtime Secret-in-argv check can accept a `Secret` without forcing callers to `# type: ignore`. After validation, argv is guaranteed to be plain strings.
+**Signature:** `cmd: list[str | Secret]`. Keep the `list`-not-`Sequence` constraint because `clickwork.process._validate_cmd` already enforces "must be a list" at runtime (see `process.py`'s docstring -- the list-only rule is a deliberate shell-injection guardrail). Using `str | Secret` in the element type lets the Secret-in-argv check accept a `Secret` at the signature level without callers needing `# type: ignore`. After validation, argv is guaranteed to be plain strings.
 
 **Files:** `src/clickwork/process.py` (add `run_with_secrets` alongside existing `run` / `run_with_confirm`), `src/clickwork/cli.py` (bind a forwarding method onto `CliContext`), `tests/unit/test_process.py` and `tests/unit/test_cli.py` (ctx-level forwarding tests).
 
@@ -116,14 +116,27 @@ def get(url: str, *,
         basic_auth: tuple[str, str] | None = None,
         headers: dict[str, str] | None = None,
         parse_json: bool = True,
-        timeout: float = 30.0) -> dict | bytes: ...
+        timeout: float = 30.0) -> JSONValue | bytes: ...
 
-def post(url, *, body: dict | bytes | None = None, ...) -> dict | bytes: ...
-def put(url, *, body: dict | bytes | None = None, ...) -> dict | bytes: ...
-def delete(url, *, ...) -> dict | bytes: ...
+def post(url, *, body: JSONValue | bytes | None = None, ...) -> JSONValue | bytes: ...
+def put(url, *, body: JSONValue | bytes | None = None, ...) -> JSONValue | bytes: ...
+def delete(url, *, ...) -> JSONValue | bytes: ...
+
+# JSONValue is a recursive alias for every top-level type json.loads may
+# return. Narrow to the concrete type at the call site with isinstance /
+# cast, same as any other union-typed helper.
+JSONValue = (
+    dict[str, "JSONValue"]
+    | list["JSONValue"]
+    | str
+    | int
+    | float
+    | bool
+    | None
+)
 
 class HttpError(Exception):
-    def __init__(self, status_code: int, response_body: bytes | str | dict,
+    def __init__(self, status_code: int, response_body: JSONValue | bytes,
                  headers: dict[str, str], url: str, message: str): ...
     # All five exposed as instance attributes.
 ```
