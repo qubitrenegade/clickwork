@@ -100,6 +100,101 @@ class TestRun:
         with pytest.raises(CliProcessError, match="Command not found"):
             run(["definitely-not-a-real-binary-xyz123"])
 
+    def test_run_with_stdin_text_delivers_value(self, capfd):
+        """stdin_text should be UTF-8 encoded and piped to the child's stdin.
+
+        Implementation detail pinned here for future readers: run() always
+        opens the child's stdin pipe in **binary** mode and encodes
+        stdin_text to UTF-8 itself. We do NOT use ``Popen(text=True)``
+        because that would pick up the platform locale encoding and could
+        apply Windows "\\n" -> "\\r\\n" newline translation -- both of
+        which silently corrupt secret/token payloads. See the WHY-always-
+        bytes comment in process.py.
+
+        The child-side Python here uses ``sys.stdin.read()`` which decodes
+        using the child's locale. Since our payload "hello" is pure ASCII,
+        the round-trip is lossless regardless of what that locale is.
+
+        WHY: this is the primary use case for secret-via-stdin tools like
+        ``wrangler secret put``, ``gh auth login --with-token``, and
+        ``docker login --password-stdin`` -- pass the secret on stdin so
+        it never appears in argv (which is visible in ``ps`` output).
+        """
+        from clickwork.process import run
+
+        # Child process echoes its stdin to stdout. We then use capfd to
+        # confirm the child actually received "hello" over its stdin pipe.
+        result = run(
+            [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+            stdin_text="hello",
+        )
+        assert result.returncode == 0
+        captured = capfd.readouterr()
+        assert captured.out == "hello"
+
+    def test_run_with_stdin_bytes_delivers_value(self, capfdbinary):
+        """stdin_bytes should be piped to the child process as a binary stream.
+
+        WHY: some tools want raw bytes on stdin (e.g., binary tokens, keys
+        with non-UTF-8 encodings). Keeping a distinct ``stdin_bytes`` kwarg
+        -- rather than overloading ``stdin_text`` with ``str | bytes`` --
+        makes the mode explicit at the call site.
+        """
+        from clickwork.process import run
+
+        # Child echoes raw bytes from stdin to stdout via the binary buffer
+        # so byte-for-byte fidelity is preserved across the pipe boundary.
+        result = run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())",
+            ],
+            stdin_bytes=b"world",
+        )
+        assert result.returncode == 0
+        captured = capfdbinary.readouterr()
+        assert captured.out == b"world"
+
+    def test_run_rejects_both_stdin_text_and_stdin_bytes(self):
+        """Passing both stdin_text and stdin_bytes is a programming error.
+
+        WHY: there's no coherent semantics for "text and bytes at the same
+        time" -- the caller clearly meant one or the other. Raise early
+        with a ValueError so the mistake surfaces immediately, rather than
+        silently picking one and dropping the other.
+        """
+        from clickwork.process import run
+
+        with pytest.raises(ValueError, match="stdin_text.*stdin_bytes"):
+            run(
+                [sys.executable, "-c", "pass"],
+                stdin_text="hello",
+                stdin_bytes=b"world",
+            )
+
+    def test_run_stdin_text_dry_run_does_not_execute(self):
+        """With dry_run=True, stdin_text must NOT trigger process execution.
+
+        WHY: dry-run should be safe even when callers pass a real secret as
+        stdin_text. If dry-run spawned the process (just to feed it stdin)
+        it could leak the secret into the child -- which is the exact
+        behavior dry-run is supposed to prevent.
+        """
+        from clickwork.process import run
+
+        # Sentinel: if the child actually runs, it exits 1, which would
+        # raise CliProcessError. Dry-run must short-circuit before that.
+        with patch("subprocess.Popen") as mock_popen:
+            result = run(
+                [sys.executable, "-c", "import sys; sys.exit(1)"],
+                dry_run=True,
+                stdin_text="secret-value",
+            )
+
+        assert result is None
+        mock_popen.assert_not_called()
+
 
 class TestFormatCmd:
     """_format_cmd() renders an argv list as a display string."""
@@ -219,3 +314,46 @@ class TestRunWithConfirm:
             dry_run=True,
         )
         assert result is None
+
+    def test_stdin_text_happy_path(self, capfd):
+        """run_with_confirm should forward stdin_text to the child process.
+
+        WHY: destructive commands that consume secrets on stdin (e.g., a
+        "rotate production token" workflow using ``wrangler secret put``)
+        still want the confirmation prompt. Forwarding stdin_text from
+        run_with_confirm through to run() keeps the call site symmetric
+        with run() and avoids a second code path for stdin injection.
+        """
+        from clickwork.process import run_with_confirm
+
+        # yes=True skips the prompt entirely so we can isolate the stdin
+        # delivery behavior from the confirmation logic.
+        result = run_with_confirm(
+            [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+            "Rotate production token?",
+            yes=True,
+            stdin_text="s3cret-token",
+        )
+        assert result is not None
+        assert result.returncode == 0
+        captured = capfd.readouterr()
+        assert captured.out == "s3cret-token"
+
+    def test_rejects_both_stdin_text_and_stdin_bytes(self):
+        """run_with_confirm should also enforce stdin mutual exclusivity.
+
+        WHY: the validation must happen in both public entry points so
+        callers hitting run_with_confirm get the same clear error as
+        callers hitting run() directly -- not a confusing error from
+        deep inside the process machinery.
+        """
+        from clickwork.process import run_with_confirm
+
+        with pytest.raises(ValueError, match="stdin_text.*stdin_bytes"):
+            run_with_confirm(
+                [sys.executable, "-c", "pass"],
+                "Do it?",
+                yes=True,
+                stdin_text="hello",
+                stdin_bytes=b"world",
+            )

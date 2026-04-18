@@ -527,6 +527,82 @@ class TestConvenienceMethods:
         assert result.exit_code == 0
         assert all(received.values()), f"Some methods not bound: {received}"
 
+    def test_ctx_run_forwards_stdin_text(self, tmp_path: Path, capfd):
+        """ctx.run(stdin_text=...) must forward the payload through to process.run().
+
+        WHY this test exists (in addition to the process.run()-level tests in
+        test_process.py): the ctx.run/ctx.run_with_confirm bindings in
+        create_cli() are forwarding lambdas that could silently swallow the
+        new kwargs on a bad refactor. Unit-testing the ctx level directly
+        via CliRunner pins the forwarding contract separately from the
+        process-layer tests.
+        """
+        from clickwork.cli import create_cli
+
+        received = {}
+
+        @click.command()
+        @click.pass_obj
+        def echo_stdin(ctx):
+            # Round-trip a payload through the child's stdin using
+            # sys.executable so the test is portable across OSes.
+            result = ctx.run(
+                [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+                stdin_text="ctx-forwarded-token",
+            )
+            received["returncode"] = result.returncode if result is not None else None
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(echo_stdin)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["echo-stdin"])
+        assert result.exit_code == 0, f"CLI failed: {result.output!r}"
+        assert received["returncode"] == 0
+        captured = capfd.readouterr()
+        assert captured.out == "ctx-forwarded-token", (
+            f"Expected stdin payload to round-trip through ctx.run; got {captured.out!r}"
+        )
+
+    def test_ctx_run_with_confirm_forwards_stdin_text(self, tmp_path: Path, capfd):
+        """ctx.run_with_confirm(stdin_text=...) must also forward.
+
+        Same rationale as test_ctx_run_forwards_stdin_text, but covers the
+        other forwarding lambda. yes=True short-circuits the prompt so the
+        test is non-interactive.
+        """
+        from clickwork.cli import create_cli
+
+        received = {}
+
+        @click.command()
+        @click.pass_obj
+        def echo_stdin_confirm(ctx):
+            result = ctx.run_with_confirm(
+                [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+                "Round-trip a stdin payload?",
+                stdin_text="confirm-token",
+            )
+            received["returncode"] = result.returncode if result is not None else None
+
+        cmd_dir = tmp_path / "commands"
+        cmd_dir.mkdir()
+
+        cli = create_cli(name="test-cli", commands_dir=cmd_dir)
+        cli.add_command(echo_stdin_confirm)
+
+        runner = CliRunner()
+        # --yes bypasses the confirmation prompt that run_with_confirm would
+        # otherwise block on.
+        result = runner.invoke(cli, ["--yes", "echo-stdin-confirm"])
+        assert result.exit_code == 0, f"CLI failed: {result.output!r}"
+        assert received["returncode"] == 0
+        captured = capfd.readouterr()
+        assert captured.out == "confirm-token"
+
     def test_ctx_run_respects_dry_run(self, tmp_path: Path):
         """ctx.run() in dry-run mode should not execute the command (returns None).
 
