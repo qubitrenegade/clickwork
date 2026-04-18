@@ -68,8 +68,12 @@ dependencies = [
 
 [project.entry-points."clickwork.commands"]
 # The key is the command name shown in --help. The value is the
-# import path to the click Command or Group. "cli" is the conventional
-# attribute name; use whatever module attribute holds your command.
+# import path to the click Command or Group. Use "cli" as the
+# attribute name to match clickwork's protocol-level contract
+# (see API_POLICY.md's "Protocol-level surfaces"). The loader
+# technically accepts any `module:attribute` path, but publishing
+# under a non-standard name isn't covered by the stability promise
+# and makes your plugin harder for reviewers to read.
 deploy = "my_deploy_tools.deploy:cli"
 
 [build-system]
@@ -95,8 +99,14 @@ promise.
 The command module itself is pure Click plus a few clickwork imports.
 The command receives a typed `CliContext` that exposes config, flags,
 subprocess helpers, and prerequisite checks -- everything a command
-usually needs, in one object. Use `@pass_cli_context` (not
-`@click.pass_obj`, which trips on nested groups):
+usually needs, in one object. Prefer `@pass_cli_context` over
+`@click.pass_obj`: both receive the same `CliContext` because
+clickwork forwards `obj=ctx.obj` through the entry-point proxy,
+but `pass_cli_context` carries clickwork-specific type hints and
+a clearer error if the CLI wasn't built via `create_cli()`. Use
+`@click.pass_obj` when you specifically want Click's native
+decorator (e.g. for cross-framework compatibility); otherwise the
+clickwork one is slightly easier to debug.
 
 ```python
 # src/my_deploy_tools/deploy.py
@@ -265,8 +275,11 @@ longer catalogue that covers command-authoring footguns too, see
   refresh.
 - **Shadowing a host CLI's local command.** If the host keeps a
   `commands/deploy.py` and your plugin also registers `deploy`, the
-  host's local file wins and your command is silently demoted. Pick
-  a more specific name (`acme-deploy`) or coordinate with the host.
+  host's local file wins. Clickwork logs a note about the shadowing
+  at INFO level, so it's not strictly silent, but a host that runs
+  at the default WARNING verbosity will still see your command
+  disappear. Pick a more specific name (`acme-deploy`) or coordinate
+  with the host.
 - **Importing private clickwork modules.** Anything under
   `clickwork._types`, `clickwork._logging`, or similar is private
   and can change without a major bump. Import only from the surface
