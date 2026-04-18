@@ -259,7 +259,8 @@ def load_env_file(path: Path) -> dict[str, str]:
           ``"$OTHER"``; nothing is resolved from ``os.environ`` or from
           earlier entries in the file. If you need shell semantics, use
           ``sh -c 'set -a; source .env; env'`` and capture stdout.
-        * Backticks / command substitution (``K=`date```).
+        * Backticks / command substitution (e.g. ``K=$(date)`` or the
+          backtick form).
         * Heredocs and multi-line values.
         * Inline trailing comments (``K=val # comment`` is parsed as
           ``K`` -> ``"val # comment"`` because the literal '#' is part of
@@ -322,7 +323,13 @@ def load_env_file(path: Path) -> dict[str, str]:
     with os.fdopen(fd, "r", encoding="utf-8") as f:
         # Reuse the exact permission check (including the Windows carve-out)
         # used by user config. See _check_owner_only_permissions for details.
-        _check_owner_only_permissions(fd, path, kind=".env file")
+        #
+        # WHY path.name in the kind label: callers pass real files like
+        # .cf-secrets, .envrc, api-creds.env etc. Hardcoding ".env file"
+        # in the error would mislead the user about which file the
+        # check failed on. Using the actual filename makes the "Fix with:
+        # chmod 600 <path>" remediation unambiguous.
+        _check_owner_only_permissions(fd, path, kind=f"dotenv file {path.name!r}")
         text = f.read()
 
     result: dict[str, str] = {}
