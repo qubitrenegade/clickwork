@@ -388,6 +388,298 @@ class TestSecretWrapping:
         assert config["bucket"] == "my-bucket"
 
 
+class TestEnvVarTypes:
+    """Env vars always arrive as strings; schema ``type`` drives coercion.
+
+    WHY this section exists: environment variables at the OS level are
+    *always* strings -- ``os.environ`` is ``dict[str, str]``, the C-level
+    ``environ`` array is a list of ``NAME=value`` byte strings. clickwork
+    preserves that: a value sourced from an env var enters the config
+    dict as a ``str``, full stop. The schema's ``type`` field is what
+    tells the loader the intended type, and the loader coerces
+    str -> int / float / bool at the schema layer before the validation
+    check runs. If coercion fails (e.g. ``"not-a-number"`` for
+    ``type: int``), ``ConfigError`` is raised with a specific, actionable
+    message naming the key and the offending value.
+
+    Pinning this behavior means plugin authors can declare typed config
+    keys and feed them from env vars or CI secrets without every
+    consumer re-implementing ``int(os.environ["PORT"])`` locally.
+
+    These tests lock the contract for 1.0. Do not relax them without
+    updating ``docs/GUIDE.md`` + ``docs/API_POLICY.md`` in the same PR.
+    """
+
+    def test_env_var_without_schema_stays_string(self, tmp_path: Path, monkeypatch):
+        """An env var override with no schema entry enters config dict AS a string.
+
+        Even when the env var value LOOKS like an int ("42"), without
+        a schema type declaration the loader cannot know the intended
+        Python type and must leave the env-sourced value as a string.
+        Plugin authors who want typed values declare ``type:`` in the
+        schema -- that's the explicit opt-in.
+
+        The TOML seed key makes the auto-prefix lookup trip: without
+        a schema, the loader only checks env vars for keys already
+        present in config files, so we need ``port`` in ``[default]``
+        for the env override to apply.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        # Seed the key so the auto-prefix env lookup has something to
+        # override. The TOML value is itself a string ("0"); the env
+        # var wins and replaces it with "42" -- both remain strings
+        # because no schema declared a type.
+        config_file.write_text('[default]\nport = "0"\n')
+
+        monkeypatch.setenv("TEST_CLI_PORT", "42")
+
+        # No schema -- loader has no type hint, so the env string passes
+        # through untouched.
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+        )
+        assert config["port"] == "42"
+        assert isinstance(config["port"], str)
+
+    def test_env_var_coerced_to_int_by_schema(self, tmp_path: Path, monkeypatch):
+        """schema type=int + env var "8080" -> config["port"] == 8080 (int).
+
+        This is the "strings in, schema coerces" contract: env delivers
+        a string, schema declares int, loader produces int.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_PORT", "8080")
+
+        schema = {
+            "port": {"type": int},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["port"] == 8080
+        assert isinstance(config["port"], int)
+
+    def test_env_var_coerced_to_float_by_schema(self, tmp_path: Path, monkeypatch):
+        """schema type=float + env var "3.14" -> config["ratio"] == 3.14."""
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_RATIO", "3.14")
+
+        schema = {
+            "ratio": {"type": float},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["ratio"] == 3.14
+        assert isinstance(config["ratio"], float)
+
+    def test_env_var_type_str_stays_string(self, tmp_path: Path, monkeypatch):
+        """schema type=str + env var "42" -> config["tag"] == "42" (unchanged).
+
+        Pins that declaring ``type: str`` is a no-op for env-sourced
+        values -- no "helpful" number-detection. Strings stay strings.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_TAG", "42")
+
+        schema = {
+            "tag": {"type": str},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["tag"] == "42"
+        assert isinstance(config["tag"], str)
+
+    def test_env_var_int_coercion_failure_raises(self, tmp_path: Path, monkeypatch):
+        """Un-coercible env value raises ConfigError naming key + value.
+
+        "not-a-number" cannot be parsed as int. The loader must fail
+        loudly rather than silently dropping the value or defaulting to
+        zero. The message names the key so the operator can fix the
+        offending env var.
+        """
+        from clickwork.config import load_config, ConfigError
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_PORT", "not-a-number")
+
+        schema = {
+            "port": {"type": int},
+        }
+        with pytest.raises(ConfigError, match="port"):
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                schema=schema,
+            )
+
+    def test_env_var_float_coercion_failure_raises(self, tmp_path: Path, monkeypatch):
+        """Un-coercible float value raises ConfigError."""
+        from clickwork.config import load_config, ConfigError
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_RATIO", "definitely-not-a-float")
+
+        schema = {
+            "ratio": {"type": float},
+        }
+        with pytest.raises(ConfigError, match="ratio"):
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                schema=schema,
+            )
+
+    @pytest.mark.parametrize("truthy", ["true", "True", "TRUE", "1", "yes", "YES", "on", "On"])
+    def test_env_var_bool_truthy_strings_coerce_to_true(self, tmp_path: Path, monkeypatch, truthy: str):
+        """Explicit truthy-string set: true/1/yes/on (case-insensitive).
+
+        WHY pin the exact set: Python's ``bool("false")`` is ``True``
+        (non-empty string), which is the classic foot-cannon. We pick a
+        short, explicit, case-insensitive allowlist that matches shell
+        conventions and reject everything else. No surprises.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_ENABLED", truthy)
+
+        schema = {
+            "enabled": {"type": bool},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["enabled"] is True
+
+    @pytest.mark.parametrize("falsy", ["false", "False", "FALSE", "0", "no", "NO", "off", "Off"])
+    def test_env_var_bool_falsy_strings_coerce_to_false(self, tmp_path: Path, monkeypatch, falsy: str):
+        """Explicit falsy-string set: false/0/no/off (case-insensitive)."""
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_ENABLED", falsy)
+
+        schema = {
+            "enabled": {"type": bool},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["enabled"] is False
+
+    def test_env_var_bool_ambiguous_string_raises(self, tmp_path: Path, monkeypatch):
+        """Unknown bool-ish string raises ConfigError.
+
+        "maybe" isn't in the truthy or falsy set. Rather than guessing,
+        raise so the operator fixes the env var to use one of the
+        accepted tokens. This prevents the classic ``bool("false") ==
+        True`` foot-cannon.
+        """
+        from clickwork.config import load_config, ConfigError
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_ENABLED", "maybe")
+
+        schema = {
+            "enabled": {"type": bool},
+        }
+        with pytest.raises(ConfigError, match="enabled"):
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                schema=schema,
+            )
+
+    def test_toml_int_value_unchanged_by_schema(self, tmp_path: Path):
+        """TOML already-typed int values are not re-coerced.
+
+        TOML carries types natively (``port = 8080`` parses as int).
+        The schema type check still runs (catches mismatches), but no
+        coercion pass touches values that already match their declared
+        type. Pinned so a future "always coerce" refactor can't silently
+        round-trip TOML ints through ``str`` -> ``int``.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\nport = 8080\n")
+
+        schema = {
+            "port": {"type": int},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["port"] == 8080
+        assert isinstance(config["port"], int)
+
+    def test_explicit_env_mapping_coerced_same_as_auto_prefix(self, tmp_path: Path, monkeypatch):
+        """Coercion applies regardless of which env-var mechanism sourced the value.
+
+        Both the explicit ``env: "CF_PORT"`` mapping and the auto-prefix
+        ``TEST_CLI_PORT`` path deliver strings from ``os.environ``. The
+        schema ``type`` pass runs after the merge, so it coerces either
+        source uniformly. Pinning both paths prevents a future refactor
+        from coercing one but not the other.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("CF_PORT", "9090")
+
+        schema = {
+            "port": {"type": int, "env": "CF_PORT"},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["port"] == 9090
+        assert isinstance(config["port"], int)
+
+
 class TestEnvVarDottedKeys:
     """Auto-prefix env var resolution handles dotted keys correctly."""
 

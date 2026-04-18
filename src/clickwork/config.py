@@ -37,6 +37,142 @@ class ConfigError(Exception):
     """
 
 
+# Explicit boolean token sets. Defined at module scope so the docstring
+# for ``_coerce_value`` can reference them and downstream code (plus
+# docs/tests) always agree on the exact accepted tokens.
+#
+# WHY not use ``bool(value)``: Python's built-in truthiness considers
+# any non-empty string truthy, so ``bool("false")`` is ``True`` -- the
+# classic foot-cannon for env-var parsing. Instead we use an explicit
+# case-insensitive allowlist that matches shell conventions. Anything
+# outside both sets raises ConfigError rather than silently guessing.
+_TRUTHY_STRINGS = frozenset({"true", "1", "yes", "on"})
+_FALSY_STRINGS = frozenset({"false", "0", "no", "off"})
+
+
+def _coerce_value(value: object, expected_type: type, key: str) -> object:
+    """Coerce a (typically env-sourced) string value to ``expected_type``.
+
+    Environment variables at the OS level are ALWAYS strings
+    (``os.environ`` is ``dict[str, str]``), but schemas want typed
+    values (``type: int``, ``type: bool``). Rather than forcing every
+    plugin author to re-implement ``int(os.environ["PORT"])`` with
+    their own error handling, the loader performs the coercion
+    centrally at the schema layer using this helper.
+
+    Values that already match ``expected_type`` pass through unchanged
+    -- TOML native-typed values (``port = 8080`` parses as ``int``)
+    don't get round-tripped through ``str``.
+
+    Supported coercion table:
+
+        str -> int    : ``int(value)`` (base 10)
+        str -> float  : ``float(value)``
+        str -> bool   : explicit allowlist -- see _TRUTHY_STRINGS /
+                        _FALSY_STRINGS, case-insensitive.
+        str -> str    : no-op (returned unchanged)
+
+    Any other combination (e.g. ``list`` -> ``int``, or an unsupported
+    ``expected_type``) triggers the same ConfigError a straight
+    ``isinstance`` mismatch would -- the caller's validation branch
+    still fires.
+
+    Args:
+        value: The resolved config value for ``key``. Usually a str
+            from an env var; may also be an already-typed TOML value
+            that happens to match ``expected_type``.
+        expected_type: The type the schema declared for ``key``
+            (``int``, ``float``, ``bool``, or ``str``).
+        key: The dotted config key -- used to build an actionable
+            error message so the operator knows which env var to fix.
+
+    Returns:
+        The coerced value, or ``value`` unchanged if it already
+        matches ``expected_type`` (including the no-op ``str`` case).
+
+    Raises:
+        ConfigError: If ``value`` is a string but does not parse as
+            ``expected_type`` (e.g. ``"not-a-number"`` for int, or a
+            bool token outside the explicit allowlist). The message
+            names ``key`` and the offending value verbatim so the
+            operator can locate the misconfigured env var.
+    """
+    # Fast-path: if the value already has the expected type, nothing
+    # to do. ``bool`` is a subclass of ``int`` in Python, so we check
+    # bool first to avoid accidentally treating ``True`` as "already
+    # an int" when the schema wanted a bool.
+    if expected_type is bool and isinstance(value, bool):
+        return value
+    # ``not isinstance(value, bool)`` on the int branch keeps ``True``
+    # from matching ``type: int`` via the bool-is-subclass-of-int
+    # quirk -- a schema that says ``int`` should reject a bool value.
+    if expected_type is int and isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if expected_type is float and isinstance(value, float):
+        return value
+    if expected_type is str and isinstance(value, str):
+        return value
+
+    # From here on, coercion only makes sense when the source value is
+    # a string (that's the env-var case). Non-string mismatches fall
+    # through unchanged so the caller's isinstance check raises the
+    # familiar "type X, expected Y" ConfigError. We deliberately do
+    # NOT coerce non-string sources (e.g. a TOML ``port = "8080"``
+    # with schema ``int`` used to raise; now it also coerces, which is
+    # a strictly-better outcome since the user's intent is clear).
+    if not isinstance(value, str):
+        return value
+
+    # String -> bool: explicit allowlist, case-insensitive. We lowercase
+    # once and compare against two frozensets so the token list stays
+    # in one place (the module-level constants) and the implementation
+    # is O(1) per lookup.
+    if expected_type is bool:
+        token = value.strip().lower()
+        if token in _TRUTHY_STRINGS:
+            return True
+        if token in _FALSY_STRINGS:
+            return False
+        # Build the error message from the actual token sets so the
+        # operator sees the same list the code accepts, and future
+        # additions can't drift out of sync with the message.
+        raise ConfigError(
+            f"Config key '{key}' has value {value!r}, which is not a "
+            f"valid boolean. Accepted tokens (case-insensitive): "
+            f"{sorted(_TRUTHY_STRINGS)} for true, "
+            f"{sorted(_FALSY_STRINGS)} for false."
+        )
+
+    # String -> int: base 10. ``int("3.14")`` raises ValueError, which
+    # we catch and re-raise as ConfigError so callers only ever have
+    # to handle one exception type from load_config().
+    if expected_type is int:
+        try:
+            return int(value)
+        except ValueError as exc:
+            raise ConfigError(
+                f"Config key '{key}' has value {value!r}, which cannot "
+                f"be parsed as int: {exc}."
+            ) from exc
+
+    # String -> float: accepts scientific notation, signed, decimals.
+    if expected_type is float:
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ConfigError(
+                f"Config key '{key}' has value {value!r}, which cannot "
+                f"be parsed as float: {exc}."
+            ) from exc
+
+    # Unsupported target type (e.g. ``type: list``, ``type: dict``).
+    # Rather than guess, return the value unchanged and let the
+    # isinstance() check in the caller flag the mismatch. Pinning the
+    # "stdlib scalar types only" rule here means adding new coercion
+    # targets is an explicit code edit, not a silent behaviour change.
+    return value
+
+
 def _key_to_env_suffix(key: str) -> str:
     """Convert a dotted config key to an env var suffix.
 
@@ -604,11 +740,26 @@ def load_config(
             if key not in config and "default" in key_schema:
                 config[key] = key_schema["default"]
 
-            # Type check: validate the resolved value matches the declared type.
-            # This catches mistakes like bucket = 42 in TOML when a string was
-            # expected, or a stale env var with the wrong format.
+            # Type check + coercion: env vars always arrive as strings
+            # (``os.environ`` is ``dict[str, str]``), but schemas want
+            # typed values. Coerce at the schema layer so env-sourced
+            # ``"8080"`` -> ``8080`` for ``type: int``, etc. See
+            # _coerce_value for the supported coercion table and the
+            # exact bool-token allowlist. Values that already match
+            # ``expected_type`` pass through unchanged (TOML natively
+            # carries int/float/bool so no round-trip through str).
             expected_type = key_schema.get("type")
             if expected_type and key in config:
+                # Secrets are wrapped AFTER this validation pass, so a
+                # ``secret: True`` value is still a plain str/int/etc.
+                # here and coerces normally.
+                config[key] = _coerce_value(config[key], expected_type, key)
+                # Post-coercion isinstance check is still the
+                # authoritative gate. If _coerce_value returned the
+                # value unchanged (unsupported target type, or a
+                # non-string source that didn't match), this catches
+                # the mismatch with the original "type X, expected Y"
+                # message callers depend on.
                 if not isinstance(config[key], expected_type):
                     raise ConfigError(
                         f"Config key '{key}' has type {type(config[key]).__name__}, "
