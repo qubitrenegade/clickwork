@@ -2,18 +2,62 @@ name: Tests
 
 on:
   push:
-    branches: [main, "feat/**", "fix/**"]
+    branches: [main, "feat/**", "fix/**", "ci/**"]
   pull_request:
     branches: [main]
 
 jobs:
   unit:
-    name: Unit tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # The job name embeds the matrix label so GitHub's required-check UI
+    # shows each (os, python, click-pin) combination distinctly. "label"
+    # is a custom matrix field defined in `matrix.include` below — it's
+    # just a display string, not a functional value.
+    name: Unit tests (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      # Don't cancel sibling jobs when one fails — a Windows failure
+      # shouldn't hide a macOS failure and vice versa.
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        # We explicitly enumerate entries rather than using a cross-product
+        # (`os: [...]` × `python-version: [...]`) because we want asymmetric
+        # coverage: full Python matrix on the cheap Linux runner, smoke
+        # checks on the expensive macOS/Windows runners.
+        include:
+          # --- Linux: full Python coverage on the cheapest runner. ---
+          - os: ubuntu-latest
+            python-version: "3.11"
+            label: "linux-py3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+            label: "linux-py3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+            label: "linux-py3.13"
+
+          # --- macOS: one smoke job on the latest supported Python. ---
+          # If tests start flaking on macOS, bump this to include 3.11/3.12.
+          - os: macos-latest
+            python-version: "3.13"
+            label: "macos-py3.13"
+
+          # --- Windows: one smoke job on the latest supported Python. ---
+          # Same escalation rule as macOS above.
+          - os: windows-latest
+            python-version: "3.13"
+            label: "windows-py3.13"
+
+          # --- Click-edge canary: latest released Click, no upper bound. ---
+          # Per the roadmap (#46) clickwork declares `click>=8.2` with no
+          # upper bound. This job installs the latest Click release on top
+          # of our pinned environment so a new Click major shows up here
+          # the moment it hits PyPI. Fails the matrix on breakage — the
+          # roadmap policy is "Click breakage gets a fix release", which
+          # means we want to know fast, not via an advisory warning.
+          - os: ubuntu-latest
+            python-version: "3.13"
+            label: "linux-click-latest"
+            click-edge: true
 
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +70,18 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev
+
+      - name: Upgrade click to latest release (click-edge canary)
+        # Only runs on the click-edge matrix entry. `uv pip install -U click`
+        # pulls the latest Click from PyPI into the uv-managed venv that
+        # `uv sync` just populated — overriding the lockfile's pinned Click.
+        if: matrix.click-edge == true
+        run: uv pip install -U click
+
+      - name: Show resolved click version
+        # Diagnostic: makes it trivial to see which Click version each
+        # matrix row actually ran against when reading CI logs.
+        run: uv run python -c "import click; print('click', click.__version__)"
 
       - name: Run unit tests
         run: uv run pytest tests/unit/ -v --tb=short
