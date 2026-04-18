@@ -220,7 +220,11 @@ def run(
         ``cmd`` (argv is world-readable in ``ps``); prefer ``env`` for
         env-var-based secrets and ``stdin_text`` for stdin-based ones.
 
-        Example::
+        Example (calling this module-level function directly)::
+
+            run(["wrangler", "secret", "put", "API_KEY"], stdin_text=token)
+
+        Via CliContext::
 
             ctx.run(["wrangler", "secret", "put", "API_KEY"], stdin_text=token)
     """
@@ -368,8 +372,12 @@ def run(
             # already closed.)
             try:
                 proc.stdin.close()
-            except (BrokenPipeError, ValueError):
-                # ValueError: stdin already closed by the KI branch.
+            except (BrokenPipeError, OSError, ValueError):
+                # BrokenPipeError / OSError: child already closed its side
+                # of the pipe (race, fast exit, etc.).
+                # ValueError: stdin already closed by the KI branch above.
+                # In every case, the semantic goal (send EOF; don't mask
+                # the real exit code) is already satisfied -- swallow.
                 pass
 
     returncode = _wait_with_signal_forwarding(proc)
