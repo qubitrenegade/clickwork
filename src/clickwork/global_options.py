@@ -51,14 +51,16 @@ from __future__ import annotations
 from typing import Any
 
 import click
-# NOTE on the click.core import: Click 8.3.2 (our minimum) defines
-# ParameterSource at ``click.core.ParameterSource`` and does NOT
-# re-export it to top-level. ``click.ParameterSource`` raises
-# AttributeError on this version (verified on the pinned installed
-# Click). The ``click.core`` module is publicly documented as part of
-# the Click API surface -- it isn't a private ``_core`` -- so importing
-# from there is the supported path for this feature. If / when Click
-# exposes ``click.ParameterSource`` at top level, we can switch.
+# NOTE on the click.core import: at the project's declared minimum
+# Click version (``click>=8.1`` per pyproject.toml) ``ParameterSource``
+# lives at ``click.core.ParameterSource`` and is NOT re-exported to
+# top-level. ``click.ParameterSource`` raises AttributeError on every
+# Click 8.x release currently shipping (verified on 8.3.2, which is
+# what the dev venv resolves to). ``click.core`` is documented as part
+# of Click's public API surface -- not a private ``_core`` module --
+# so importing from there is the supported path today. If a future
+# Click release promotes ParameterSource to top-level, this import
+# can be swapped.
 from click.core import ParameterSource
 
 
