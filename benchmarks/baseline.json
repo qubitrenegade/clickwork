@@ -1,0 +1,8 @@
+{
+  "import_ms": 207.174451,
+  "min_ms": 180.217623,
+  "p95_ms": 258.4034852,
+  "runs": 7,
+  "python": "3.13.6",
+  "platform": "Linux-6.8.0-106-generic-x86_64-with-glibc2.35"
+}
