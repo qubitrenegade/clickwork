@@ -128,9 +128,8 @@ def _coerce_value(
     if expected_type is str and isinstance(value, str):
         return value
 
-    # From here on, coercion only applies to string values. Every
-    # string source is coerced uniformly -- env vars, TOML string
-    # literals (``port = "8080"``), and user-supplied overrides all
+    # From here on, coercion only applies to string values. Both string
+    # sources (env vars and TOML string literals like ``port = "8080"``)
     # follow the same rule: if the schema declares a non-``str`` type
     # and the merged value is a string, the loader coerces it. Non-
     # string mismatches (e.g. a TOML ``port = [8080]`` list against
@@ -789,7 +788,7 @@ def load_config(
 
             # Type check + coercion: env vars always arrive as strings
             # (``os.environ`` is ``dict[str, str]``), but TOML string
-            # literals and user-supplied overrides can also be strings
+            # literals and TOML string literals can also be strings
             # even when the schema declares ``int``/``bool``/``float``.
             # The rule is uniform: every string value in the merged
             # config dict gets coerced to the schema-declared type,

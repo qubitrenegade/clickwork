@@ -317,7 +317,7 @@ Schema features:
   after all layers merge.
 - **`type: str`** (or `int`, `bool`, `float`) -- Validates the resolved
   value matches the expected type. For **any string-sourced value**
-  (env var, TOML string literal, user-supplied override), also
+  (env var or TOML string literal), also
   performs coercion to the declared type -- see
   [Environment Variable Types](#environment-variable-types) below for
   the exact rules and the bool allowlist.
@@ -346,7 +346,7 @@ loader finishes merging all layers and the schema declares a non-
 config dict to the declared type before returning it in
 `ctx.config`. The rule is uniform across sources: the coercion
 applies to env vars, TOML string literals (`port = "8080"`), and
-user-supplied overrides alike -- whichever source produced the
+TOML string literals alike -- whichever source produced the
 string, the same coercion fires. The caller never has to write
 `int(os.environ["PORT"])` by hand, and a TOML author who quoted the
 value by mistake still gets a usable int.
@@ -356,7 +356,7 @@ env-var reader) means:
 
 - Env vars and TOML values behave the same at the call site.
   `ctx.config["port"]` is an int whether it came from
-  `port = 8080` in TOML or `TEST_CLI_PORT=8080` in the shell.
+  `port = 8080` in TOML or `MY_TOOL_PORT=8080` in the shell.
 - String literals in TOML coerce too. A `.test-cli.toml` that
   contains `port = "8080"` under `type: int` produces the int
   `8080` in `ctx.config["port"]`, matching what an env var would
