@@ -437,6 +437,60 @@ class TestEnableParentPackageImports:
             f"found {sys.path.count(expected)} occurrences in {sys.path!r}"
         )
 
+    def test_enable_parent_package_imports_inserts_before_discover_commands(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """sys.path must be updated BEFORE discover_commands() runs.
+
+        WHY this test exists: a refactor that moves the sys.path insertion
+        to *after* discover_commands() would silently break the feature --
+        command modules that import from the parent package (``from tools.lib...``)
+        would fail at discovery time with ModuleNotFoundError. The unit
+        tests above only assert the final state of sys.path, not the
+        ordering relative to discovery.
+
+        We pin the ordering by patching discover_commands() to snapshot
+        sys.path at the moment it's called. If the snapshot already
+        contains the resolved grandparent, the insertion happened first
+        (correct); if not, the insertion happened later (regression).
+        """
+        from clickwork.cli import create_cli
+
+        # Snapshot sys.path via monkeypatch for auto-restoration.
+        monkeypatch.setattr("sys.path", list(sys.path))
+
+        project_root = tmp_path / "project"
+        commands_dir = project_root / "tools" / "commands"
+        commands_dir.mkdir(parents=True)
+        expected_inserted = str(commands_dir.parent.parent.resolve())
+
+        # Capture sys.path[0] at the instant discover_commands() is
+        # entered. We use monkeypatch on the module-level symbol that
+        # create_cli() actually calls, so our stub replaces the real
+        # function for the duration of this test.
+        captured: dict = {}
+
+        def _spy_discover_commands(**kwargs):
+            captured["sys_path_first_entry_at_discovery"] = sys.path[0]
+            return {}  # no commands -- we only care about the ordering
+
+        monkeypatch.setattr("clickwork.cli.discover_commands", _spy_discover_commands)
+
+        create_cli(
+            name="t",
+            commands_dir=commands_dir,
+            enable_parent_package_imports=True,
+        )
+
+        assert captured.get("sys_path_first_entry_at_discovery") == expected_inserted, (
+            f"Expected sys.path[0] to equal {expected_inserted!r} at the moment "
+            f"discover_commands() was called (i.e., the insertion happened "
+            f"BEFORE discovery), but observed "
+            f"{captured.get('sys_path_first_entry_at_discovery')!r}. "
+            "A regression moving the sys.path insertion after discover_commands() "
+            "would make parent-package imports fail at module-discovery time."
+        )
+
 
 class TestConvenienceMethods:
     """Convenience methods on CliContext are bound by create_cli()."""
