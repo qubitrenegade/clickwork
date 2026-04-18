@@ -119,9 +119,13 @@ class HttpError(Exception):
 
     Attributes:
         status_code: HTTP status code reported by the server (e.g. 404, 500).
-        response_body: Parsed JSON if the response's Content-Type was
-            ``application/json`` (or a charset-suffixed variant), else the
-            raw bytes of the body.
+        response_body: Parsed JSON if the original request was issued with
+            ``parse_json=True`` (the default) AND the error response's
+            Content-Type was ``application/json`` (or a charset-suffixed
+            variant); raw bytes otherwise. The ``parse_json`` flag gates
+            parsing on BOTH the success and error paths uniformly so a
+            caller opting out of auto-parse gets the same raw-bytes
+            treatment regardless of status code.
         headers: Response headers as a plain ``dict[str, str]``. Multi-valued
             headers are collapsed (the last value wins) since this is the
             simplest shape callers reason about; if multi-value support
@@ -151,8 +155,12 @@ class HttpError(Exception):
 
         Args:
             status_code: HTTP status from the server.
-            response_body: Parsed JSON body (when the response Content-Type
-                matched) or raw bytes.
+            response_body: Parsed JSON body (when the caller opted into
+                ``parse_json=True`` -- the default -- AND the response
+                Content-Type matched ``application/json``) or raw bytes.
+                Gating by the request's ``parse_json`` flag is uniform
+                across success and error paths; see the class-level
+                docstring for the full rule.
             headers: Response headers as a plain string-keyed dict.
             url: The URL that produced this error.
             message: A pre-composed human-readable message for ``str(err)``.
@@ -235,52 +243,62 @@ def _sanitize_url_for_log(url: str) -> str:
     carry secrets, but they add noise and aren't part of the request
     wire anyway).
 
+    Robustness invariants:
+      - MUST NOT raise on any input. The sanitizer runs on every error
+        path in ``_send()`` (scheme guard, allowlist, HttpError.url) --
+        if it raises while building an error message, the caller sees
+        a confusing inner exception ("Port out of range") that buries
+        the real cause. This is why we operate on ``parts.netloc``
+        directly instead of touching ``parts.port`` (which validates
+        the port lazily and raises ``ValueError`` for out-of-range or
+        non-numeric ports like ``:99999`` or ``:abc``).
+      - Hostless-but-parseable URLs (``file:///etc/passwd``,
+        ``http:///path``) return a sanitized scheme + path instead
+        of an opaque ``<unparseable URL>`` placeholder. Operators
+        debugging scheme-guard rejections need to see the scheme.
+        The placeholder is reserved for genuinely unparseable input
+        (where ``urlparse`` itself raises).
+
     Edge cases:
-      - A URL we can't parse falls back to returning ``"<unparseable URL>"``
-        rather than leaking the raw string.
-      - Even for URLs with no userinfo / query / fragment, the output is
-        re-built via ``urlunparse`` (so the result may differ from the
-        input in incidental ways -- e.g. host casing is preserved from
-        ``hostname`` which is normalized to lowercase, IPv6 addresses
-        get re-bracketed). This is deliberate: one canonical shape
-        through the sanitizer is easier to reason about than an
-        early-return fast path that sometimes preserves quirks of the
-        input formatting.
+      - IPv6 addresses keep their brackets natively because we do not
+        round-trip through ``parts.hostname`` (which strips them);
+        ``parts.netloc`` already carries ``[::1]:8443`` verbatim.
+      - Malformed ports are preserved in the sanitized output. This
+        is deliberate: an operator looking at the log/error should
+        see the actual port that was attempted, not a silently
+        corrected form. The alternative ("drop the port") would
+        mislead triage.
 
     Args:
         url: The URL that was passed to the public ``get``/``post``/etc.
 
     Returns:
         A URL safe to emit in a log line: scheme + host + port + path,
-        no userinfo, no query, no fragment.
+        no userinfo, no query, no fragment. Empty-hostname inputs
+        still return scheme + path (so the caller can see what got
+        rejected).
     """
     try:
         parts = urllib.parse.urlparse(url)
     except ValueError:
         return "<unparseable URL>"
 
-    # Rebuild netloc WITHOUT userinfo. urlparse exposes hostname (always
-    # without userinfo) and port separately; reassemble them so we keep
-    # non-default ports visible (they're operationally useful) but drop
-    # any "user:pass@" prefix the original might have had.
-    if parts.hostname is None:
-        return "<unparseable URL>"
-
-    # IPv6 addresses need bracket-wrapping in netloc to be unambiguous.
-    # parts.hostname strips the brackets (``[::1]`` -> ``::1``), so
-    # reassembling naively produces ``::1:8443`` which is ambiguous
-    # between "IPv6 ::1 on port 8443" and "IPv6 ::1:8443". The colon
-    # count is the hint: any host with colons is IPv6 and must be
-    # wrapped before appending a port. This matches what urlunparse
-    # does for netloc round-trips in the standard library's own test
-    # suite.
-    if ":" in parts.hostname:
-        host_for_netloc = f"[{parts.hostname}]"
-    else:
-        host_for_netloc = parts.hostname
-    netloc = host_for_netloc
-    if parts.port is not None:
-        netloc = f"{netloc}:{parts.port}"
+    # Strip userinfo from netloc WITHOUT touching ``parts.hostname`` or
+    # ``parts.port``. Both of those accessors run additional validation
+    # (port range, IDNA host check) that can raise ``ValueError`` on
+    # malformed inputs, which would turn the sanitizer into a source of
+    # its own exceptions on the exact error paths that depend on it to
+    # build a clean message. ``parts.netloc`` is a raw string attribute
+    # -- no validation runs -- so operating on it is safe even when the
+    # original URL has an out-of-range port or a non-integer port.
+    #
+    # ``rpartition("@")`` is the right split because userinfo can
+    # itself contain colons (``user:pass``); splitting from the right
+    # cleanly separates "everything before the last @" (userinfo) from
+    # "host[:port]" (what we want to keep). When there's no userinfo,
+    # rpartition returns ``("", "", original)`` so ``host_and_port``
+    # is just the original netloc unchanged.
+    _, _, host_and_port = parts.netloc.rpartition("@")
 
     # Drop QUERY and FRAGMENT entirely (those are the credential-leak
     # vectors). Preserve ``params`` -- the rarely-used semicolon-
@@ -289,7 +307,7 @@ def _sanitize_url_for_log(url: str) -> str:
     # the path-level semantics still go out on the wire, so the log
     # should show the same shape.
     return urllib.parse.urlunparse(
-        (parts.scheme, netloc, parts.path, parts.params, "", "")
+        (parts.scheme, host_and_port, parts.path, parts.params, "", "")
     )
 
 

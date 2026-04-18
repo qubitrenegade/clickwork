@@ -683,6 +683,76 @@ class TestLogSanitization:
         # produce ``::1:8443`` without them.
         assert "[::1]:8443" in all_log_text
 
+    def test_invalid_port_does_not_crash_sanitizer(self):
+        """Out-of-range / non-numeric ports must not raise in the sanitizer.
+
+        WHY: the sanitizer runs on every error path (scheme guard,
+        allowlist, HttpError.url). If it raises while BUILDING a log
+        or exception message, the caller gets a confusing
+        ``ValueError: Port out of range`` that buries the real cause
+        (bad scheme, bad allowlist, etc.). ``urllib.parse.urlparse``
+        itself accepts these URLs; the port validation happens lazily
+        when ``parts.port`` is accessed. The sanitizer must access
+        the netloc without touching ``.port``.
+        """
+        from clickwork.http import _sanitize_url_for_log
+
+        # Port out of range (> 65535): urlparse accepts this,
+        # parts.port raises ValueError on access.
+        out_of_range = _sanitize_url_for_log("https://host:99999/path")
+        assert "host" in out_of_range
+        assert "/path" in out_of_range
+
+        # Non-numeric port: same lazy-validation trap.
+        non_numeric = _sanitize_url_for_log("https://host:abc/path")
+        assert "host" in non_numeric
+        assert "/path" in non_numeric
+
+    def test_invalid_port_in_scheme_guard_error_message(self):
+        """Scheme-guard ValueError for a URL with a bad port still reports cleanly.
+
+        Integration-style pin: the scheme guard rejects
+        ``file:///etc/passwd`` before any URL parsing would hit the
+        port. But the exception message passes through
+        ``_sanitize_url_for_log``, so a URL like
+        ``gopher://host:99999/`` (bad scheme AND bad port) still
+        needs to produce a coherent ValueError, not a double-fault
+        where the sanitizer itself raises while building the message.
+        """
+        from clickwork import http
+
+        with pytest.raises(ValueError, match="scheme"):
+            http.get("gopher://host:99999/path")
+
+    def test_hostless_parseable_url_preserves_scheme_and_path(self):
+        """Hostless URLs (file:///x, http:///y) keep scheme + path in the sanitized form.
+
+        WHY: an opaque ``<unparseable URL>`` placeholder makes
+        scheme-guard / allowlist errors harder to debug -- the
+        operator can't tell whether the caller passed
+        ``file:///etc/passwd`` or ``ldap:///dn=...``. The sanitizer
+        already drops userinfo / query / fragment, so reconstructing
+        scheme + path is safe AND informative. The placeholder is
+        still reserved for genuinely unparseable inputs (where
+        ``urlparse`` itself raises ``ValueError``).
+        """
+        from clickwork.http import _sanitize_url_for_log
+
+        # file:///etc/passwd -- hostless but parseable. We want the
+        # operator to SEE this is a file:// URL in the error, not a
+        # generic placeholder.
+        file_url = _sanitize_url_for_log("file:///etc/passwd")
+        assert "file" in file_url
+        assert "/etc/passwd" in file_url
+        assert "<unparseable URL>" not in file_url
+
+        # http:///no-host -- malformed but parseable (urlparse
+        # accepts it). Still useful to show scheme + path.
+        http_url = _sanitize_url_for_log("http:///missing-host")
+        assert "http" in http_url
+        assert "/missing-host" in http_url
+        assert "<unparseable URL>" not in http_url
+
 
 class TestRedirectsDisabled:
     """3xx responses are not auto-followed; they surface as HttpError.
