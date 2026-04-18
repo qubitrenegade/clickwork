@@ -115,6 +115,24 @@ class LazyEntryPointCommand(click.Command):
         real command's context and ``@pass_cli_context`` / ``@click.pass_obj``
         keep working.
 
+        We also pass ``parent=ctx.parent`` (NOT ``parent=ctx``) so the
+        loaded command's context joins the existing context chain without
+        becoming a child of the proxy. WHY this matters: anything that
+        walks to the root via ``ctx.find_root()`` -- notably
+        ``clickwork.add_global_option`` writing to ``ctx.find_root().meta``
+        -- needs to see the REAL root's meta dict, not a detached one. If
+        we passed no parent at all, the loaded plugin command's
+        ``find_root()`` would return its own fresh context and global-
+        option values written at the root level would be silently invisible
+        to the plugin. If we passed ``parent=ctx`` (the proxy itself),
+        Click would double-count the command name in ``command_path``
+        (proxy + loaded both contribute the same info_name to the chain),
+        producing duplicated Usage/help text like "myapp plugin-cmd
+        plugin-cmd". Passing ``ctx.parent`` threads the chain correctly:
+        the loaded command *replaces* the proxy at the plugin-cmd level,
+        inheriting the proxy's own parent so ``find_root()`` still reaches
+        the true root.
+
         Args:
             ctx: The Click context, whose ``ctx.args`` contains the
                 unparsed extra arguments collected by the proxy and whose
@@ -124,14 +142,136 @@ class LazyEntryPointCommand(click.Command):
             Whatever the real command's ``main()`` returns.
         """
         loaded = self._load()
+
+        # Defensive flag-collision check for entry-point plugins.
+        #
+        # WHY this check exists: ``clickwork.add_global_option`` installs
+        # options on this proxy at CLI-build time, but the proxy has no
+        # way to introspect the plugin's own options until the plugin
+        # module is actually loaded (the whole point of laziness). So
+        # add_global_option's conflict detector cannot see a plugin's
+        # private ``--json`` (or whatever) -- it only sees the proxy's
+        # ``self.params``. If the plugin's loaded command declares the
+        # same flag, Click would parse that flag at the PROXY level
+        # first, consume the token, and the plugin would never see its
+        # own option. Behaviour would look like "the flag is silently
+        # ignored by the plugin", which is a nasty debugging experience.
+        #
+        # Now that we actually have ``loaded``, compare its declared
+        # flag strings against the proxy's. Any overlap is a genuine
+        # conflict between a plugin-declared option and a globally-
+        # installed option; surface it as a ``click.UsageError`` (user-
+        # classification, matches the rest of clickwork's error policy)
+        # with a pointer to both sides so the caller can fix whichever
+        # makes sense for their setup.
+        #
+        # WHY we walk the FULL loaded tree (not just loaded.params): if
+        # the plugin's entry-point target is a ``click.Group``, the
+        # group's own params don't include the options declared on its
+        # subcommands. A nested subcommand that declares ``--json``
+        # still has its token consumed at the proxy level because the
+        # proxy installed the ``--json`` option via add_global_option
+        # and Click's parser greedily matches it at whichever level
+        # declares it (the proxy, here) before descending. Walking the
+        # full tree catches those deeper collisions.
+        proxy_flag_strings: set[str] = set()
+        for proxy_param in self.params:
+            proxy_flag_strings.update(getattr(proxy_param, "opts", ()))
+            proxy_flag_strings.update(getattr(proxy_param, "secondary_opts", ()))
+
+        # Collect (qualified_path, flag_string) pairs from loaded and any
+        # nested commands it contains. Group membership check uses the
+        # public isinstance on click.Group; Groups always expose their
+        # subcommands via ``.commands``.
+        #
+        # WHY we track the REGISTERED name (the dict key in Group.commands)
+        # rather than ``cmd.name``: a plugin can register a command under
+        # an alias with ``Group.add_command(cmd, name="alias")``, in which
+        # case ``cmd.name`` differs from the name the user actually types
+        # on the command line. The error message needs the invocation
+        # path, so we thread the dict key down through the recursion
+        # instead of relying on ``cmd.name``. For the top-level call we
+        # use ``self.name`` -- the proxy IS registered under that name
+        # at the CLI root, so starting the walk with just that name
+        # (and NOT appending ``loaded.name`` again) avoids the
+        # "plugin plugin" duplication an earlier draft produced.
+        collisions: list[tuple[str, str]] = []
+
+        def _walk(cmd: click.Command, path: str) -> None:
+            # path is the FULL qualified path (registered names, space-
+            # separated) for ``cmd`` as the user would type it. Every
+            # param declared directly on ``cmd`` that collides with a
+            # proxy flag gets appended with this path.
+            for p in cmd.params:
+                cmd_flags = set(getattr(p, "opts", ()))
+                cmd_flags.update(getattr(p, "secondary_opts", ()))
+                for flag in cmd_flags & proxy_flag_strings:
+                    collisions.append((path, flag))
+            if isinstance(cmd, click.Group):
+                # Iterate .items() so we get the REGISTERED name (dict
+                # key), not the underlying cmd.name attribute -- these
+                # can differ when a plugin aliased the command.
+                for registered_name, sub in cmd.commands.items():
+                    sub_path = f"{path} {registered_name}".strip()
+                    _walk(sub, sub_path)
+
+        # Start with the proxy's own registered name. We do NOT append
+        # loaded.name to this: the proxy IS the loaded command's entry
+        # point, and Click parses from the proxy's registered name, so
+        # "self.name" alone is the correct root of the path.
+        _walk(loaded, self.name or "")
+
+        if collisions:
+            # Group collisions by flag so the error message names each
+            # conflicting flag once with all the command paths that
+            # declare it -- easier to read than one line per occurrence.
+            by_flag: dict[str, list[str]] = {}
+            for cmd_path, flag in collisions:
+                by_flag.setdefault(flag, []).append(cmd_path)
+            details = "; ".join(
+                f"{flag!r} declared on " + ", ".join(sorted(paths))
+                for flag, paths in sorted(by_flag.items())
+            )
+            raise click.UsageError(
+                f"Entry-point plugin {self.name!r} contains option(s) that "
+                f"collide with a globally-installed option on the CLI root: "
+                f"{details}. The global option consumes these flags before "
+                f"the plugin command/subcommand sees them. Either rename "
+                f"the plugin-side option(s) or omit the global install for "
+                f"the colliding flag(s)."
+            )
+
         # Pass obj=ctx.obj so the new context created by loaded.main() carries
         # the CliContext forward.  Click forwards **extra kwargs through
         # make_context() -> Context(), and Context accepts obj as a keyword arg.
+        #
+        # WHY parent=ctx.parent (NOT parent=ctx): Click builds
+        # ``command_path`` as ``parent.command_path + " " + info_name`` by
+        # walking the parent chain. The proxy ctx ALREADY represents the
+        # plugin-cmd level in the chain. If we passed parent=ctx the loaded
+        # command would become a *child* of the proxy and its command_path
+        # would be "myapp plugin-cmd" (proxy's path) + " " + "plugin-cmd"
+        # (loaded's info_name) = "myapp plugin-cmd plugin-cmd" -- duplicated
+        # in Usage / help / error messages.
+        #
+        # Passing parent=ctx.parent instead makes the loaded command's
+        # context a *sibling* of the proxy in the tree: it replaces the
+        # proxy in the chain rather than appending to it. That gives
+        # command_path = "myapp" + " " + "plugin-cmd" = "myapp plugin-cmd"
+        # (correct) while keeping ctx.find_root() reachable from the loaded
+        # ctx -- the whole reason we wire the chain at all, so
+        # clickwork.add_global_option values live on a shared root.meta.
+        #
+        # WHY prog_name=ctx.info_name: once parent is ctx.parent, info_name
+        # needs to be just the command's own name (e.g. "plugin-cmd"),
+        # not the full command path -- Click rebuilds the path from the
+        # chain.
         return loaded.main(
             args=list(ctx.args),
-            prog_name=ctx.command_path,
+            prog_name=ctx.info_name,
             standalone_mode=False,
             obj=ctx.obj,
+            parent=ctx.parent,
         )
 
     def get_short_help_str(self, limit: int = 45) -> str:
