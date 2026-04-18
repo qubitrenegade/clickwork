@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-04-18
 
 A broad expansion of the framework closing 12 issues (#4-#17), plus one
-PR-only follow-up (#33) that raised the `click` dependency floor during
+PR-only follow-up (PR #33) that raised the `click` dependency floor during
 release prep. Numbers in parens on each entry below are **issue
 numbers**, except where explicitly noted as `(PR #NN)`. Major new
 modules: `clickwork.http`, `clickwork.platform`, `clickwork.testing`.
