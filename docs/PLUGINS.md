@@ -51,10 +51,16 @@ my-deploy-tools/
       deploy.py
 ```
 
-`pyproject.toml` carries the entry-point declaration. The important
-parts are the `clickwork>=1.0` dependency (so pip refuses to install
-your plugin against an unsupported framework release) and the
-`[project.entry-points."clickwork.commands"]` table:
+`pyproject.toml` carries the entry-point declaration. The examples in
+this guide target the **1.0 release and later** -- before 1.0 shipped,
+the canonical dependency was `clickwork>=0.2,<1` and the APIs
+referenced below (`strict=`, `package_name=`, `clickwork._deprecated`,
+etc.) didn't all exist. If you are still on 0.2.x, [MIGRATING.md](MIGRATING.md)
+walks through the upgrade.
+
+The important parts of the example are the `clickwork>=1.0` dependency
+(so pip refuses to install your plugin against an unsupported framework
+release) and the `[project.entry-points."clickwork.commands"]` table:
 
 ```toml
 [project]
@@ -140,8 +146,9 @@ def cli(ctx: CliContext, target: str, force: bool) -> None:
     if ctx.env == "production" and not force:
         raise click.ClickException("production deploys require --force")
 
-    # ctx.run respects --dry-run: in dry-run mode it prints the command
-    # and returns without spawning a subprocess.
+    # ctx.run respects --dry-run: in dry-run mode it logs the command
+    # at INFO (visible at -v or higher) and returns without spawning a
+    # subprocess.
     ctx.run(
         ["wrangler", "deploy", target, "--account-id", account_id],
     )
@@ -219,10 +226,22 @@ version string. See
 story.
 
 For production host CLIs, the host author should also pass
-`strict=True` to `create_cli()` so a broken plugin (missing `cli`
-attribute, import error, flag collision) raises at startup instead of
-silently dropping the command. Strict discovery is opt-in for
-compatibility with existing CLIs; new deployments should turn it on.
+`strict=True` to `create_cli()` so discovery-time failures raise at
+startup instead of silently dropping the command. What strict catches
+depends on the discovery mechanism:
+
+- **Directory scan**: missing `cli` attribute, import error, invalid
+  `cli` type, duplicate command name -- all caught at startup.
+- **Entry-point scan**: same categories, plus entry-point metadata
+  failures and duplicate entry-point names. Per-plugin runtime failures
+  (e.g. a lazy-loaded plugin's `cli` attribute raising when Click
+  eventually imports it) surface at invocation time, since
+  `LazyEntryPointCommand` doesn't load the target until the command
+  runs. This is the lazy-loading tradeoff -- startup stays fast but
+  some defects move to first-use time.
+
+Strict discovery is opt-in for compatibility with existing CLIs; new
+deployments should turn it on.
 
 ## Testing against multiple clickwork versions
 
