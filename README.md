@@ -259,6 +259,12 @@ uv run pytest tests/integration/ -v   # Slower integration tests (creates venvs)
 uv run pytest tests/ -v               # Everything
 ```
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup, the full
+verification suite, test-writing pointers, PR conventions, and review
+expectations.
+
 ## License
 
 MIT
