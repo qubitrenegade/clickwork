@@ -509,6 +509,68 @@ class TestLoadEnvFile:
 
         assert load_env_file(env_file) == {"K": "v"}
 
+    def test_load_env_file_strips_leading_whitespace_around_equals(self, tmp_path: Path):
+        """``KEY = value`` and ``KEY= value`` produce a value without the
+        leading space.
+
+        WHY this regression test exists: the partition-on-'=' parse
+        leaves leading whitespace on the value side for forms like
+        ``KEY = value`` (spaces around '=', a common shape in hand-edited
+        .env files). Without lstrip, the value would be ``" value"`` with
+        a real leading space -- easy to miss and trivial to mangle a
+        secret token. Pins the strip so a regression produces a loud
+        test failure rather than a silent content bug.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEY = value\nKEY2= value\nKEY3 =value\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {
+            "KEY": "value",
+            "KEY2": "value",
+            "KEY3": "value",
+        }
+
+    def test_load_env_file_strips_whitespace_before_quote_unwrap(self, tmp_path: Path):
+        """``KEY = "value"`` must still unwrap the quotes.
+
+        If the value-side whitespace isn't stripped BEFORE the quote-
+        unwrap check, the check sees a value starting with a space and
+        doesn't recognise the quotes as wrapping. The parser would then
+        leave the quote characters literally in the stored value
+        (``' "value"'`` instead of ``"value"``) -- subtle enough that
+        callers wouldn't notice until the subprocess tries to use the
+        literal quoted form of the token.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text('KEY = "wrapped"\nK2=   \'singly\'\n')
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"KEY": "wrapped", "K2": "singly"}
+
+    def test_load_env_file_preserves_whitespace_inside_quotes(self, tmp_path: Path):
+        """Leading whitespace INSIDE quotes is intentional and preserved.
+
+        The lstrip on the pre-quote-unwrap value removes only whitespace
+        AROUND the '=' operator; whitespace kept inside a quoted value is
+        a deliberate user choice (e.g. a token formatted with a leading
+        space, or a human-readable prefix) and must survive.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text('KEY = "  leading spaces preserved"\n')
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"KEY": "  leading spaces preserved"}
+
     def test_load_env_file_handles_double_quotes(self, tmp_path: Path):
         """Values wrapped in double quotes have the quotes stripped so
         spaces and other whitespace-adjacent characters survive parsing."""

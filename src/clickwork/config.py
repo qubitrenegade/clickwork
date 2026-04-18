@@ -337,12 +337,13 @@ def load_env_file(path: Path) -> dict[str, str]:
         # Reuse the exact permission check (including the Windows carve-out)
         # used by user config. See _check_owner_only_permissions for details.
         #
-        # WHY path.name in the kind label: callers pass real files like
-        # .cf-secrets, .envrc, api-creds.env etc. Hardcoding ".env file"
-        # in the error would mislead the user about which file the
-        # check failed on. Using the actual filename makes the "Fix with:
-        # chmod 600 <path>" remediation unambiguous.
-        _check_owner_only_permissions(fd, path, kind=f"dotenv file {path.name!r}")
+        # The shared helper already formats errors as
+        # "{kind} {path} ..." so we only need to pass a generic
+        # category label here; the path itself comes from the
+        # helper's own interpolation. Keeping kind short avoids the
+        # "dotenv file '.env' /tmp/.../.env ..." double-labelling
+        # Copilot caught.
+        _check_owner_only_permissions(fd, path, kind="dotenv file")
         text = f.read()
 
     result: dict[str, str] = {}
@@ -403,6 +404,21 @@ def load_env_file(path: Path) -> dict[str, str]:
             raise ConfigError(
                 f"{path}: line {lineno}: empty key (missing name before '=')"
             )
+
+        # Strip ONE layer of leading whitespace from the value before
+        # looking for quotes. Common dotenv forms like ``KEY = value`` or
+        # ``KEY= "value"`` would otherwise produce values like ``" value"``
+        # (with a real leading space) or leave the surrounding quotes
+        # intact (because value[0] is a space, not a quote). lstrip()
+        # matches what python-dotenv / direnv / shell-source do in
+        # practice, while still letting QUOTED values preserve their own
+        # leading whitespace:
+        #   KEY = "  value"   -> value becomes "  value" (inside quotes)
+        #   KEY =   value     -> value becomes "value"   (bare, space stripped)
+        # Trailing whitespace is NOT stripped: .env files seldom have
+        # trailing spaces, and preserving them is safer when someone does
+        # intentionally include one.
+        value = value.lstrip()
 
         # Unwrap matching surrounding quotes. We only strip quotes when the
         # entire value is wrapped -- a value like 'foo"bar' stays literal.
