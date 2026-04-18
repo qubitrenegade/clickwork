@@ -226,8 +226,19 @@ own EOL for that minor**. Concretely, CPython 3.11's EOL is scheduled
 for 2027-10, so the earliest clickwork release that drops 3.11 is
 2029-04. Callers also get at least **two clickwork minor releases**
 of warning (via deprecation notices in the changelog and a
-`DeprecationWarning` emitted at import time when appropriate) before
-the drop lands.
+`DeprecationWarning` emitted from `create_cli()` / the first public
+API call, **not** at package import time) before the drop lands.
+
+Warning-emission discipline: we avoid emitting `DeprecationWarning`
+at import time because many downstream test suites run with
+`filterwarnings = ["error"]`, and an import-time warning would break
+those suites even for callers who aren't touching the deprecated
+surface. Warnings fire from the specific entry points that trigger
+the deprecated behavior (e.g. inside `create_cli()` once per CLI,
+or from the deprecated function itself). Callers who want to silence
+deprecations in their own test runs can add a targeted
+`filterwarnings = ["ignore::DeprecationWarning:clickwork"]` entry,
+or narrow further by message text.
 
 The 18-month window is deliberately generous. Enterprise and
 Linux-distribution Python environments lag upstream by years; a
