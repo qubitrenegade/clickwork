@@ -126,7 +126,7 @@ class TestGetResponseParsing:
         from clickwork import http
 
         resp = _make_response(body=b'{"ok": true}', content_type="application/json")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
 
         assert result == {"ok": True}
@@ -142,7 +142,7 @@ class TestGetResponseParsing:
         resp = _make_response(
             body=b'{"ok": true}', content_type="application/json; charset=utf-8",
         )
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
 
         assert result == {"ok": True}
@@ -152,7 +152,7 @@ class TestGetResponseParsing:
         from clickwork import http
 
         resp = _make_response(body=b"<html></html>", content_type="text/html")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/")
 
         assert result == b"<html></html>"
@@ -162,7 +162,7 @@ class TestGetResponseParsing:
         from clickwork import http
 
         resp = _make_response(body=b'{"ok": true}', content_type="application/json")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api", parse_json=False)
 
         assert result == b'{"ok": true}'
@@ -179,7 +179,7 @@ class TestAuthHeaders:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.get("https://example.com/api", bearer_token="abc123")
 
         req, _ = captured[0]
@@ -191,7 +191,7 @@ class TestAuthHeaders:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.get("https://example.com/api", basic_auth=("user", "pw"))
 
         req, _ = captured[0]
@@ -207,7 +207,7 @@ class TestAuthHeaders:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.get(
                 "https://example.com/api",
                 bearer_token="ignored",
@@ -223,7 +223,7 @@ class TestAuthHeaders:
         from clickwork._types import Secret
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock), caplog.at_level(
+        with patch("clickwork.http._dispatch_request", mock), caplog.at_level(
             logging.DEBUG, logger="clickwork.http",
         ):
             http.get("https://example.com/api", bearer_token=Secret("supertok"))
@@ -246,7 +246,7 @@ class TestAuthHeaders:
         from clickwork._types import Secret
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock), caplog.at_level(
+        with patch("clickwork.http._dispatch_request", mock), caplog.at_level(
             logging.DEBUG, logger="clickwork.http",
         ):
             http.get(
@@ -274,7 +274,7 @@ class TestLoggingRedaction:
         from clickwork import http
 
         mock = MagicMock(return_value=_make_response(body=b"{}"))
-        with patch("urllib.request.urlopen", mock), caplog.at_level(
+        with patch("clickwork.http._dispatch_request", mock), caplog.at_level(
             logging.DEBUG, logger="clickwork.http",
         ):
             http.get("https://example.com/api", bearer_token="topsecret")
@@ -309,7 +309,7 @@ class TestHttpError:
             fp=BytesIO(b'{"error": "not found"}'),
         )
 
-        with patch("urllib.request.urlopen", side_effect=err):
+        with patch("clickwork.http._dispatch_request", side_effect=err):
             with pytest.raises(http.HttpError) as exc_info:
                 http.get("https://example.com/api")
 
@@ -333,7 +333,7 @@ class TestHttpError:
             fp=BytesIO(b"<html>oops</html>"),
         )
 
-        with patch("urllib.request.urlopen", side_effect=err):
+        with patch("clickwork.http._dispatch_request", side_effect=err):
             with pytest.raises(http.HttpError) as exc_info:
                 http.get("https://example.com/api")
 
@@ -352,7 +352,7 @@ class TestAllowedHosts:
         from clickwork import http
 
         resp = _make_response(body=b"{}")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get(
                 "https://api.cloudflare.com/v4/zones",
                 allowed_hosts=["api.cloudflare.com"],
@@ -375,7 +375,7 @@ class TestAllowedHosts:
                 "the preflight host check regressed."
             )
 
-        with patch("urllib.request.urlopen", side_effect=_fail_if_called):
+        with patch("clickwork.http._dispatch_request", side_effect=_fail_if_called):
             with pytest.raises(ValueError):
                 http.get(
                     "https://evil.example/steal",
@@ -387,7 +387,7 @@ class TestAllowedHosts:
         from clickwork import http
 
         resp = _make_response(body=b"{}")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             # Any URL should be fine when the allowlist is disabled.
             result = http.get("https://wherever.example/", allowed_hosts=None)
 
@@ -415,7 +415,7 @@ class TestAllowedHosts:
                 "allowlist should have failed closed first."
             )
 
-        with patch("urllib.request.urlopen", side_effect=_urlopen_must_not_run):
+        with patch("clickwork.http._dispatch_request", side_effect=_urlopen_must_not_run):
             with pytest.raises(ValueError, match="empty list"):
                 http.get("https://api.cloudflare.com/", allowed_hosts=[])
 
@@ -436,7 +436,7 @@ class TestAllowedHosts:
                 "check should have fired first."
             )
 
-        with patch("urllib.request.urlopen", side_effect=_urlopen_must_not_run):
+        with patch("clickwork.http._dispatch_request", side_effect=_urlopen_must_not_run):
             with pytest.raises(ValueError, match="scheme"):
                 http.get("file:///etc/passwd")
 
@@ -451,7 +451,7 @@ class TestAllowedHosts:
         def _urlopen_must_not_run(*args, **kwargs):
             raise AssertionError("urlopen should not have been called")
 
-        with patch("urllib.request.urlopen", side_effect=_urlopen_must_not_run):
+        with patch("clickwork.http._dispatch_request", side_effect=_urlopen_must_not_run):
             with pytest.raises(ValueError, match="scheme"):
                 http.get("ftp://example.com/payload")
 
@@ -479,7 +479,7 @@ class TestEmptyBodyHandling:
         resp = _make_response(
             status=204, body=b"", content_type="application/json",
         )
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
 
         # Empty body passes through as bytes (not a parsed None).
@@ -492,7 +492,7 @@ class TestEmptyBodyHandling:
         resp = _make_response(
             body=b"   \n\t  ", content_type="application/json",
         )
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
 
         assert result == b"   \n\t  "
@@ -514,7 +514,7 @@ class TestEmptyBodyHandling:
             body=b"<html>not json at all</html>",
             content_type="application/json",
         )
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
 
         assert result == b"<html>not json at all</html>"
@@ -535,7 +535,7 @@ class TestLogSanitization:
         from clickwork import http
 
         resp = _make_response(body=b"{}")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             with caplog.at_level(logging.INFO, logger="clickwork.http"):
                 http.get("https://alice:super-secret-token@example.com/api")
 
@@ -557,7 +557,7 @@ class TestLogSanitization:
         from clickwork import http
 
         resp = _make_response(body=b"{}")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             with caplog.at_level(logging.INFO, logger="clickwork.http"):
                 http.get("https://example.com/api?api_key=leaked-creds")
 
@@ -572,7 +572,7 @@ class TestLogSanitization:
         from clickwork import http
 
         resp = _make_response(body=b"{}")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             with caplog.at_level(logging.INFO, logger="clickwork.http"):
                 http.get("https://internal.example:8443/health")
 
@@ -592,7 +592,7 @@ class TestLogSanitization:
         from clickwork import http
 
         resp = _make_response(body=b"{}")
-        with patch("urllib.request.urlopen", return_value=resp):
+        with patch("clickwork.http._dispatch_request", return_value=resp):
             with caplog.at_level(logging.INFO, logger="clickwork.http"):
                 http.get("https://[::1]:8443/metrics")
 
@@ -600,6 +600,63 @@ class TestLogSanitization:
         # Brackets must be present; naive netloc reconstruction would
         # produce ``::1:8443`` without them.
         assert "[::1]:8443" in all_log_text
+
+
+class TestRedirectsDisabled:
+    """3xx responses are not auto-followed; they surface as HttpError.
+
+    WHY this matters: urllib's default opener follows redirects AND
+    forwards request headers (including Authorization) along. That's
+    a cross-host credential leak waiting to happen, AND it bypasses
+    the allowlist because we only validated the initial URL. clickwork.http
+    installs a _NoRedirectHandler on its module opener so a 3xx surfaces
+    as an HttpError with the status code, leaving the caller free to
+    inspect the Location header and decide whether to follow.
+    """
+
+    def test_3xx_redirect_raises_http_error_instead_of_following(self):
+        """A 302 with Location to another host must raise HttpError, not follow."""
+        import urllib.error
+        from clickwork import http
+
+        # Build a urllib HTTPError carrying the 302 status + Location header,
+        # which is what urllib raises under our _NoRedirectHandler (since
+        # redirect_request returns None, the 3xx becomes a terminal error).
+        def _raise_302(request, *args, **kwargs):
+            raise urllib.error.HTTPError(
+                url=request.full_url,
+                code=302,
+                msg="Found",
+                hdrs={  # type: ignore[arg-type]
+                    "Location": "https://evil.example/stolen",
+                    "Content-Type": "text/html",
+                },
+                fp=BytesIO(b"<html>redirect</html>"),
+            )
+
+        with patch("clickwork.http._dispatch_request", side_effect=_raise_302):
+            try:
+                http.get(
+                    "https://api.cloudflare.com/thing",
+                    bearer_token="super-secret-token",
+                )
+            except http.HttpError as e:
+                # The 302 surfaces as HttpError with the real status so
+                # the caller can branch on it. No silent follow.
+                assert e.status_code == 302
+                # The Location header is accessible so callers who WANT
+                # to follow can extract it manually after validating the
+                # target host themselves.
+                assert "Location" in e.headers
+                assert "evil.example" in e.headers["Location"]
+                # Critically: the token must not appear anywhere in the
+                # str(e) or e.url -- the sanitizer already covered URL
+                # creds, but this confirms no redirect-path plumbing
+                # accidentally echoed the Authorization header value.
+                assert "super-secret-token" not in str(e)
+                assert "super-secret-token" not in e.url
+            else:
+                raise AssertionError("Expected HttpError for 3xx redirect")
 
 
 class TestHttpErrorMessageSanitization:
@@ -626,7 +683,7 @@ class TestHttpErrorMessageSanitization:
                 fp=BytesIO(b'{"error": "nope"}'),
             )
 
-        with patch("urllib.request.urlopen", side_effect=_raise_404):
+        with patch("clickwork.http._dispatch_request", side_effect=_raise_404):
             try:
                 http.get("https://alice:token@api.example.com/thing?api_key=xxx")
             except http.HttpError as e:
@@ -652,7 +709,7 @@ class TestTimeout:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.get("https://example.com/api", timeout=7.5)
 
         _, kwargs = captured[0]
@@ -670,7 +727,7 @@ class TestBodyMethods:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.post("https://example.com/api", body={"key": "val"})
 
         req, _ = captured[0]
@@ -689,7 +746,7 @@ class TestBodyMethods:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.post("https://example.com/api", body=[1, 2, 3])
 
         req, _ = captured[0]
@@ -700,7 +757,7 @@ class TestBodyMethods:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.put("https://example.com/api", body={"key": "val"})
 
         req, _ = captured[0]
@@ -712,7 +769,7 @@ class TestBodyMethods:
         from clickwork import http
 
         mock, captured = _capture_request()
-        with patch("urllib.request.urlopen", mock):
+        with patch("clickwork.http._dispatch_request", mock):
             http.delete("https://example.com/api", body={"key": "val"})
 
         req, _ = captured[0]

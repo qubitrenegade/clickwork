@@ -169,6 +169,57 @@ class HttpError(Exception):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """urllib redirect handler that refuses to follow 3xx responses.
+
+    Installed on the module-level opener below so ``_dispatch_request``
+    treats a 3xx response as terminal instead of transparently issuing a
+    second request to the Location. See ``_send()`` for the full rationale
+    (allowlist-bypass + cross-host credential forwarding).
+
+    The override returns ``None`` from ``redirect_request`` which is
+    urllib's documented "do not redirect" contract. That causes urllib
+    to raise the 3xx as an ``urllib.error.HTTPError``, which our except
+    branch then surfaces to callers as ``HttpError`` with the 3xx
+    status code (e.g. 302) so the caller can inspect the ``Location``
+    header from ``HttpError.headers`` and decide whether to follow.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Returning None signals "do not redirect"; urllib converts the
+        # 3xx into an HTTPError that propagates out of opener.open().
+        return None
+
+
+# Module-level opener built once. We install our no-redirect handler
+# here instead of mutating the urllib global via ``install_opener``
+# (which would change redirect behaviour for any OTHER code in the
+# same process that happens to use urllib). Keeping the opener scoped
+# to ``clickwork.http`` lets the rest of the process keep its default
+# urlopen semantics.
+_opener = urllib.request.build_opener(_NoRedirectHandler())
+
+
+def _dispatch_request(request: urllib.request.Request, *, timeout: float):
+    """Send ``request`` through the no-redirect opener; return the response.
+
+    WHY a thin module-level wrapper exists: tests need a single obvious
+    seam to mock. Patching ``urllib.request.urlopen`` doesn't help here
+    because ``_send()`` uses ``_opener.open`` (which bypasses the
+    module-global urlopen). A dedicated wrapper gives tests one place
+    to point ``unittest.mock.patch("clickwork.http._dispatch_request")``
+    at without fighting the opener chain.
+
+    Args:
+        request: The prepared ``urllib.request.Request`` (method, URL,
+            headers, body already attached).
+        timeout: Socket deadline forwarded to ``opener.open``.
+
+    Returns:
+        The opened response (a context-manager file-like).
+    """
+    return _opener.open(request, timeout=timeout)
+
 def _sanitize_url_for_log(url: str) -> str:
     """Strip credentials and query string from a URL for safe logging.
 
@@ -609,11 +660,35 @@ def _send(
         url, data=body_bytes, method=method, headers=merged_headers,
     )
 
+    # WHY we install an opener that REFUSES HTTP redirects (3xx). urllib's
+    # default urlopen follows redirects automatically AND forwards the
+    # Request's headers -- including any ``Authorization`` we just built
+    # from ``bearer_token`` / ``basic_auth`` -- along to the redirect
+    # target. That can:
+    #   (a) BYPASS the allowlist. We only validated the URL the caller
+    #       passed; a 301 pointing at ``evil.example`` would send the
+    #       request anyway.
+    #   (b) LEAK credentials cross-host. Even if redirect semantics
+    #       were fine, auth-header forwarding across hosts is a
+    #       well-known credential-leak class.
+    # Disabling redirects closes both. A caller who genuinely needs
+    # redirect-following can see the 3xx surface as HttpError,
+    # inspect the Location header themselves, and issue a new call
+    # with the right allowlist. That's the tradeoff we accept in
+    # exchange for the security invariant.
+    #
+    # WHY a custom handler instead of ``urllib.request.Request.headers`` /
+    # ``OpenerDirector``: HTTPRedirectHandler exposes ``redirect_request``
+    # which we override to return None, making urllib treat 3xx as a
+    # terminal response (it becomes an HTTPError with the actual 3xx
+    # status, surfacing to our except branch below).
     try:
-        # ``timeout`` must be forwarded to urlopen, NOT stashed on the Request,
-        # because Request has no timeout attribute -- urlopen owns the socket
-        # deadline.
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        # ``timeout`` must be forwarded to opener, NOT stashed on the
+        # Request, because Request has no timeout attribute -- the
+        # opener's open() method owns the socket deadline. We route
+        # through ``_dispatch_request`` (defined at module scope above)
+        # so tests have a single, obvious patch target.
+        with _dispatch_request(request, timeout=timeout) as response:
             response_body = response.read()
             response_content_type = response.headers.get("Content-Type")
     except urllib.error.HTTPError as err:
@@ -648,7 +723,17 @@ def _send(
         # operator. The sanitized form drops userinfo/query/fragment
         # and keeps scheme + host + port + path, matching what the
         # per-request log line shows.
-        safe_url_for_error = _sanitize_url_for_log(url)
+        #
+        # WHY err.url over the original ``url`` arg: ``urllib.error.HTTPError``
+        # populates ``err.url`` with the URL that actually produced the
+        # error. With redirects disabled this equals ``url`` in the
+        # common case, but urllib can also normalize the URL (e.g.
+        # percent-encoding fixups) before sending, and err.url reflects
+        # what went on the wire. Using err.url keeps the reported URL
+        # honest. Fall back to ``url`` if for any reason err.url is
+        # missing (defensive; shouldn't happen in practice).
+        url_for_error = getattr(err, "url", None) or url
+        safe_url_for_error = _sanitize_url_for_log(url_for_error)
         message = f"HTTP {err.code} for {safe_url_for_error}: {snippet}"
         raise HttpError(
             status_code=err.code,
