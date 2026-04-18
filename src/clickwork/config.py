@@ -120,6 +120,55 @@ def _load_toml_from_bytes(data: bytes) -> dict:
     return tomllib.load(io.BytesIO(data))
 
 
+def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
+    """Raise ConfigError if the file behind ``fd`` is readable by group/others.
+
+    Factored out of the user-config reader so the same permission guard can
+    be reused by any secrets-bearing file (user config TOML, .env dotenv
+    files, etc.) without duplicating the TOCTOU-safe fstat() logic or the
+    Windows carve-out.
+
+    The check uses ``os.fstat(fd)`` (not ``os.stat(path)``) so it operates
+    on the already-opened file descriptor. This closes the TOCTOU
+    (time-of-check/time-of-use) window: an attacker cannot swap the file
+    between permission check and read, because both operate on the same
+    kernel fd.
+
+    On Windows the Unix permission model does not apply (NTFS ACLs use a
+    completely different mechanism), so the check is a no-op there. Callers
+    should still gate file creation on platform-appropriate ACLs; this
+    helper only enforces the POSIX mode-bit portion.
+
+    Args:
+        fd: An open file descriptor to check. The caller retains ownership
+            -- this function does not close it.
+        path: The path used to open ``fd``; only used to build a helpful
+            error message pointing the user at the right file to chmod.
+        kind: Human-readable label for the file type (e.g., "User config",
+            ".env file"). Interpolated into the error message so the
+            caller sees which file failed the check.
+
+    Raises:
+        ConfigError: If the file is readable by group or other users
+            (i.e., mode bits include S_IRGRP or S_IROTH).
+    """
+    # Skip the check entirely on Windows -- POSIX mode bits are meaningless
+    # there, and fstat() on Windows typically returns 0o666 for any file.
+    if sys.platform == "win32":
+        return
+
+    st = os.fstat(fd)
+    mode = stat.S_IMODE(st.st_mode)
+    # S_IRGRP = group-read bit, S_IROTH = other-read bit. Either being set
+    # means the file is too permissive for secrets.
+    if mode & (stat.S_IRGRP | stat.S_IROTH):
+        raise ConfigError(
+            f"{kind} {path} has unsafe permission {oct(mode)} "
+            f"(readable by group/others). Secrets may be exposed.\n"
+            f"Fix with: chmod 600 {path}"
+        )
+
+
 def _read_checked_user_config(path: Path) -> bytes | None:
     """Open, permission-check, and read a user config file in one operation.
 
@@ -158,21 +207,148 @@ def _read_checked_user_config(path: Path) -> bytes | None:
     # short reads internally -- os.read() can return fewer bytes than
     # requested. closefd=True means the file object owns the fd.
     with os.fdopen(fd, "rb") as f:
-        # Skip permission check on Windows where Unix permission bits
-        # are not meaningful.
-        if sys.platform != "win32":
-            st = os.fstat(fd)
-            mode = stat.S_IMODE(st.st_mode)
-            # S_IRGRP = group-read bit, S_IROTH = other-read bit.
-            # Either being set means the file is too permissive for secrets.
-            if mode & (stat.S_IRGRP | stat.S_IROTH):
-                raise ConfigError(
-                    f"User config {path} has unsafe permission {oct(mode)} "
-                    f"(readable by group/others). Secrets may be exposed.\n"
-                    f"Fix with: chmod 600 {path}"
-                )
-
+        # Delegate the permission check to the shared helper so the
+        # dotenv loader and any future secrets-bearing reader can reuse
+        # exactly the same logic (including the Windows carve-out).
+        _check_owner_only_permissions(fd, path, kind="User config")
         return f.read()
+
+
+def load_env_file(path: Path) -> dict[str, str]:
+    """Parse a dotenv-style file into a plain dict of string key/value pairs.
+
+    This is a *standalone* helper -- it is **not** integrated into
+    ``load_config()``. The TOML pipeline handles structured config; this
+    helper covers the separate case where a command needs to source
+    credentials or environment variables from a ``.env`` file and pass
+    them to a subprocess (``ctx.run(env=...)``) or inject them into
+    ``os.environ``.
+
+    Supported syntax (deliberately tiny):
+
+        KEY=value              # simple assignment
+        export KEY=value       # optional shell-style 'export' prefix, stripped
+        KEY="value with ws"    # double-quoted value (quotes stripped)
+        KEY='value with ws'    # single-quoted value (quotes stripped)
+        # full-line comment    # skipped
+        <blank line>           # skipped
+
+    Explicitly **NOT supported** (by design -- do not add these):
+
+        * Variable substitution. ``K=$OTHER`` stores the literal string
+          ``"$OTHER"``; nothing is resolved from ``os.environ`` or from
+          earlier entries in the file. If you need shell semantics, use
+          ``sh -c 'set -a; source .env; env'`` and capture stdout.
+        * Backticks / command substitution (``K=`date```).
+        * Heredocs and multi-line values.
+        * Inline trailing comments (``K=val # comment`` is parsed as
+          ``K`` -> ``"val # comment"`` because the literal '#' is part of
+          the value, not a comment marker).
+
+    These omissions are intentional. A tiny grammar is a feature: it means
+    you can look at a ``.env`` file and know exactly what each line does
+    without reading the parser.
+
+    Security: the file must be owner-only (``chmod 600``) on POSIX
+    platforms. Because ``.env`` files typically hold secrets, looser
+    permissions (anything readable by group or other) raise ConfigError.
+    On Windows the check is skipped -- POSIX mode bits do not apply there,
+    and callers are expected to protect the file via NTFS ACLs instead.
+
+    Example usage::
+
+        from clickwork.config import load_env_file
+
+        env = load_env_file(Path(".env"))
+        # env == {"API_TOKEN": "...", "REGION": "us-east-1"}
+
+        # Pass to a subprocess without mutating the parent environment:
+        ctx.run("./deploy.sh", env={**os.environ, **env})
+
+        # Or inject into the parent process:
+        os.environ.update(env)
+
+    Args:
+        path: Path to the dotenv file to parse. Must exist (unlike user
+            config, a missing .env is an error -- the caller asked for
+            this file by name).
+
+    Returns:
+        Dict mapping keys to their (possibly unquoted) string values.
+        Insertion order matches the order keys appear in the file.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        ConfigError: If the file has unsafe permissions (POSIX only), or
+            if any line is malformed (missing ``=`` separator). Malformed-
+            line errors include the 1-based line number so the caller
+            can locate the problem.
+    """
+    # Open then fstat -- same TOCTOU-safe pattern as _read_checked_user_config.
+    # We deliberately do not catch FileNotFoundError: a missing .env is a
+    # real error for this function (the caller explicitly asked for it),
+    # unlike user config which is optional.
+    fd = os.open(str(path), os.O_RDONLY)
+    # os.fdopen(..., "r") gives us text mode with universal newlines so
+    # Windows CRLF files parse correctly alongside Unix LF files.
+    with os.fdopen(fd, "r", encoding="utf-8") as f:
+        # Reuse the exact permission check (including the Windows carve-out)
+        # used by user config. See _check_owner_only_permissions for details.
+        _check_owner_only_permissions(fd, path, kind=".env file")
+        text = f.read()
+
+    result: dict[str, str] = {}
+    # enumerate(..., start=1) gives 1-based line numbers for human-friendly
+    # error messages -- line 1 in the error should match line 1 in the file.
+    for lineno, raw_line in enumerate(text.splitlines(), start=1):
+        # Strip surrounding whitespace once; we'll work with the trimmed
+        # form from here on. This also normalizes trailing "\r" from
+        # CRLF files (universal-newline mode strips the "\n" but leaves "\r"
+        # when the file mixes line endings).
+        line = raw_line.strip()
+
+        # Skip blank lines and full-line comments. These two branches are
+        # the only lines that do not produce a key/value pair.
+        if not line or line.startswith("#"):
+            continue
+
+        # Strip the optional shell-style 'export ' prefix so the same file
+        # can be consumed by both load_env_file() and 'source .env'.
+        # We match 'export ' with a trailing space to avoid eating the
+        # 'export' portion of a legitimate key like 'exportKEY=v'.
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+
+        # Split on the *first* '=' only. Values may legitimately contain
+        # '=' (e.g., base64-encoded tokens), so str.partition is safer than
+        # str.split('=', 1) because it returns a 3-tuple even when '=' is
+        # absent, which we check for below.
+        key, sep, value = line.partition("=")
+        if not sep:
+            # No '=' in the line -- we can't tell what the caller meant.
+            # Refuse rather than silently dropping or misinterpreting.
+            raise ConfigError(
+                f"line {lineno}: malformed entry (no '=' separator): {raw_line!r}"
+            )
+
+        # Keys are trimmed; values are *not* trimmed beyond outer whitespace.
+        # We already stripped the whole line above, so key.strip() on top of
+        # that is cheap and defensive against 'KEY =value' style spacing.
+        key = key.strip()
+
+        # Unwrap matching surrounding quotes. We only strip quotes when the
+        # entire value is wrapped -- a value like 'foo"bar' stays literal.
+        # This matches the behaviour users expect from a minimal dotenv
+        # parser, without pulling in the full shell-quoting rules.
+        if len(value) >= 2 and (
+            (value[0] == '"' and value[-1] == '"')
+            or (value[0] == "'" and value[-1] == "'")
+        ):
+            value = value[1:-1]
+
+        result[key] = value
+
+    return result
 
 
 def load_config(
