@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import threading
 import warnings
 from typing import Any, Callable, TypeVar
 
@@ -82,6 +83,17 @@ T = TypeVar("T")
 # re-warn, it can clear this set -- but we don't expose a public reset
 # because production code should not depend on warning timing.
 _warned: set[str] = set()
+
+# Guards the check-and-add on ``_warned``. Without it, two threads
+# racing on the first call of the same deprecated symbol can both pass
+# ``cache_key not in _warned`` before either adds, so
+# ``warnings.warn(...)`` fires twice and breaks the "warn once per
+# symbol per process" contract. A plain ``threading.Lock`` is enough
+# since the critical section is a single set mutation. Cost at steady
+# state (key already in the set) is one attribute-access + one
+# lock-acquire per call, which is negligible next to the warning-emit
+# path we're avoiding.
+_warned_lock = threading.Lock()
 
 
 def _qualname(obj: Any) -> str:
@@ -197,8 +209,16 @@ def deprecated(
 
             @functools.wraps(original_init)
             def new_init(self: Any, *args: Any, **kwargs: Any) -> None:
-                if cache_key not in _warned:
-                    _warned.add(cache_key)
+                # Lock the check-and-add so two threads racing on a
+                # first call don't both observe ``not in _warned`` and
+                # emit duplicate warnings. ``should_warn`` latches the
+                # winner inside the lock; the losing thread sees
+                # ``False`` and silently proceeds.
+                with _warned_lock:
+                    should_warn = cache_key not in _warned
+                    if should_warn:
+                        _warned.add(cache_key)
+                if should_warn:
                     # stacklevel=2 -> blame the caller doing ``OldWidget(...)``,
                     # not this wrapper.
                     warnings.warn(message, DeprecationWarning, stacklevel=2)
@@ -215,8 +235,14 @@ def deprecated(
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            if cache_key not in _warned:
-                _warned.add(cache_key)
+            # Same lock-protected check-and-add as the class path above.
+            # Keeping both paths identical makes the "warn once per
+            # process" contract uniform under concurrency.
+            with _warned_lock:
+                should_warn = cache_key not in _warned
+                if should_warn:
+                    _warned.add(cache_key)
+            if should_warn:
                 warnings.warn(message, DeprecationWarning, stacklevel=2)
             return func(*args, **kwargs)
 
