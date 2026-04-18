@@ -347,7 +347,16 @@ class CliContext:
     require: Callable[..., None] | None = field(
         default=None, repr=False, compare=False,
     )
-    """Assert that a binary exists on PATH, raising PrerequisiteError if not."""
+    """Assert that a binary exists on PATH, raising PrerequisiteError if not.
+
+    Tests can intercept this helper by patching ``clickwork.prereqs.require``
+    (the public symbol). The CLI harness binds ``ctx.require`` through a
+    module-level wrapper function that re-reads the module attribute on
+    every call, so ``unittest.mock.patch("clickwork.prereqs.require")``
+    transparently takes effect. Prior to issue #8's fix, tests had to
+    reach for the internal ``clickwork.cli._require`` alias; that alias
+    no longer exists -- patch ``clickwork.prereqs.require`` instead.
+    """
 
     confirm: Callable[..., bool] | None = field(
         default=None, repr=False, compare=False,
