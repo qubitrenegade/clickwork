@@ -6,16 +6,17 @@ Each test class covers one exported type: Secret, CliProcessError, CliContext.
 Run with:
     uv run pytest tests/unit/test_types.py -v
 """
+
 import copy
 import pickle
 import subprocess
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Secret
 # ---------------------------------------------------------------------------
+
 
 class TestSecret:
     """Verify that Secret wraps a string and keeps it out of every repr path."""
@@ -97,10 +98,13 @@ class TestSecret:
 # CliProcessError
 # ---------------------------------------------------------------------------
 
+
 class TestCliProcessError:
     """Verify CliProcessError wraps CalledProcessError cleanly."""
 
-    def _make_cpe(self, returncode: int = 1, cmd: str = "git status", stderr: str = "fatal: not a git repo"):
+    def _make_cpe(
+        self, returncode: int = 1, cmd: str = "git status", stderr: str = "fatal: not a git repo"
+    ):
         # Helper to construct a CalledProcessError -- CalledProcessError takes
         # (returncode, cmd, output, stderr) positional args.
         return subprocess.CalledProcessError(
@@ -146,6 +150,7 @@ class TestCliProcessError:
 # ---------------------------------------------------------------------------
 # CliContext
 # ---------------------------------------------------------------------------
+
 
 class TestCliContext:
     """Verify CliContext construction, config access, and callable fields."""

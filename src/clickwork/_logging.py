@@ -10,6 +10,7 @@ The verbosity mapping:
   - -vv (verbose=2): DEBUG -- implementation details
   - --quiet: ERROR -- only failures
 """
+
 from __future__ import annotations
 
 import logging

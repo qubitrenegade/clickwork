@@ -15,16 +15,17 @@ Schema validation (optional) ensures required keys exist, types match,
 and secrets don't leak into repo config. User config with loose permissions
 is refused (not just warned) to prevent secret leakage.
 """
+
 from __future__ import annotations
 
 import os
 import shlex
 import stat
 import sys
-from pathlib import Path
 
 # tomllib is stdlib in Python 3.11+. No external dependency needed.
 import tomllib
+from pathlib import Path
 
 from clickwork._types import Secret, normalize_prefix
 
@@ -118,6 +119,7 @@ def _load_toml_from_bytes(data: bytes) -> dict:
     # tomllib.loads() requires a str, but tomllib.load() requires a binary
     # IO object.  We use an in-memory BytesIO so no second open() is needed.
     import io
+
     return tomllib.load(io.BytesIO(data))
 
 
@@ -367,7 +369,7 @@ def load_env_file(path: Path) -> dict[str, str]:
         # We match 'export ' with a trailing space to avoid eating the
         # 'export' portion of a legitimate key like 'exportKEY=v'.
         if line.startswith("export "):
-            line = line[len("export "):].lstrip()
+            line = line[len("export ") :].lstrip()
 
         # Split on the *first* '=' only. Values may legitimately contain
         # '=' (e.g., base64-encoded tokens), so str.partition is safer than
@@ -384,9 +386,7 @@ def load_env_file(path: Path) -> dict[str, str]:
             # assignment, echoing raw_line would leak it into logs/CI
             # output. Just the line number is enough for the caller to
             # open the file and find the bad line.
-            raise ConfigError(
-                f"{path}: line {lineno}: malformed entry (no '=' separator)"
-            )
+            raise ConfigError(f"{path}: line {lineno}: malformed entry (no '=' separator)")
 
         # Keys are trimmed; values are *not* trimmed beyond outer whitespace.
         # We already stripped the whole line above, so key.strip() on top of
@@ -400,9 +400,7 @@ def load_env_file(path: Path) -> dict[str, str]:
         # (Same no-raw-line policy as the separator error above -- don't
         # echo the bad line because it may contain secrets.)
         if not key:
-            raise ConfigError(
-                f"{path}: line {lineno}: empty key (missing name before '=')"
-            )
+            raise ConfigError(f"{path}: line {lineno}: empty key (missing name before '=')")
 
         # Strip leading whitespace from the value before looking for
         # quotes. Common dotenv forms like ``KEY = value`` or
@@ -434,8 +432,7 @@ def load_env_file(path: Path) -> dict[str, str]:
         # This matches the behaviour users expect from a minimal dotenv
         # parser, without pulling in the full shell-quoting rules.
         if len(value) >= 2 and (
-            (value[0] == '"' and value[-1] == '"')
-            or (value[0] == "'" and value[-1] == "'")
+            (value[0] == '"' and value[-1] == '"') or (value[0] == "'" and value[-1] == "'")
         ):
             value = value[1:-1]
 
@@ -532,9 +529,9 @@ def load_config(
     # dict.update() means the last write wins, so we apply layers in order
     # from lowest to highest priority.
     config: dict = {}
-    config.update(user_config)   # Layer 4: lowest priority
+    config.update(user_config)  # Layer 4: lowest priority
     config.update(repo_default)  # Layer 3: overrides user
-    config.update(repo_env)      # Layer 2: overrides default
+    config.update(repo_env)  # Layer 2: overrides default
 
     # Track which keys came from repo config so the secret check can
     # identify values that should never live in a git-tracked file.
@@ -587,7 +584,6 @@ def load_config(
     # then defaults (fill missing values), then type check, then required check.
     if schema:
         for key, key_schema in schema.items():
-
             # Secret check: keys tagged secret=True must not appear in repo
             # config. Repo config is checked into git and visible to anyone
             # with repo access. Secrets must live in user config or env vars.

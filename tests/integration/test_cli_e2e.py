@@ -4,10 +4,10 @@ These tests create real CLI instances with real command files on disk,
 invoke them, and verify the full output. No mocking -- this catches
 integration issues between modules.
 """
+
 from pathlib import Path
 
 from click.testing import CliRunner
-import pytest
 
 from clickwork.cli import create_cli
 

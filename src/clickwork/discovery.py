@@ -16,6 +16,7 @@ The discovery_mode parameter controls which are active:
   commands_dir exists. Local commands shadow installed ones on name
   conflicts (with an info log).
 """
+
 from __future__ import annotations
 
 import hashlib

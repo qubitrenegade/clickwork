@@ -81,6 +81,7 @@ default ``CliRunner()`` configuration (where streams were mixed unless
 ``mix_stderr=False`` was passed explicitly). Flooring at 8.2 gets us
 out of documenting that conditional behaviour.
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence

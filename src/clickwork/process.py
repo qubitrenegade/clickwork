@@ -16,6 +16,7 @@ Signal handling: when the user presses Ctrl-C, the framework forwards SIGINT to
 the child process, waits for it to exit, then re-raises KeyboardInterrupt so the
 caller sees the interruption only after the child has had a chance to clean up.
 """
+
 from __future__ import annotations
 
 import logging
@@ -147,10 +148,7 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
         raise
 
 
-
-def _validate_stdin_params(
-    stdin_text: str | None, stdin_bytes: bytes | None
-) -> None:
+def _validate_stdin_params(stdin_text: str | None, stdin_bytes: bytes | None) -> None:
     """Enforce mutual exclusivity between stdin_text and stdin_bytes.
 
     WHY two separate kwargs instead of one polymorphic stdin=str|bytes:
@@ -279,7 +277,7 @@ def run(
     # subprocess.run() has no hook for signal interception.
     try:
         proc = subprocess.Popen(cmd, **popen_kwargs)
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         # The binary doesn't exist. This is a user/environment error (like
         # PrerequisiteError), not a framework bug. Surface it as exit code 1
         # via CliProcessError with an actionable message.
@@ -287,7 +285,7 @@ def run(
             subprocess.CalledProcessError(
                 returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
             )
-        )
+        ) from exc
 
     # If we opened a stdin pipe, write the payload and close it so the child
     # sees EOF and can proceed. We do this BEFORE _wait_with_signal_forwarding
@@ -382,9 +380,7 @@ def run(
 
     returncode = _wait_with_signal_forwarding(proc)
     if returncode != 0:
-        raise CliProcessError(
-            subprocess.CalledProcessError(returncode=returncode, cmd=cmd)
-        )
+        raise CliProcessError(subprocess.CalledProcessError(returncode=returncode, cmd=cmd))
     return subprocess.CompletedProcess(cmd, returncode)
 
 
@@ -420,18 +416,22 @@ def capture(
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, env=full_env,
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=full_env,
             shell=False,
         )
         return result.stdout.strip()
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         # Same treatment as run(): missing binary is a user/environment
         # error (exit 1), not a framework bug (exit 2).
         raise CliProcessError(
             subprocess.CalledProcessError(
                 returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
             )
-        )
+        ) from exc
     except subprocess.CalledProcessError as e:
         raise CliProcessError(e) from e
 
@@ -541,7 +541,7 @@ def _validate_no_secret_in_argv(cmd: list[str | Secret]) -> None:
             raise ValueError(
                 f"cmd[{idx}] is a Secret instance. Do not place secrets "
                 "in argv (visible in `ps` output). Pass them via "
-                "`secrets={...}` (env) or `stdin_secret=\"NAME\"` (stdin) instead."
+                '`secrets={...}` (env) or `stdin_secret="NAME"` (stdin) instead.'
             )
 
 
@@ -784,7 +784,7 @@ def run_with_secrets(
         raise TypeError(
             f"stdin_secret must be a str (or None); got "
             f"{type(stdin_secret).__name__}. Pass the KEY name from "
-            "your ``secrets={}`` dict, e.g. stdin_secret=\"TOKEN\"."
+            'your ``secrets={}`` dict, e.g. stdin_secret="TOKEN".'
         )
 
     # 6. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
@@ -804,9 +804,7 @@ def run_with_secrets(
     # (run, _format_cmd) get the concrete list[str] they expect.
     plain_cmd: list[str] = list(cmd)  # type: ignore[arg-type]
 
-    stdin_display = (
-        f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
-    )
+    stdin_display = f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
 
     # 7. Dry-run short-circuit. Docstring promises dry_run does not
     # pull secret values into memory. Honouring that means bailing out

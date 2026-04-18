@@ -14,11 +14,11 @@ lightweight Click proxies so startup and unrelated commands don't import every
 installed plugin up front. The real command object loads on invocation, and on
 `--help` when Click asks for command metadata.
 """
+
 from pathlib import Path
 
 import click
 from click.testing import CliRunner
-import pytest
 
 
 class TestDirectoryScanning:
@@ -169,8 +169,9 @@ class TestNamespaceIsolation:
         scan gets the cached first helper from sys.modules -- silently
         loading the wrong code.
         """
-        from clickwork.discovery import discover_commands_from_dir
         from click.testing import CliRunner
+
+        from clickwork.discovery import discover_commands_from_dir
 
         # Create two directories each with a helper.py exporting 'cli'.
         dir_a = tmp_path / "a"
@@ -216,11 +217,7 @@ class TestDiscoveryMode:
 
         cmd_file = tmp_path / "hello.py"
         cmd_file.write_text(
-            "import click\n\n"
-            "@click.command()\n"
-            "def hello():\n"
-            "    click.echo('hi')\n\n"
-            "cli = hello\n"
+            "import click\n\n@click.command()\ndef hello():\n    click.echo('hi')\n\ncli = hello\n"
         )
 
         commands = discover_commands(
@@ -235,11 +232,7 @@ class TestDiscoveryMode:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "status.py").write_text(
-            "import click\n\n"
-            "@click.command()\n"
-            "def status():\n"
-            "    pass\n\n"
-            "cli = status\n"
+            "import click\n\n@click.command()\ndef status():\n    pass\n\ncli = status\n"
         )
 
         commands = discover_commands(
@@ -260,11 +253,7 @@ class TestDiscoveryMode:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "status.py").write_text(
-            "import click\n\n"
-            "@click.command()\n"
-            "def status():\n"
-            "    pass\n\n"
-            "cli = status\n"
+            "import click\n\n@click.command()\ndef status():\n    pass\n\ncli = status\n"
         )
 
         called = {"entry_points": False}
@@ -302,11 +291,7 @@ class TestDiscoveryMode:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "local.py").write_text(
-            "import click\n\n"
-            "@click.command()\n"
-            "def local():\n"
-            "    pass\n\n"
-            "cli = local\n"
+            "import click\n\n@click.command()\ndef local():\n    pass\n\ncli = local\n"
         )
 
         # In installed mode, the directory should be ignored
@@ -369,7 +354,9 @@ class TestEntrypoints:
         assert result.exit_code == 0
         assert result.output.strip() == "bar:alice"
 
-    def test_local_command_shadows_installed_with_info_log(self, tmp_path: Path, monkeypatch, caplog):
+    def test_local_command_shadows_installed_with_info_log(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
         """When auto mode finds the same name in both sources, local wins.
 
         WHY: during dev you want to iterate on a local copy of a command
@@ -385,11 +372,7 @@ class TestEntrypoints:
         )
 
         (tmp_path / "hello.py").write_text(
-            "import click\n\n"
-            "@click.command()\n"
-            "def hello():\n"
-            "    pass\n\n"
-            "cli = hello\n"
+            "import click\n\n@click.command()\ndef hello():\n    pass\n\ncli = hello\n"
         )
 
         with caplog.at_level("INFO", logger="clickwork"):

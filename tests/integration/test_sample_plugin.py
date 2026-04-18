@@ -8,6 +8,7 @@ Marked ``network`` because pip install needs to download build dependencies
 (hatchling) from PyPI. Skip with ``pytest -m "not network"`` in sandboxed
 or offline environments.
 """
+
 import subprocess
 import sys
 

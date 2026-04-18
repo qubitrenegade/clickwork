@@ -6,9 +6,8 @@ needs to handle three cases:
 2. Non-TTY (CI/piped): auto-deny (safe default) unless --yes
 3. --yes flag: auto-confirm everything (for scripted use)
 """
-from unittest.mock import patch
 
-import pytest
+from unittest.mock import patch
 
 
 class TestConfirm:
@@ -30,22 +29,28 @@ class TestConfirm:
     def test_user_types_y(self):
         from clickwork.prompts import confirm
 
-        with patch("clickwork.prompts._is_tty", return_value=True), \
-             patch("builtins.input", return_value="y"):
+        with (
+            patch("clickwork.prompts._is_tty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
             assert confirm("Continue?", yes=False) is True
 
     def test_user_types_n(self):
         from clickwork.prompts import confirm
 
-        with patch("clickwork.prompts._is_tty", return_value=True), \
-             patch("builtins.input", return_value="n"):
+        with (
+            patch("clickwork.prompts._is_tty", return_value=True),
+            patch("builtins.input", return_value="n"),
+        ):
             assert confirm("Continue?", yes=False) is False
 
     def test_empty_input_defaults_to_no(self):
         from clickwork.prompts import confirm
 
-        with patch("clickwork.prompts._is_tty", return_value=True), \
-             patch("builtins.input", return_value=""):
+        with (
+            patch("clickwork.prompts._is_tty", return_value=True),
+            patch("builtins.input", return_value=""),
+        ):
             assert confirm("Continue?", yes=False) is False
 
 
@@ -60,14 +65,18 @@ class TestConfirmDestructive:
     def test_requires_full_yes(self):
         from clickwork.prompts import confirm_destructive
 
-        with patch("clickwork.prompts._is_tty", return_value=True), \
-             patch("builtins.input", return_value="yes"):
+        with (
+            patch("clickwork.prompts._is_tty", return_value=True),
+            patch("builtins.input", return_value="yes"),
+        ):
             assert confirm_destructive("Drop database?", yes=False) is True
 
     def test_y_is_not_enough(self):
         """'y' doesn't count for destructive -- must type full 'yes'."""
         from clickwork.prompts import confirm_destructive
 
-        with patch("clickwork.prompts._is_tty", return_value=True), \
-             patch("builtins.input", return_value="y"):
+        with (
+            patch("clickwork.prompts._is_tty", return_value=True),
+            patch("builtins.input", return_value="y"),
+        ):
             assert confirm_destructive("Drop database?", yes=False) is False

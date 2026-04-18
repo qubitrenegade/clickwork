@@ -12,6 +12,7 @@ Key behaviors tested:
 - Schema validation (required keys, types, defaults)
 - Secret safety (refuse secrets in repo config)
 """
+
 import sys
 from pathlib import Path
 
@@ -38,8 +39,7 @@ class TestLoadTomlConfig:
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
-            '[default]\nbucket = "staging"\n\n'
-            '[env.production]\nbucket = "prod"\n'
+            '[default]\nbucket = "staging"\n\n[env.production]\nbucket = "prod"\n'
         )
 
         config = load_config(
@@ -79,6 +79,7 @@ class TestLoadTomlConfig:
     def test_user_config_merged_below_repo(self, tmp_path: Path):
         """User config has lowest priority -- repo config overrides it."""
         import os
+
         from clickwork.config import load_config
 
         repo_config = tmp_path / "repo" / ".test-cli.toml"
@@ -106,9 +107,7 @@ class TestLoadTomlConfig:
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
-            '[default]\n'
-            'cloudflare.account_id = "abc123"\n'
-            'r2.bucket = "releases-staging"\n'
+            '[default]\ncloudflare.account_id = "abc123"\nr2.bucket = "releases-staging"\n'
         )
 
         config = load_config(
@@ -182,8 +181,7 @@ class TestEnvVarResolution:
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text(
-            '[default]\nbucket = "default-bucket"\n\n'
-            '[env.staging]\nbucket = "staging-bucket"\n'
+            '[default]\nbucket = "default-bucket"\n\n[env.staging]\nbucket = "staging-bucket"\n'
         )
 
         monkeypatch.setenv("TEST_CLI_ENV", "staging")
@@ -200,7 +198,7 @@ class TestSchemaValidation:
     """Config schema validates required keys, types, and defaults."""
 
     def test_required_key_missing_raises(self, tmp_path: Path):
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -235,7 +233,7 @@ class TestSchemaValidation:
 
     def test_secret_in_repo_config_raises(self, tmp_path: Path):
         """Keys tagged secret=True must not appear in repo config."""
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\napi_token = "should-not-be-here"\n')
@@ -253,7 +251,7 @@ class TestSchemaValidation:
 
     def test_type_mismatch_raises(self, tmp_path: Path):
         """Values that don't match the declared type should raise ConfigError."""
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\nport = "not-a-number"\n')
@@ -318,8 +316,8 @@ class TestSecretWrapping:
         Wrapping in Secret() ensures str(value) returns '***' so accidental
         logging of ctx.config['api_token'] never exposes the real credential.
         """
-        from clickwork.config import load_config
         from clickwork._types import Secret
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -343,8 +341,9 @@ class TestSecretWrapping:
     def test_secret_from_user_config_is_wrapped(self, tmp_path: Path):
         """A secret-tagged value from user config should also be a Secret."""
         import os
-        from clickwork.config import load_config
+
         from clickwork._types import Secret
+        from clickwork.config import load_config
 
         repo_config = tmp_path / ".test-cli.toml"
         repo_config.write_text("[default]\n")
@@ -369,8 +368,8 @@ class TestSecretWrapping:
 
     def test_non_secret_value_stays_plain_string(self, tmp_path: Path):
         """Values without secret: True should remain plain strings."""
-        from clickwork.config import load_config
         from clickwork._types import Secret
+        from clickwork.config import load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text('[default]\nbucket = "my-bucket"\n')
@@ -427,14 +426,17 @@ class TestEnvVarDottedKeys:
         assert config["new_key"] == "from-env"
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Unix permission model does not apply on Windows")
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Unix permission model does not apply on Windows"
+)
 class TestUserConfigPermissions:
     """User config file permissions are checked for safety."""
 
     def test_world_readable_config_is_refused(self, tmp_path: Path):
         """User config readable by others should raise ConfigError."""
         import os
-        from clickwork.config import load_config, ConfigError
+
+        from clickwork.config import ConfigError, load_config
 
         user_config = tmp_path / "config.toml"
         user_config.write_text('token = "secret"\n')
@@ -453,6 +455,7 @@ class TestUserConfigPermissions:
     def test_owner_only_config_passes(self, tmp_path: Path):
         """User config with 0o600 permissions should load fine."""
         import os
+
         from clickwork.config import load_config
 
         user_config = tmp_path / "config.toml"
@@ -485,7 +488,8 @@ class TestUserConfigPermissions:
         check back to read-only without a loud test failure.
         """
         import os
-        from clickwork.config import load_config, ConfigError
+
+        from clickwork.config import ConfigError, load_config
 
         user_config = tmp_path / "config.toml"
         user_config.write_text('token = "secret"\n')
@@ -522,6 +526,7 @@ class TestLoadEnvFile:
     def test_load_env_file_parses_simple_key_value(self, tmp_path: Path):
         """The simplest case: one KEY=VALUE line produces one dict entry."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -536,6 +541,7 @@ class TestLoadEnvFile:
         """A leading 'export ' (shell-style) is stripped so the same file
         works with both ``source .env`` and load_env_file()."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -557,6 +563,7 @@ class TestLoadEnvFile:
         test failure rather than a silent content bug.
         """
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -581,10 +588,11 @@ class TestLoadEnvFile:
         literal quoted form of the token.
         """
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
-        env_file.write_text('KEY = "wrapped"\nK2=   \'singly\'\n')
+        env_file.write_text("KEY = \"wrapped\"\nK2=   'singly'\n")
         os.chmod(env_file, 0o600)
 
         assert load_env_file(env_file) == {"KEY": "wrapped", "K2": "singly"}
@@ -598,6 +606,7 @@ class TestLoadEnvFile:
         space, or a human-readable prefix) and must survive.
         """
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -610,6 +619,7 @@ class TestLoadEnvFile:
         """Values wrapped in double quotes have the quotes stripped so
         spaces and other whitespace-adjacent characters survive parsing."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -623,6 +633,7 @@ class TestLoadEnvFile:
         purposes of this minimal parser -- the grammar deliberately does
         not distinguish shell's 'literal vs interpolated' semantics."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -638,6 +649,7 @@ class TestLoadEnvFile:
         supported" section for the full anti-feature list (variable
         substitution, inline comments, heredocs, etc.)."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -649,6 +661,7 @@ class TestLoadEnvFile:
     def test_load_env_file_skips_blank_lines(self, tmp_path: Path):
         """Blank lines (whitespace-only or empty) are harmless and ignored."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -660,6 +673,7 @@ class TestLoadEnvFile:
     def test_load_env_file_handles_multiple_keys(self, tmp_path: Path):
         """Multiple KEY=VALUE lines produce multiple dict entries."""
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"
@@ -692,7 +706,8 @@ class TestLoadEnvFile:
         group/other have the read bit set.
         """
         import os
-        from clickwork.config import load_env_file, ConfigError
+
+        from clickwork.config import ConfigError, load_env_file
 
         env_file = tmp_path / ".env"
         env_file.write_text("K=v\n")
@@ -716,7 +731,8 @@ class TestLoadEnvFile:
         tamper-resistance without any test failing.
         """
         import os
-        from clickwork.config import load_env_file, ConfigError
+
+        from clickwork.config import ConfigError, load_env_file
 
         env_file = tmp_path / ".env"
         env_file.write_text("K=v\n")
@@ -733,7 +749,8 @@ class TestLoadEnvFile:
         than silently dropping or misinterpreting. The error message must
         name the 1-based line number so the caller can locate the problem."""
         import os
-        from clickwork.config import load_env_file, ConfigError
+
+        from clickwork.config import ConfigError, load_env_file
 
         env_file = tmp_path / ".env"
         # Line 1: valid. Line 2: malformed (no '='). Line 3: valid.
@@ -752,7 +769,8 @@ class TestLoadEnvFile:
         so the caller can fix the bad line immediately.
         """
         import os
-        from clickwork.config import load_env_file, ConfigError
+
+        from clickwork.config import ConfigError, load_env_file
 
         env_file = tmp_path / ".env"
         # Line 1: valid. Line 2: empty key. Line 3: valid.
@@ -769,7 +787,8 @@ class TestLoadEnvFile:
         don't miss the bad case.
         """
         import os
-        from clickwork.config import load_env_file, ConfigError
+
+        from clickwork.config import ConfigError, load_env_file
 
         env_file = tmp_path / ".env"
         env_file.write_text("export =value\n")
@@ -788,6 +807,7 @@ class TestLoadEnvFile:
         semantics should use 'sh -c "set -a; source .env; env"' instead.
         """
         import os
+
         from clickwork.config import load_env_file
 
         env_file = tmp_path / ".env"

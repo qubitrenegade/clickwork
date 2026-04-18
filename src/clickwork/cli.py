@@ -13,6 +13,7 @@ Plugin authors call this once in their entry point script:
     from clickwork import create_cli
     cli = create_cli(name="orbit-admin", commands_dir=Path(__file__).parent / "commands")
 """
+
 from __future__ import annotations
 
 import functools
@@ -29,12 +30,18 @@ from clickwork.config import ConfigError, load_config
 from clickwork.discovery import discover_commands
 from clickwork.process import (
     capture as _capture,
+)
+from clickwork.process import (
     run as _run,
+)
+from clickwork.process import (
     run_with_confirm as _run_with_confirm,
+)
+from clickwork.process import (
     run_with_secrets as _run_with_secrets,
 )
-from clickwork.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
-
+from clickwork.prompts import confirm as _confirm
+from clickwork.prompts import confirm_destructive as _confirm_destructive
 
 # Exit codes per spec:
 # 0 = success
@@ -126,9 +133,7 @@ class MutuallyExclusive(click.Option):
         for other in self._mutually_exclusive:
             other_value = opts.get(other)
             if current_value and other_value:
-                raise click.UsageError(
-                    f"--{self.name} and --{other} are mutually exclusive."
-                )
+                raise click.UsageError(f"--{self.name} and --{other} are mutually exclusive.")
         return super().handle_parse_result(ctx, opts, args)
 
 
@@ -154,6 +159,7 @@ def pass_cli_context(f):
         def deploy(ctx: CliContext) -> None:
             ctx.run(["kubectl", "apply", "-f", "manifests/"])
     """
+
     @click.pass_context
     @functools.wraps(f)
     def wrapper(click_ctx, *args, **kwargs):
@@ -185,6 +191,7 @@ def pass_cli_context(f):
                 "a CLI created by clickwork.create_cli()."
             )
         return f(cli_ctx, *args, **kwargs)
+
     return wrapper
 
 
@@ -298,7 +305,8 @@ def create_cli(
     # This is the standard Click pattern for parameterised group factories.
     @click.group(name=name, help=group_help)
     @click.option(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         count=True,
         # count=True means -v gives 1, -vv gives 2, etc.
         # We map these to INFO / DEBUG in setup_logging().
@@ -307,7 +315,8 @@ def create_cli(
         mutually_exclusive=["quiet"],
     )
     @click.option(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         is_flag=True,
         default=False,
         help="Suppress non-error output.",
@@ -329,7 +338,8 @@ def create_cli(
         help="Select config environment (e.g., staging, production).",
     )
     @click.option(
-        "--yes", "-y",
+        "--yes",
+        "-y",
         is_flag=True,
         default=False,
         help="Skip confirmation prompts.",
@@ -436,14 +446,16 @@ def create_cli(
         # cli_ctx's flags. This keeps the logic single-sourced in process.py
         # (confirmation + execution + dry-run + signal forwarding) while still
         # letting ctx.run_with_confirm(cmd, msg) work without extra args.
-        cli_ctx.run_with_confirm = lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: _run_with_confirm(
-            cmd,
-            msg,
-            yes=cli_ctx.yes,
-            dry_run=cli_ctx.dry_run,
-            env=env,
-            stdin_text=stdin_text,
-            stdin_bytes=stdin_bytes,
+        cli_ctx.run_with_confirm = lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: (  # noqa: E501
+            _run_with_confirm(
+                cmd,
+                msg,
+                yes=cli_ctx.yes,
+                dry_run=cli_ctx.dry_run,
+                env=env,
+                stdin_text=stdin_text,
+                stdin_bytes=stdin_bytes,
+            )
         )
 
         # run_with_secrets: safety-focused wrapper for subprocesses that
@@ -452,12 +464,14 @@ def create_cli(
         # and accepts ``env=`` as a non-secret passthrough, matching the shape
         # of the other bindings above. secrets / stdin_secret are keyword-only
         # at the helper level; we mirror that here.
-        cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None, env=None: _run_with_secrets(
-            cmd,
-            secrets=secrets,
-            stdin_secret=stdin_secret,
-            dry_run=cli_ctx.dry_run,
-            env=env,
+        cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None, env=None: (
+            _run_with_secrets(
+                cmd,
+                secrets=secrets,
+                stdin_secret=stdin_secret,
+                dry_run=cli_ctx.dry_run,
+                env=env,
+            )
         )
 
         # Attach the CliContext to Click's ctx.obj so all subcommands can
