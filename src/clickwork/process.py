@@ -257,9 +257,12 @@ def run(
     else:
         stdin_payload = None
 
-    # Only open a pipe when we actually have data to write. When no stdin
-    # payload is set, we inherit the parent's stdin (the existing behavior)
-    # so interactive tools that read from the TTY still work.
+    # Only open a pipe when stdin_text or stdin_bytes was provided (even
+    # if the resulting payload is an empty string/bytes -- that's a valid
+    # "send immediate EOF" case, e.g. for a command that wants to see
+    # closed stdin as a signal). When neither was provided, we inherit
+    # the parent's stdin (the existing behavior) so interactive tools
+    # that read from the TTY still work.
     popen_kwargs: dict = {"env": full_env, "shell": False}
     if stdin_payload is not None:
         popen_kwargs["stdin"] = subprocess.PIPE
@@ -312,14 +315,39 @@ def run(
             # via CliProcessError -- that message is more actionable than
             # a BrokenPipeError traceback from the parent.
             pass
+        except KeyboardInterrupt:
+            # User pressed Ctrl-C while we were still writing stdin. Do
+            # the same SIGINT-forward + wait-with-escalation dance that
+            # ``_wait_with_signal_forwarding`` does when it catches KI
+            # mid-wait, so the child gets a chance to clean up regardless
+            # of exactly when during the call the signal arrived.
+            # Without this, the KI would propagate up past ``proc``
+            # entirely and leave the child running until OS cleanup.
+            try:
+                proc.stdin.close()
+            except BrokenPipeError:
+                pass
+            proc.send_signal(signal.SIGINT)
+            try:
+                proc.wait(timeout=SIGINT_TIMEOUT_SECONDS)
+            except subprocess.TimeoutExpired:
+                # Child ignored SIGINT; escalate to SIGKILL so we don't
+                # hang the terminal waiting on a wedged child.
+                proc.kill()
+                proc.wait()
+            raise
         finally:
             # Close in a finally so a successful-but-partial write still
             # sends EOF. Wrap the close in its own try because closing a
             # pipe whose peer already closed can also raise BrokenPipeError
             # on some platforms (it's the flush-on-close that fails).
+            # (The KeyboardInterrupt branch above already closes before
+            # raising; this finally is a no-op there because stdin is
+            # already closed.)
             try:
                 proc.stdin.close()
-            except BrokenPipeError:
+            except (BrokenPipeError, ValueError):
+                # ValueError: stdin already closed by the KI branch.
                 pass
 
     returncode = _wait_with_signal_forwarding(proc)
@@ -400,11 +428,13 @@ def run_with_confirm(
         yes: If True, skip the prompt (--yes flag).
         dry_run: If True, print the command but don't execute it.
         env: Extra environment variables merged with os.environ.
-        stdin_text: If set, pipe this string to the child's stdin (text mode).
-            Mutually exclusive with stdin_bytes. See ``run()`` for the
-            secrets-via-stdin pattern this supports.
-        stdin_bytes: If set, pipe these raw bytes to the child's stdin (binary
-            mode). Mutually exclusive with stdin_text.
+        stdin_text: If set, encode this string as UTF-8 and pipe the bytes
+            to the child's stdin. Mutually exclusive with stdin_bytes.
+            (Implementation note: delegates to ``run()``, which always
+            opens stdin in binary mode and encodes here -- no locale
+            dependency, no newline translation.)
+        stdin_bytes: If set, pipe these raw bytes to the child's stdin.
+            Mutually exclusive with stdin_text.
 
     Returns:
         subprocess.CompletedProcess on success, or None if denied/dry-run.

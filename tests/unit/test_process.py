@@ -101,7 +101,19 @@ class TestRun:
             run(["definitely-not-a-real-binary-xyz123"])
 
     def test_run_with_stdin_text_delivers_value(self, capfd):
-        """stdin_text should be piped to the child process as a text stream.
+        """stdin_text should be UTF-8 encoded and piped to the child's stdin.
+
+        Implementation detail pinned here for future readers: run() always
+        opens the child's stdin pipe in **binary** mode and encodes
+        stdin_text to UTF-8 itself. We do NOT use ``Popen(text=True)``
+        because that would pick up the platform locale encoding and could
+        apply Windows "\\n" -> "\\r\\n" newline translation -- both of
+        which silently corrupt secret/token payloads. See the WHY-always-
+        bytes comment in process.py.
+
+        The child-side Python here uses ``sys.stdin.read()`` which decodes
+        using the child's locale. Since our payload "hello" is pure ASCII,
+        the round-trip is lossless regardless of what that locale is.
 
         WHY: this is the primary use case for secret-via-stdin tools like
         ``wrangler secret put``, ``gh auth login --with-token``, and
