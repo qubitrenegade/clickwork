@@ -326,11 +326,15 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
             Raises.
 
     Raises:
-        ValueError: If ``allowed_hosts`` is populated and the URL's host
-            doesn't match any entry, OR if ``allowed_hosts`` is an empty
-            list, OR if the URL's scheme is not http/https. ``ValueError``
-            rather than :class:`HttpError` because no HTTP response
-            exists yet -- the request never left the process.
+        ValueError: If the URL's scheme is not http/https, OR if the URL
+            has no hostname component (malformed absolute URL), OR if
+            ``allowed_hosts`` is an empty list, OR if ``allowed_hosts``
+            is populated and the URL's host doesn't match any entry.
+            ``ValueError`` rather than :class:`HttpError` because no
+            HTTP response exists yet -- the request never left the
+            process. All error messages funnel the URL through
+            ``_sanitize_url_for_log`` so callers' embedded credentials
+            (userinfo / query params) don't leak via the exception text.
     """
     # Scheme guard. urlopen() will happily follow file:// and ftp://, which
     # is a nasty surprise for callers accepting URLs from user input or
@@ -338,7 +342,8 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
     # URL fetcher. Reject anything that isn't http or https up front so
     # the rest of the pipeline can assume we're actually making an HTTP
     # request.
-    scheme = urllib.parse.urlparse(url).scheme.lower()
+    parts = urllib.parse.urlparse(url)
+    scheme = parts.scheme.lower()
     if scheme not in ("http", "https"):
         # Sanitize the URL in the error message so a caller's embedded
         # credentials (userinfo or query params) can't leak through the
@@ -350,6 +355,23 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
             "arbitrary URL schemes from user input is a footgun "
             "(file://, ftp://, etc.). If you genuinely need non-HTTP "
             "fetch, use urllib directly."
+        )
+
+    # Hostname guard. Enforced UNCONDITIONALLY (before the allowlist
+    # opt-out) because the public get/post/... docstrings promise the
+    # caller passes an absolute URL -- a URL without a hostname violates
+    # that contract regardless of whether the allowlist is active. If
+    # we skipped this check when ``allowed_hosts`` was ``None``, a URL
+    # like ``https:///missing-host`` would sneak all the way down to
+    # urllib, which surfaces it as a much less actionable
+    # ``URLError: <urlopen error no host given>`` several stack frames
+    # deeper. Rejecting here keeps the failure mode a clean, sanitized
+    # clickwork-level ValueError that matches every other guard error.
+    if parts.hostname is None:
+        raise ValueError(
+            f"URL {_sanitize_url_for_log(url)!r} has no hostname "
+            "component; clickwork.http requires an absolute URL "
+            "(e.g. https://host/path)."
         )
 
     if allowed_hosts is None:
@@ -371,23 +393,11 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
             "would be a silent security regression."
         )
 
-    hostname = urllib.parse.urlparse(url).hostname
-    if hostname is None:
-        # urlparse returns None for URLs without a host component (e.g.
-        # ``file:///foo``). Treat this as a denied-by-default case rather
-        # than letting it sneak through -- the allowlist exists precisely
-        # to gate on host identity. Sanitize the URL in the error for
-        # the same reason as the scheme error above.
-        raise ValueError(
-            f"URL {_sanitize_url_for_log(url)!r} has no hostname "
-            "component; cannot be allowlisted."
-        )
-
-    hostname_lower = hostname.lower()
+    hostname_lower = parts.hostname.lower()
     allowed_lower = {h.lower() for h in allowed_hosts}
     if hostname_lower not in allowed_lower:
         raise ValueError(
-            f"Host {hostname!r} is not in allowed_hosts={allowed_hosts!r}."
+            f"Host {parts.hostname!r} is not in allowed_hosts={allowed_hosts!r}."
         )
 
 

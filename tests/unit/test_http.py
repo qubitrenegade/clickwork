@@ -448,6 +448,67 @@ class TestAllowedHosts:
             with pytest.raises(ValueError, match="empty list"):
                 http.get("https://api.cloudflare.com/", allowed_hosts=[])
 
+    def test_rejects_hostless_url_even_when_allowlist_disabled(self):
+        """Hostless URLs (``https:///path``) are rejected even with ``allowed_hosts=None``.
+
+        WHY: the public docstrings say ``url`` must be absolute (e.g.
+        ``https://host/path``). A hostless URL like ``https:///missing``
+        violates that contract. With an allowlist populated, the host
+        check catches this (hostname is ``None`` -> ValueError).
+        Without an allowlist, the earlier code path skipped straight
+        to urllib, which surfaces the same problem as a less-actionable
+        ``URLError: <urlopen error no host given>`` several layers
+        deeper. Rejecting at the guard gives a clean, sanitized
+        ValueError consistent with every other guard error.
+
+        This also fails closed on an edge case an attacker could
+        exploit with creative URL construction: the scheme guard
+        accepts http/https, the allowlist is opted out via None,
+        and a hostless URL could in principle reach urlopen. Even
+        though urllib refuses to execute such requests, the failure
+        mode should be a crisp clickwork-level error, not a stdlib
+        one.
+        """
+        from clickwork import http
+
+        def _urlopen_must_not_run(*args, **kwargs):
+            raise AssertionError(
+                "urlopen was called despite hostless URL; the guard "
+                "should have rejected it first."
+            )
+
+        with patch("clickwork.http._dispatch_request", side_effect=_urlopen_must_not_run):
+            with pytest.raises(ValueError, match="hostname"):
+                http.get("https:///missing-host", allowed_hosts=None)
+
+    def test_hostless_url_error_message_is_sanitized(self):
+        """The hostless-URL guard error strips credentials/query via the sanitizer.
+
+        WHY: same discipline as the scheme-guard error -- userinfo
+        or query params in the rejected URL must not leak through
+        ``str(ValueError)`` into logs or tracebacks. The error
+        message funnels through ``_sanitize_url_for_log`` which
+        drops userinfo, query, and fragment.
+        """
+        from clickwork import http
+
+        with patch("clickwork.http._dispatch_request"):
+            try:
+                http.get(
+                    "https://user:super-secret-token@/path?api_key=leaked",
+                    allowed_hosts=None,
+                )
+            except ValueError as err:
+                msg = str(err)
+                assert "super-secret-token" not in msg
+                assert "user" not in msg
+                assert "api_key" not in msg
+                assert "leaked" not in msg
+            else:
+                raise AssertionError(
+                    "Expected ValueError for hostless URL under allowed_hosts=None"
+                )
+
     def test_rejects_non_http_scheme_file(self):
         """file:// URLs are rejected before any urlopen call.
 
