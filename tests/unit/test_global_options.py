@@ -21,6 +21,7 @@ These tests build minimal inline Click CLIs to keep each test focused on the
 parsing/merge behaviour of add_global_option itself. A single end-of-file
 integration test confirms it also works with ``clickwork.create_cli()``.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -404,6 +405,7 @@ class TestAddGlobalOptionEntryPointPropagation:
         """A plugin command loaded via entry point sees ctx.find_root().meta['json']."""
         import click
         from click.testing import CliRunner
+
         from clickwork.discovery import discover_commands_from_entrypoints
 
         captured: dict = {}
@@ -474,6 +476,7 @@ class TestAddGlobalOptionEntryPointPropagation:
         """
         import click
         from click.testing import CliRunner
+
         from clickwork.discovery import discover_commands_from_entrypoints
 
         class FakeEntryPoint:
@@ -519,9 +522,7 @@ class TestAddGlobalOptionEntryPointPropagation:
         assert "plugin-cmd" in result.output
         assert "--json" in result.output
 
-    def test_global_option_flag_collision_on_nested_subcommand_raises(
-        self, monkeypatch
-    ) -> None:
+    def test_global_option_flag_collision_on_nested_subcommand_raises(self, monkeypatch) -> None:
         """Collision on a nested subcommand of a loaded group also raises.
 
         WHY this test exists: the runtime check walks the LOADED command's
@@ -537,6 +538,7 @@ class TestAddGlobalOptionEntryPointPropagation:
         """
         import click
         from click.testing import CliRunner
+
         from clickwork.discovery import discover_commands_from_entrypoints
 
         class FakeEntryPoint:
@@ -581,8 +583,7 @@ class TestAddGlobalOptionEntryPointPropagation:
             f"got exit={result.exit_code}, output={result.output!r}"
         )
         assert "sub" in result.output, (
-            f"Error message must name the colliding subcommand path; got "
-            f"output={result.output!r}"
+            f"Error message must name the colliding subcommand path; got output={result.output!r}"
         )
         assert "--json" in result.output
 

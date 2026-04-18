@@ -55,3 +55,22 @@ filterwarnings = [
 markers = [
     "network: requires network access (pip install, HTTP calls)",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Conservative initial rule selection. Expand in follow-up PRs once the
+# project settles into a house style.
+#   E, W  — pycodestyle errors + warnings
+#   F     — pyflakes (undefined names, unused imports, etc.)
+#   B     — flake8-bugbear (likely bugs)
+#   I     — isort (import ordering)
+#   UP    — pyupgrade (modern Python idioms)
+select = ["E", "F", "W", "B", "I", "UP"]
+ignore = []
+
+[tool.ruff.format]
+# Use ruff's defaults. Don't set quote-style / indent-style unless/until the
+# project adopts an explicit house style.

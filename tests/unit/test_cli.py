@@ -10,13 +10,14 @@ Test structure:
 - TestFrameworkErrorHandling: tests that unhandled exceptions exit with code 2
 - TestPassCliContextDecorator: tests the @pass_cli_context decorator
 """
+
+import sys
 from pathlib import Path
 from unittest.mock import patch
-import sys
 
 import click
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 
 class TestCreateCli:
@@ -97,7 +98,6 @@ class TestCreateCli:
         The CliContext carries all of that from the group callback.
         """
         from clickwork.cli import create_cli
-        from clickwork._types import CliContext
 
         received_ctx = {}
 
@@ -317,7 +317,7 @@ class TestCreateCli:
 
 
 class TestEnableParentPackageImports:
-    """create_cli(enable_parent_package_imports=True) inserts commands_dir.parent.parent into sys.path.
+    """enable_parent_package_imports=True inserts commands_dir.parent.parent into sys.path.
 
     WHY this feature exists: plugin authors want their command files to be able
     to ``from tools.lib.X import Y`` without having to add sys.path boilerplate
@@ -615,8 +615,8 @@ class TestConvenienceMethods:
         ctx-level forwarding shape, mirroring the symmetry of
         test_ctx_run_forwards_stdin_text / test_ctx_run_with_confirm_forwards_stdin_text.
         """
-        from clickwork.cli import create_cli
         from clickwork._types import Secret
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -778,8 +778,8 @@ class TestFrameworkErrorHandling:
         framework bug. Exit code 1 tells CI it's a fixable configuration
         error, not an internal failure.
         """
-        from clickwork.cli import create_cli
         from clickwork._types import PrerequisiteError
+        from clickwork.cli import create_cli
 
         @click.command()
         @click.pass_obj
@@ -885,9 +885,7 @@ class TestClickExceptionHandling:
         assert "myfile.txt" in result.output
         assert "file not found" in result.output
 
-    def test_generic_click_exception_exits_1_without_internal_prefix(
-        self, tmp_path: Path
-    ):
+    def test_generic_click_exception_exits_1_without_internal_prefix(self, tmp_path: Path):
         """A plain click.ClickException should exit 1 with Click's own format.
 
         WHY: Plugin authors sometimes raise ClickException directly to signal
@@ -927,8 +925,8 @@ class TestPassCliContextDecorator:
         remembering to call ensure_object(). It also gives a clear error
         if the command is somehow invoked outside a create_cli() harness.
         """
-        from clickwork.cli import create_cli, pass_cli_context
         from clickwork._types import CliContext
+        from clickwork.cli import create_cli, pass_cli_context
 
         received = {}
 

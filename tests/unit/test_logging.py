@@ -5,9 +5,8 @@ verbosity levels driven by CLI flags, and automatic color detection. It's the
 first thing the CLI sets up, so it must be reliable and have no side effects
 when imported.
 """
-import logging
 
-import pytest
+import logging
 
 
 class TestSetupLogging:

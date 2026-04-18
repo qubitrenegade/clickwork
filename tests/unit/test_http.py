@@ -40,20 +40,20 @@ around the custom no-redirect opener; patching it gives tests a
 single, stable seam (see ``clickwork.http._dispatch_request`` for
 why the custom opener exists).
 """
+
 from __future__ import annotations
 
 import base64
-import json
 import logging
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_response(
     *,
@@ -116,7 +116,7 @@ def _capture_request() -> tuple[MagicMock, list]:
         # Record (request, kwargs) so tests can inspect both the Request
         # payload and the timeout that urlopen received.
         captured.append((req, kwargs))
-        return _make_response(body=b'{}', content_type="application/json")
+        return _make_response(body=b"{}", content_type="application/json")
 
     mock.side_effect = _side_effect
     return mock, captured
@@ -125,6 +125,7 @@ def _capture_request() -> tuple[MagicMock, list]:
 # ---------------------------------------------------------------------------
 # GET: response parsing
 # ---------------------------------------------------------------------------
+
 
 class TestGetResponseParsing:
     """Response body decoding rules: JSON auto-parse vs raw bytes."""
@@ -147,7 +148,8 @@ class TestGetResponseParsing:
         from clickwork import http
 
         resp = _make_response(
-            body=b'{"ok": true}', content_type="application/json; charset=utf-8",
+            body=b'{"ok": true}',
+            content_type="application/json; charset=utf-8",
         )
         with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
@@ -188,7 +190,8 @@ class TestGetResponseParsing:
         from clickwork import http
 
         resp = _make_response(
-            body=b'not really json', content_type="application/jsonx",
+            body=b"not really json",
+            content_type="application/jsonx",
         )
         with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
@@ -200,6 +203,7 @@ class TestGetResponseParsing:
 # ---------------------------------------------------------------------------
 # Auth handling
 # ---------------------------------------------------------------------------
+
 
 class TestAuthHeaders:
     """bearer_token / basic_auth / explicit headers precedence."""
@@ -252,8 +256,12 @@ class TestAuthHeaders:
         from clickwork._types import Secret
 
         mock, captured = _capture_request()
-        with patch("clickwork.http._dispatch_request", mock), caplog.at_level(
-            logging.DEBUG, logger="clickwork.http",
+        with (
+            patch("clickwork.http._dispatch_request", mock),
+            caplog.at_level(
+                logging.DEBUG,
+                logger="clickwork.http",
+            ),
         ):
             http.get("https://example.com/api", bearer_token=Secret("supertok"))
 
@@ -275,8 +283,12 @@ class TestAuthHeaders:
         from clickwork._types import Secret
 
         mock, captured = _capture_request()
-        with patch("clickwork.http._dispatch_request", mock), caplog.at_level(
-            logging.DEBUG, logger="clickwork.http",
+        with (
+            patch("clickwork.http._dispatch_request", mock),
+            caplog.at_level(
+                logging.DEBUG,
+                logger="clickwork.http",
+            ),
         ):
             http.get(
                 "https://example.com/api",
@@ -296,6 +308,7 @@ class TestAuthHeaders:
 # Logging / redaction
 # ---------------------------------------------------------------------------
 
+
 class TestLoggingRedaction:
     """Log lines must redact auth material; never leak tokens."""
 
@@ -303,8 +316,12 @@ class TestLoggingRedaction:
         from clickwork import http
 
         mock = MagicMock(return_value=_make_response(body=b"{}"))
-        with patch("clickwork.http._dispatch_request", mock), caplog.at_level(
-            logging.DEBUG, logger="clickwork.http",
+        with (
+            patch("clickwork.http._dispatch_request", mock),
+            caplog.at_level(
+                logging.DEBUG,
+                logger="clickwork.http",
+            ),
         ):
             http.get("https://example.com/api", bearer_token="topsecret")
 
@@ -319,13 +336,15 @@ class TestLoggingRedaction:
 # Error handling
 # ---------------------------------------------------------------------------
 
+
 class TestHttpError:
     """Non-2xx responses become HttpError; transport errors propagate."""
 
     def test_get_raises_http_error_on_non_2xx(self):
         """404 with JSON body -> HttpError with parsed body + all attrs."""
-        from clickwork import http
         from urllib.error import HTTPError
+
+        from clickwork import http
 
         # urllib hands non-2xx responses to us via HTTPError, which has
         # a read()-able file-like body and a headers object. We build one
@@ -351,8 +370,9 @@ class TestHttpError:
         }
 
     def test_get_http_error_body_kept_as_bytes_when_not_json(self):
-        from clickwork import http
         from urllib.error import HTTPError
+
+        from clickwork import http
 
         err = HTTPError(
             url="https://example.com/api",
@@ -373,6 +393,7 @@ class TestHttpError:
 # ---------------------------------------------------------------------------
 # Allowlist
 # ---------------------------------------------------------------------------
+
 
 class TestAllowedHosts:
     """Per-call URL allowlist preflight."""
@@ -473,8 +494,7 @@ class TestAllowedHosts:
 
         def _urlopen_must_not_run(*args, **kwargs):
             raise AssertionError(
-                "urlopen was called despite hostless URL; the guard "
-                "should have rejected it first."
+                "urlopen was called despite hostless URL; the guard should have rejected it first."
             )
 
         with patch("clickwork.http._dispatch_request", side_effect=_urlopen_must_not_run):
@@ -550,6 +570,7 @@ class TestAllowedHosts:
 # Empty / malformed body handling
 # ---------------------------------------------------------------------------
 
+
 class TestEmptyBodyHandling:
     """204/empty-body responses with JSON Content-Type don't crash."""
 
@@ -567,7 +588,9 @@ class TestEmptyBodyHandling:
         from clickwork import http
 
         resp = _make_response(
-            status=204, body=b"", content_type="application/json",
+            status=204,
+            body=b"",
+            content_type="application/json",
         )
         with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
@@ -580,7 +603,8 @@ class TestEmptyBodyHandling:
         from clickwork import http
 
         resp = _make_response(
-            body=b"   \n\t  ", content_type="application/json",
+            body=b"   \n\t  ",
+            content_type="application/json",
         )
         with patch("clickwork.http._dispatch_request", return_value=resp):
             result = http.get("https://example.com/api")
@@ -830,6 +854,7 @@ class TestRedirectsDisabled:
     def test_3xx_redirect_raises_http_error_instead_of_following(self):
         """A 302 with Location to another host must raise HttpError, not follow."""
         import urllib.error
+
         from clickwork import http
 
         # Build a urllib HTTPError carrying the 302 status + Location header,
@@ -885,6 +910,7 @@ class TestHttpErrorMessageSanitization:
     def test_http_error_url_attribute_is_sanitized(self):
         """HttpError.url strips userinfo and query string."""
         import urllib.error
+
         from clickwork import http
 
         def _raise_404(req, *args, **kwargs):
@@ -917,7 +943,6 @@ class TestHttpErrorMessageSanitization:
 
 
 class TestTimeout:
-
     def test_timeout_forwarded_to_urlopen(self):
         from clickwork import http
 
@@ -932,6 +957,7 @@ class TestTimeout:
 # ---------------------------------------------------------------------------
 # post / put / delete sanity
 # ---------------------------------------------------------------------------
+
 
 class TestBodyMethods:
     """post/put/delete round-trip JSON bodies correctly."""
