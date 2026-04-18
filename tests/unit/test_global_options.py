@@ -217,7 +217,12 @@ class TestAddGlobalOptionSnapshotSemantics:
         runner = CliRunner()
         result = runner.invoke(root, ["fresh", "--json"])
 
-        assert result.exit_code != 0
+        # Click uses exit code 2 specifically for UsageError (its standard
+        # classification for "bad CLI invocation"). Tighten from `!= 0` to
+        # `== 2` so we catch a regression where some unrelated exit code
+        # (e.g. 1 from a thrown exception in a callback) would otherwise
+        # let this test silently pass.
+        assert result.exit_code == 2
         # Click's canonical phrasing for unknown options is "no such option".
         assert "no such option" in result.output.lower()
 

@@ -60,8 +60,12 @@ def add_global_option(
     option's Python-identifier name (e.g., ``--foo-bar`` -> ``meta['foo_bar']``).
     Read it from command callbacks via::
 
+        # For add_global_option(cli, "--json", is_flag=True) the meta key
+        # is "json" (Click's standard param-decl-to-name derivation). Use
+        # whatever key your flag derives to -- ``--my-flag`` -> ``"my_flag"``,
+        # ``--api-url`` -> ``"api_url"``, etc.
         root_meta = click.get_current_context().find_root().meta
-        value = root_meta[name]
+        is_json = root_meta["json"]
 
     Merge semantics:
         * Flags (``is_flag=True``) use **OR across levels**: a truthy value
