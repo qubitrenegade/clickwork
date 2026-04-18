@@ -279,6 +279,15 @@ cli = create_cli(name="my-tool", commands_dir=..., config_schema=CONFIG_SCHEMA)
 When both an explicit mapping and an auto-prefixed var could provide
 the same key, the explicit mapping wins.
 
+Env-var values always arrive as strings from the OS. If your schema
+declares `type: int`, `type: float`, or `type: bool` for a key that
+might be set via env var, the loader coerces the string into the
+declared type automatically. See
+[Environment Variable Types](#environment-variable-types) below for
+the coercion rules -- bool parsing in particular has a fixed
+allowlist that avoids the classic `bool("false") == True`
+foot-cannon.
+
 ### Config Schema
 
 Schemas are optional but recommended for production CLIs. They provide
@@ -308,8 +317,12 @@ Schema features:
 
 - **`required: True`** -- Raises `ConfigError` if the key is missing
   after all layers merge.
-- **`type: str`** (or `int`, `bool`, etc.) -- Validates the resolved
-  value matches the expected type.
+- **`type: str`** (or `int`, `bool`, `float`) -- Validates the resolved
+  value matches the expected type. For **any string-sourced value**
+  (env var or TOML string literal), also
+  performs coercion to the declared type -- see
+  [Environment Variable Types](#environment-variable-types) below for
+  the exact rules and the bool allowlist.
 - **`default: "value"`** -- Fills missing keys after all layers merge
   but before validation.
 - **`env: "VAR_NAME"`** -- Explicit env var mapping (overrides auto-prefix).
@@ -317,6 +330,104 @@ Schema features:
   is checked into git). The resolved value is automatically wrapped in a
   `Secret()` instance that redacts itself in logs and string formatting.
 - **`description: "..."`** -- Documentation only, ignored by the framework.
+
+### Environment Variable Types
+
+Environment variables at the OS level are **always strings**.
+`os.environ` is `dict[str, str]`, and the kernel-level `environ`
+array is a list of `NAME=value` byte strings -- there is no such
+thing as an "integer environment variable." That means when a
+plugin author declares a schema key like `{"port": {"type": int}}`
+and the value arrives via `MY_TOOL_PORT=8080`, *something* has to
+convert the string `"8080"` into the integer `8080` before the
+command code uses it.
+
+clickwork pins that conversion at the **schema layer**. When the
+loader finishes merging all layers and the schema declares a non-
+`str` `type`, the loader coerces any string value in the merged
+config dict to the declared type before returning it in
+`ctx.config`. The rule is uniform across sources: the coercion
+applies to env vars, TOML string literals (`port = "8080"`), and
+TOML string literals alike -- whichever source produced the
+string, the same coercion fires. The caller never has to write
+`int(os.environ["PORT"])` by hand, and a TOML author who quoted the
+value by mistake still gets a usable int.
+
+Pinning coercion at the schema layer (rather than the caller or the
+env-var reader) means:
+
+- Env vars and TOML values behave the same at the call site.
+  `ctx.config["port"]` is an int whether it came from
+  `port = 8080` in TOML or `MY_TOOL_PORT=8080` in the shell.
+- String literals in TOML coerce too. A `.test-cli.toml` that
+  contains `port = "8080"` under `type: int` produces the int
+  `8080` in `ctx.config["port"]`, matching what an env var would
+  have delivered.
+- Conversion errors surface at CLI startup (during `load_config`)
+  rather than halfway through a deploy when a command does
+  arithmetic on a string. You get a `ConfigError` naming the key
+  and the offending value (redacted to `<redacted>` if the schema
+  marks the key as `secret: True`).
+- The coercion table is small, stdlib-only, and deliberately
+  explicit about bools so Python's classic `bool("false") == True`
+  foot-cannon never bites you.
+
+The supported `type` values and their string-source coercion rules:
+
+| Schema `type` | String input | Result | Failure mode |
+|---------------|--------------|--------|--------------|
+| `str` | `"hello"` | `"hello"` (unchanged) | Never fails -- strings are strings. |
+| `int` | `"8080"` | `8080` (base 10) | `ConfigError` on non-integer text (`"3.14"`, `"abc"`). |
+| `float` | `"3.14"` | `3.14` | `ConfigError` on non-numeric text. |
+| `bool` | `"true"`, `"1"`, `"yes"`, `"on"` | `True` | `ConfigError` on anything outside the allowlist. |
+| `bool` | `"false"`, `"0"`, `"no"`, `"off"` | `False` | See above. |
+
+Boolean parsing is **case-insensitive** (`"TRUE"`, `"True"`, and
+`"true"` all produce `True`) but the allowlist is fixed. Tokens like
+`"maybe"`, `"enabled"`, or `"y"` raise `ConfigError` rather than
+silently defaulting either way. If you need looser parsing, do it
+in your command code before feeding the value to clickwork.
+
+Values that already carry the declared type pass through unchanged.
+TOML's native typing means `port = 8080` parses as `int` and skips
+coercion entirely -- the schema `type` check still runs, but
+there's nothing to convert. Only *string* values in the merged
+config dict take the coercion path.
+
+Worked TOML-string example: given the schema
+`{"port": {"type": int}}` and a repo config containing
+`port = "8080"` (quoted string literal), the loader coerces the
+string and `ctx.config["port"]` is the int `8080` -- identical to
+what `port = 8080` (unquoted int) would have produced.
+
+Without a schema, string values stay as strings in `ctx.config`.
+The schema's `type` declaration is the explicit opt-in for
+coercion; there is no heuristic "looks like a number, must be a
+number" detection.
+
+Example combining all of the above:
+
+```python
+CONFIG_SCHEMA = {
+    "port": {
+        "type": int,
+        "default": 8080,
+        "description": "HTTP listener port; honours MY_TOOL_PORT.",
+    },
+    "debug": {
+        "type": bool,
+        "default": False,
+    },
+    "api_token": {
+        "secret": True,
+        "env": "MY_TOOL_API_TOKEN",
+    },
+}
+```
+
+With `MY_TOOL_PORT=9090 MY_TOOL_DEBUG=true my-tool deploy`, the
+command sees `ctx.config["port"] == 9090` (int) and
+`ctx.config["debug"] is True`.
 
 ## Subprocess Helpers
 
