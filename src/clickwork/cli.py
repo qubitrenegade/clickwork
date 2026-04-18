@@ -245,16 +245,27 @@ def create_cli(
             don't stack duplicate entries (known limitation: the dedup
             does not normalize *existing* ``sys.path`` entries that were
             added via relative/unresolved spellings elsewhere).
-        strict: When True, any command-discovery failure (broken import,
-            missing ``cli`` attribute, ``cli`` not a Click command, duplicate
-            command name, or a failed entry-point wrap) raises
+        strict: When True, any command-discovery failure raises
             ``ClickworkDiscoveryError`` at CLI construction time instead of
-            silently dropping the command with a warning. Use this for
-            production CLIs and release validation where shipping a binary
-            with a missing command is a bug. Defaults to False to preserve
-            the forgiving dev-mode behaviour so upgraders see no change
-            unless they opt in. Keyword-only to keep the positional
-            signature stable. See issue #42 for the full rationale.
+            silently dropping the command with a warning. Failure modes
+            that count: broken import, missing ``cli`` attribute, ``cli``
+            not a Click command, duplicate command name WITHIN a single
+            discovery mechanism (two files in the same ``commands/`` dir,
+            or two installed entry points), and failed entry-point wraps.
+
+            Scope note: in ``discovery_mode="auto"``, a name conflict
+            BETWEEN a local command file and an installed entry point is
+            intentional shadowing (local wins, the installed command is
+            still reachable via fully-qualified import). This cross-
+            mechanism shadowing is NOT a strict-mode failure; only
+            same-mechanism duplicates are.
+
+            Use this flag for production CLIs and release validation
+            where shipping a binary with a missing command is a bug.
+            Defaults to False to preserve the forgiving dev-mode
+            behaviour so upgraders see no change unless they opt in.
+            Keyword-only to keep the positional signature stable. See
+            issue #42 for the full rationale.
 
     Returns:
         A configured Click group with all discovered commands registered.

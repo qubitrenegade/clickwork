@@ -56,8 +56,10 @@ ENTRY_POINT_GROUP = "clickwork.commands"
 
 # WHY a string-valued category instead of an enum: the set of failure modes
 # is small and unlikely to grow, callers rarely care to switch on it
-# programmatically, and plain strings keep the exception trivially
-# serialisable (logging, JSON error reporters, subprocess output). If
+# programmatically, and plain strings are trivially loggable / easy to
+# grep for. (The surrounding DiscoveryFailure dataclass carries ``Path``
+# and exception instances too, so the full struct isn't JSON-serialisable
+# as-is -- the category string is just a small stable-typed tag.) If
 # downstream code needs to branch on the category, the current values are
 # documented here and stable across minor versions.
 #
