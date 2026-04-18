@@ -127,11 +127,18 @@ jobs:
         # and one overrides the other non-deterministically. Resolve to
         # exactly one path and fail loudly otherwise.
         run: |
-          WHEEL=$(ls dist/*.whl)
-          if [ "$(printf '%s\n' "$WHEEL" | wc -l)" -ne 1 ]; then
-            echo "expected exactly one wheel, got: $WHEEL"
+          # Use bash glob with nullglob so zero matches produce an empty
+          # array (not a literal 'dist/*.whl' string) and we can emit a
+          # clean error message. Without nullglob + the ls(1) pipeline,
+          # an empty dist/ directory would trip 'set -e' inside ls before
+          # our explicit count check ran.
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "expected exactly one wheel, got: ${wheels[*]:-<none>}"
             exit 1
           fi
+          WHEEL="${wheels[0]}"
           uv venv --python 3.13 /tmp/wheel-smoke
           /tmp/wheel-smoke/bin/pip install "$WHEEL" pytest pytest-mock
           cp -r tests /tmp/wheel-smoke-tests
@@ -164,11 +171,16 @@ jobs:
         # /tmp/sdist-smoke* (not /tmp/wheel-smoke*) so CI logs make it
         # unambiguous which artifact is being exercised at each step.
         run: |
-          SDIST=$(ls dist/*.tar.gz)
-          if [ "$(printf '%s\n' "$SDIST" | wc -l)" -ne 1 ]; then
-            echo "expected exactly one sdist, got: $SDIST"
+          # Same nullglob pattern as the wheel step -- empty dist/ must
+          # produce a readable error, not a spurious 'ls: cannot access'
+          # that trips set -e before our count check.
+          shopt -s nullglob
+          sdists=(dist/*.tar.gz)
+          if [ "${#sdists[@]}" -ne 1 ]; then
+            echo "expected exactly one sdist, got: ${sdists[*]:-<none>}"
             exit 1
           fi
+          SDIST="${sdists[0]}"
           uv venv --python 3.13 /tmp/sdist-smoke
           /tmp/sdist-smoke/bin/pip install "$SDIST" pytest pytest-mock
           cp -r tests /tmp/sdist-smoke-tests
