@@ -587,7 +587,13 @@ class TestLoadEnvFile:
         reason="POSIX file-mode semantics don't apply on Windows",
     )
     def test_load_env_file_rejects_world_readable_file(self, tmp_path: Path):
-        """A .env file commonly holds secrets; refuse anything looser than 0o600."""
+        """A .env file commonly holds secrets; any group/other bit rejects it.
+
+        The implementation forbids any group or other permission bit
+        (read, write, or execute) -- not just "looser than 0o600". Modes
+        like 0o400 or 0o700 pass the check; 0o644 here fails because
+        group/other have the read bit set.
+        """
         import os
         from clickwork.config import load_env_file, ConfigError
 

@@ -381,7 +381,7 @@ def load_env_file(path: Path) -> dict[str, str]:
             # output. Just the line number is enough for the caller to
             # open the file and find the bad line.
             raise ConfigError(
-                f"line {lineno}: malformed entry (no '=' separator)"
+                f"{path}: line {lineno}: malformed entry (no '=' separator)"
             )
 
         # Keys are trimmed; values are *not* trimmed beyond outer whitespace.
@@ -397,7 +397,7 @@ def load_env_file(path: Path) -> dict[str, str]:
         # echo the bad line because it may contain secrets.)
         if not key:
             raise ConfigError(
-                f"line {lineno}: empty key (missing name before '=')"
+                f"{path}: line {lineno}: empty key (missing name before '=')"
             )
 
         # Unwrap matching surrounding quotes. We only strip quotes when the
