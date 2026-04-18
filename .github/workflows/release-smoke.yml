@@ -77,7 +77,11 @@ jobs:
           wheels = glob.glob("dist/*.whl")
           assert len(wheels) == 1, f"expected exactly one wheel, found {wheels}"
           whl = wheels[0]
-          names = zipfile.ZipFile(whl).namelist()
+          # Use the ZipFile as a context manager so the file handle is
+          # released deterministically instead of waiting for GC. Matters
+          # on Windows where GC timing can leave the archive locked.
+          with zipfile.ZipFile(whl) as zf:
+              names = zf.namelist()
           assert "clickwork/py.typed" in names, (
               f"py.typed missing: {[n for n in names if 'clickwork' in n]}"
           )
@@ -144,7 +148,7 @@ jobs:
       - name: Clean up wheel venv
         # Run after the wheel test so the sdist step starts from a clean
         # slate. `if: always()` so we still reset even if the wheel tests
-        # failed -- otherwise the sdist step inherits the wheel venv.
+        # failed -- otherwise the sdist step could inherit lingering state.
         if: always()
         run: rm -rf /tmp/wheel-smoke /tmp/wheel-smoke-tests
 
@@ -156,22 +160,24 @@ jobs:
         #
         # Same discipline as the wheel step: pin the venv to 3.13 via
         # `uv venv --python 3.13`, and resolve the sdist glob to exactly
-        # one path so a stale tarball can't sneak in.
+        # one path so a stale tarball can't sneak in. Uses
+        # /tmp/sdist-smoke* (not /tmp/wheel-smoke*) so CI logs make it
+        # unambiguous which artifact is being exercised at each step.
         run: |
           SDIST=$(ls dist/*.tar.gz)
           if [ "$(printf '%s\n' "$SDIST" | wc -l)" -ne 1 ]; then
             echo "expected exactly one sdist, got: $SDIST"
             exit 1
           fi
-          uv venv --python 3.13 /tmp/wheel-smoke
-          /tmp/wheel-smoke/bin/pip install "$SDIST" pytest pytest-mock
-          cp -r tests /tmp/wheel-smoke-tests
-          cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
+          uv venv --python 3.13 /tmp/sdist-smoke
+          /tmp/sdist-smoke/bin/pip install "$SDIST" pytest pytest-mock
+          cp -r tests /tmp/sdist-smoke-tests
+          cat > /tmp/sdist-smoke-tests/pytest.ini <<'INI'
           [pytest]
           filterwarnings =
               error
           markers =
               network: requires network access (pip install, HTTP calls)
           INI
-          cd /tmp/wheel-smoke-tests
-          /tmp/wheel-smoke/bin/python -m pytest -q -m "not network"
+          cd /tmp/sdist-smoke-tests
+          /tmp/sdist-smoke/bin/python -m pytest -q -m "not network"
