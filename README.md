@@ -96,6 +96,9 @@ working example with subcommand groups.
 - **[Architecture](docs/ARCHITECTURE.md)** -- Design decisions, module
   responsibilities, security model, and the reasoning behind non-obvious
   choices.
+- **[Security](docs/SECURITY.md)** -- What clickwork defends against,
+  what it leaves to the CLI author, threat model assumptions, and how
+  to report vulnerabilities.
 - **[Migrating 0.2.x to 1.0](docs/MIGRATING.md)** -- Breaking changes,
   new opt-in surfaces, and concrete before/after diffs for upgraders.
 
