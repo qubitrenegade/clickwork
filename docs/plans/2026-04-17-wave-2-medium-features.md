@@ -10,7 +10,7 @@
 | Issue | Decision |
 |-------|----------|
 | #9 | Standalone helper: `clickwork.config.load_env_file(path: Path) -> dict[str, str]`. Callers decide how to use the returned dict (inject into `os.environ`, pass as `env=` to `ctx.run`, etc.). **Not** integrated into `load_config()` — keeps the TOML pipeline focused on structured data. Shell-semantics scope is capped at: `KEY=value`, `export KEY=value`, `KEY="double-quoted"`, `KEY='single-quoted'`, `# comments`, blank lines. **No** variable substitution (`$OTHER`), no backticks, no heredocs, no multiline values. Same owner-only TOCTOU-safe permission check clickwork already applies to user config. |
-| #12 | Primary surface: decorator `@clickwork.platform_dispatch(linux=fn, windows=fn, macos=fn, macos_error="...")`. Also export the functional form `clickwork.platform.dispatch(ctx, *, linux=fn, windows=fn, ...)` as a public helper for the 20% of cases that need pre-dispatch logic in the command body. Any platform whose kwarg is `None` or omitted: raise `click.UsageError(f"{platform} not supported")` unless a `*_error` string kwarg provides a custom message. |
+| #12 | Primary surface: decorator `@clickwork.platform_dispatch(linux=fn, windows=fn, macos=fn, linux_error="...", windows_error="...", macos_error="...")`. Also export the functional form `clickwork.platform.dispatch(ctx, *, linux=fn, windows=fn, macos=fn, linux_error="...", windows_error="...", macos_error="...")` as a public helper for the 20% of cases that need pre-dispatch logic in the command body. Any platform whose impl kwarg is `None` or omitted: raise `click.UsageError(f"{platform} not supported")` unless that platform's matching `*_error` string kwarg provides a custom message. All three `*_error` kwargs are part of the public API (consistent surface; no "macOS is special" carve-out). |
 | #14 | Functional: `clickwork.add_global_option(cli, *param_decls, **option_kwargs)`. Installs the option at the root group + every group + every subcommand currently attached to `cli`. Value stashed on Click's `ctx.meta[<option_name>]`. **Resolution semantics:** flags (`is_flag=True`) OR across levels (any truthy wins); value options (string/int/etc.) innermost-wins. Both live under the same `ctx.meta[name]` key. |
 
 ## Branch + worktree layout
@@ -61,11 +61,13 @@
 
 **TDD:**
 1. Red: add tests in `tests/unit/test_platform.py`:
-   - Decorator form:
+   - Decorator form (use the `sys.platform` strings clickwork's own `is_linux/is_windows/is_macos` helpers check for — `"linux"`, `"win32"`, `"darwin"` respectively):
      - `test_platform_dispatch_linux_calls_linux_impl` — patch `sys.platform` to `"linux"`, decorated command calls `linux=fn`, assert `fn` received the expected args.
-     - Same for `windows` and `macos`.
+     - `test_platform_dispatch_windows_calls_windows_impl` — patch `sys.platform` to `"win32"` (not `"windows"` — that's what `is_windows()` checks for).
+     - `test_platform_dispatch_macos_calls_macos_impl` — patch `sys.platform` to `"darwin"`.
      - `test_platform_dispatch_unsupported_platform_raises_usage_error` — patch `sys.platform` to `"freebsd13"` (or any platform we don't wire), assert `click.UsageError`.
-     - `test_platform_dispatch_macos_error_kwarg_overrides_message` — `macos_error="not yet"` provided, `sys.platform="darwin"`, assert `UsageError` with that exact message.
+     - `test_platform_dispatch_linux_error_kwarg_overrides_message` — `linux=None, linux_error="not yet"`, `sys.platform="linux"`, assert `UsageError` with the custom message.
+     - Same pattern for `windows_error` and `macos_error`.
    - Functional form:
      - `test_dispatch_functional_linux` — `dispatch(ctx, linux=fn, windows=other, **kwargs)` on linux, assert `fn(**kwargs)` called.
      - `test_dispatch_functional_forwards_kwargs` — pass `extra="x"`, assert the selected impl received it.
