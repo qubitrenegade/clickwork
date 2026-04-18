@@ -338,8 +338,20 @@ def create_cli(
         # WHY not @functools.partial or a closure over a local name: both
         # would also freeze the reference at bind time. The only shape that
         # defers lookup is one that re-reads the module attribute each call,
-        # which this lambda does via ``_prereqs.require``.
-        cli_ctx.require = lambda *args, **kwargs: _prereqs.require(*args, **kwargs)
+        # which this wrapper does via ``_prereqs.require``.
+        #
+        # WHY @functools.wraps(_prereqs.require) on the wrapper: the import-
+        # time reference is used solely to copy the *signature* and docstring
+        # onto the wrapper (via __wrapped__), so ``inspect.signature`` and
+        # IDE tooling show the real ``(binary: str, authenticated: bool = ...)``
+        # parameters rather than the generic ``(*args, **kwargs)``. The
+        # wrapper's *body* still goes through ``_prereqs.require`` on every
+        # call, so patching remains effective.
+        @functools.wraps(_prereqs.require)
+        def _require_via_prereqs(*args, **kwargs):
+            return _prereqs.require(*args, **kwargs)
+
+        cli_ctx.require = _require_via_prereqs
 
         # confirm() and confirm_destructive() close over yes so --yes propagates.
         cli_ctx.confirm = lambda msg: _confirm(msg, yes=cli_ctx.yes)
