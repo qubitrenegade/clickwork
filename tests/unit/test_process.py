@@ -421,8 +421,13 @@ class TestRunWithSecrets:
         from clickwork.process import run_with_secrets
         from clickwork._types import Secret
 
-        # Child reads the env var we claim to have set and echoes it to
-        # stdout, so we can assert the delivery worked end-to-end.
+        # Child reads the env var we claim to have set and exits 0 iff
+        # the value matches -- we assert exit code here. The companion
+        # test below (``..._env_value_reaches_child``) pins the exact
+        # child stdout via ``capfd``; this one only verifies the
+        # successful-exit path so a regression where the env var never
+        # reaches the child still fails loudly (the child would exit
+        # non-zero with KeyError before ever writing to stdout).
         result = run_with_secrets(
             [
                 sys.executable,
@@ -431,13 +436,6 @@ class TestRunWithSecrets:
             ],
             secrets={"TOKEN": Secret("supersecret")},
         )
-        # Capture via subprocess.run-style assertion: rerun capturing.
-        # We use capture directly here for clarity, mirroring how the
-        # existing stdin_text test uses capfd.
-        # But since run_with_secrets delegates to run() (which inherits
-        # stdio), we need capfd-style capture. Use capsys via the capfd
-        # fixture form when this is called -- see the fixture-based test
-        # below. This positive path just asserts the return code.
         assert result is not None
         assert result.returncode == 0
 
@@ -577,6 +575,93 @@ class TestRunWithSecrets:
 
         assert result is None
         mock_popen.assert_not_called()
+
+    def test_run_with_secrets_dry_run_does_not_unwrap_secrets(self):
+        """dry_run=True must not call Secret.get() on any secret.
+
+        WHY: dry-run is "nothing happens" -- no subprocess, no file
+        writes, and (this test) no secret values pulled into memory.
+        A Secret whose .get() would otherwise raise (e.g. one backed by
+        a lazy source that errors during dry-run) must pass cleanly
+        through dry-run. We pin this by wrapping a Secret in a spy that
+        tracks every .get() call; the assertion is that it was called
+        ZERO times.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        unwrap_count = {"count": 0}
+
+        class _SpySecret(Secret):
+            """Secret that records every .get() invocation.
+
+            Inherits Secret so isinstance checks still fire; overrides
+            .get to increment the counter. We do NOT want the counter
+            touched during dry-run.
+            """
+
+            def get(self) -> str:
+                unwrap_count["count"] += 1
+                return super().get()
+
+        result = run_with_secrets(
+            [sys.executable, "-c", "print('never runs')"],
+            secrets={"TOKEN": _SpySecret("the-secret-value")},
+            stdin_secret="TOKEN",
+            dry_run=True,
+        )
+        assert result is None
+        assert unwrap_count["count"] == 0, (
+            f"dry_run=True must not unwrap any Secret; got "
+            f"{unwrap_count['count']} .get() call(s). A regression here "
+            "would mean dry-run is pulling secret values into process "
+            "memory, contradicting the docstring contract."
+        )
+
+    def test_run_with_secrets_rejects_non_str_non_secret_argv(self):
+        """cmd elements that aren't str and aren't Secret raise TypeError.
+
+        WHY: an earlier implementation silently dropped non-str elements
+        from cmd via an isinstance-filter, which could change the
+        command the child sees (if a PathLike, bytes, or int sneaked
+        through). The new guard validates every element is str after
+        the Secret-rejection step so the caller gets a loud error at
+        the offending index instead of a mysterious "command did the
+        wrong thing" bug at runtime.
+        """
+        from clickwork.process import run_with_secrets
+        from pathlib import Path
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                ["echo", Path("/tmp/nope")],
+                secrets={},
+            )
+        # The error must name the offending index so the caller can
+        # locate the bad arg without a traceback hunt.
+        assert "cmd[1]" in str(exc_info.value)
+        # Mention the type so the fix (str(path)) is obvious.
+        assert "PosixPath" in str(exc_info.value) or "WindowsPath" in str(exc_info.value) or "Path" in str(exc_info.value)
+
+    def test_run_with_secrets_rejects_non_list_cmd(self):
+        """cmd must be a list, not a tuple/str/other iterable.
+
+        WHY: matches the _validate_cmd guard run()/capture() already
+        enforce. A tuple would iterate fine in plain Python but
+        signals the caller is treating argv as something other than a
+        mutable list -- often a sign they came from a string.format
+        chain that should have been a list[str] to begin with. The
+        same list-only rule catches raw string commands (which is the
+        shell-injection footgun _validate_cmd was originally written
+        to prevent).
+        """
+        from clickwork.process import run_with_secrets
+
+        with pytest.raises(TypeError, match="cmd must be a list"):
+            run_with_secrets(
+                "echo hello",  # type: ignore[arg-type] -- the point of the test
+                secrets={},
+            )
 
     def test_run_with_secrets_merges_caller_env(self, capfd):
         """Caller-supplied env is merged with secrets; secrets win on key conflict.

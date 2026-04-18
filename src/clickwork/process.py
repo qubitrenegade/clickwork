@@ -671,12 +671,34 @@ def run_with_secrets(
         operators opt in to unredacted logging during local debugging.
         That's tracked as a separate issue; this helper always redacts.
     """
-    # 1. Argv guardrail. Run this BEFORE any logging / env building so
+    # 1. Same list-not-string guardrail as run() / capture() /
+    # run_with_confirm. Callers who pass a tuple or a raw string would
+    # otherwise slip past the argv iteration below and bypass the
+    # shell-injection contract the other helpers enforce. _validate_cmd
+    # only checks isinstance(cmd, list), so our declared
+    # list[str | Secret] element typing still goes through it cleanly.
+    _validate_cmd(cmd)
+
+    # 2. Argv guardrail. Run this BEFORE any logging / env building so
     # the rejection happens as early as possible and can't accidentally
     # surface the secret through a pre-check log line.
     _validate_no_secret_in_argv(cmd)
 
-    # 2. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
+    # 3. After the Secret check, every element must be a plain str. A
+    # PathLike, bytes, or int sneaking through would otherwise get
+    # silently dropped by the old filter-comprehension, changing the
+    # command the child sees. Fail loudly with the offending index so
+    # the caller knows exactly what to fix.
+    for idx, arg in enumerate(cmd):
+        if not isinstance(arg, str):
+            raise TypeError(
+                f"cmd[{idx}] must be a str; got {type(arg).__name__}. "
+                "run_with_secrets only accepts str (and Secret, which is "
+                "rejected separately as a guardrail). Convert paths with "
+                "str(path), ints with str(n), etc."
+            )
+
+    # 4. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
     # we touch Secret.get() for any reason, so a typo surfaces as a
     # clear ValueError with no secret material in flight.
     if stdin_secret is not None and stdin_secret not in secrets:
@@ -687,10 +709,43 @@ def run_with_secrets(
             "The name must match one of the keys you pass in `secrets`."
         )
 
-    # 3. Build the full env for the subprocess. Caller's env goes first
+    # After validation, every cmd element is a plain str -- the element
+    # typing is list[str | Secret] at the API boundary, but the runtime
+    # is guaranteed narrower. Cast via list() so downstream helpers
+    # (run, _format_cmd) get the concrete list[str] they expect.
+    plain_cmd: list[str] = list(cmd)  # type: ignore[arg-type]
+
+    stdin_display = (
+        f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
+    )
+
+    # 5. Dry-run short-circuit. Docstring promises dry_run does not
+    # pull secret values into memory. Honouring that means bailing out
+    # BEFORE Secret.get() on any entry of ``secrets`` -- only the
+    # caller-supplied ``env`` (which is already plain strings) and the
+    # secret KEYS (not values) appear in the dry-run log.
+    if dry_run:
+        base_env_for_log: dict[str, str] = dict(env) if env is not None else {}
+        # Show the secret keys as NAME=<redacted> in the dry-run log so
+        # an operator inspecting a dry-run can see the full env shape
+        # without any values having been read off the Secret objects.
+        redacted_secret_env = {name: "<redacted>" for name in secrets}
+        display_env = {**base_env_for_log, **redacted_secret_env}
+        logger.info(
+            "run_with_secrets [dry-run]: cmd=%s env=%s stdin=%s",
+            _format_cmd(plain_cmd),
+            # secret_keys = names we'd redact; in dry-run every secret
+            # is redacted regardless because we haven't unwrapped them.
+            _format_env_redacted(display_env, set(secrets)),
+            stdin_display,
+        )
+        return None
+
+    # 6. Build the full env for the subprocess. Caller's env goes first
     # so secrets win on key conflict -- the helper's job is to deliver
     # the secret, and a stale override from ``env`` would silently break
-    # that contract.
+    # that contract. Each Secret.get() is called EXACTLY ONCE and the
+    # result reused below for stdin delivery if needed.
     base_env: dict[str, str] = dict(env) if env is not None else {}
     secret_env = {name: s.get() for name, s in secrets.items()}
     full_env: dict[str, str] = {**base_env, **secret_env}
@@ -698,30 +753,21 @@ def run_with_secrets(
     # those values -- non-secret env vars stay plainly visible.
     secret_keys = set(secret_env.keys())
 
-    # 4. Resolve stdin payload (if requested) BEFORE logging so that if
-    # anything goes wrong we never emit a half-formed log line. Read
-    # via Secret.get() exactly once here; the value stays in this local
-    # and is passed by reference into run().
+    # 7. Resolve the stdin payload from the ALREADY-unwrapped secret_env
+    # dict rather than calling Secret.get() a second time -- one unwrap
+    # per secret keeps the "minimal touch" contract explicit.
     stdin_payload: str | None = None
     if stdin_secret is not None:
-        stdin_payload = secrets[stdin_secret].get()
+        stdin_payload = secret_env[stdin_secret]
 
-    # 5. Emit the helper's own log line. This is the SINGLE place where
+    # 8. Emit the helper's own log line. This is the SINGLE place where
     # the "secrets-in-play" subprocess launch is recorded. We log
     # BEFORE delegating to run() so:
-    #   - the argv (already validated Secret-free) appears once, here,
-    #     with full context (env + stdin redacted);
+    #   - the argv (already validated Secret-free and all-str) appears
+    #     once, here, with full context (env + stdin redacted);
     #   - run()'s own logging stays unchanged -- it never sees Secret
     #     objects, only plain strings, and during normal (non-dry-run)
     #     execution it doesn't log env at all (see process.run()).
-    # cast to list[str] for the formatter -- after _validate_no_secret_in_argv
-    # we know every element is a str, but the annotation is still
-    # list[str | Secret]; _format_cmd doesn't care about the nominal
-    # type, only that each element is str-compatible.
-    plain_cmd: list[str] = [a for a in cmd if isinstance(a, str)]
-    stdin_display = (
-        f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
-    )
     logger.info(
         "run_with_secrets: cmd=%s env=%s stdin=%s",
         _format_cmd(plain_cmd),
@@ -729,12 +775,13 @@ def run_with_secrets(
         stdin_display,
     )
 
-    # 6. Delegate. run() handles dry-run, signal forwarding, and stdin
-    # piping -- we deliberately reuse all of it instead of reinventing
-    # the wheel (and instead of teaching run() about Secret).
+    # 9. Delegate. run() handles signal forwarding and stdin piping --
+    # we reuse all of it instead of reinventing the wheel (and instead
+    # of teaching run() about Secret). dry_run was already handled
+    # above so we pass False here to make that explicit.
     return run(
         plain_cmd,
-        dry_run=dry_run,
+        dry_run=False,
         env=full_env,
         stdin_text=stdin_payload,
     )
