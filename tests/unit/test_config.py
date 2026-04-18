@@ -479,8 +479,9 @@ class TestLoadEnvFile:
     or inject into os.environ themselves. Keeping it standalone means
     the TOML pipeline stays focused on structured data, and the dotenv
     grammar stays deliberately tiny (no variable substitution, no
-    command substitution, no heredocs -- see the module docstring for
-    the explicit out-of-scope list).
+    command substitution, no heredocs -- see the load_env_file()
+    docstring itself for the explicit out-of-scope list; the module
+    docstring on config.py describes TOML layered config, not dotenv).
     """
 
     def test_load_env_file_parses_simple_key_value(self, tmp_path: Path):

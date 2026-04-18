@@ -162,14 +162,21 @@ def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
     mode = stat.S_IMODE(st.st_mode)
     # S_IRGRP = group-read bit, S_IROTH = other-read bit. Either being set
     # means the file is too permissive for secrets.
-    if mode & (stat.S_IRGRP | stat.S_IROTH):
+    # Reject ANY group/other permission bits (not just read). A file with
+    # mode 0o620 (owner rw, group w, other ---) has group-write, which
+    # means another user could *tamper* with our secrets file -- still a
+    # compromise even though they can't read it directly. S_IRWXG and
+    # S_IRWXO cover all of read/write/execute for group/other, matching
+    # the "chmod 600" remediation we recommend.
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
         # Shell-quote the path in the remediation hint so paths with
         # spaces or leading '-' characters remain safe to copy/paste into
         # a terminal. shlex.quote() wraps the string in single quotes
         # when needed and leaves safe paths unchanged.
         raise ConfigError(
             f"{kind} {path} has unsafe permission {oct(mode)} "
-            f"(readable by group/others). Secrets may be exposed.\n"
+            f"(accessible by group/others). Secrets may be exposed or "
+            f"tampered with.\n"
             f"Fix with: chmod 600 {shlex.quote(str(path))}"
         )
 
@@ -339,8 +346,15 @@ def load_env_file(path: Path) -> dict[str, str]:
         if not sep:
             # No '=' in the line -- we can't tell what the caller meant.
             # Refuse rather than silently dropping or misinterpreting.
+            #
+            # WHY we don't echo raw_line in the error: .env files are the
+            # canonical home for secrets (that's the whole point of this
+            # parser). If a malformed line contained a partial secret
+            # assignment, echoing raw_line would leak it into logs/CI
+            # output. Just the line number is enough for the caller to
+            # open the file and find the bad line.
             raise ConfigError(
-                f"line {lineno}: malformed entry (no '=' separator): {raw_line!r}"
+                f"line {lineno}: malformed entry (no '=' separator)"
             )
 
         # Keys are trimmed; values are *not* trimmed beyond outer whitespace.
@@ -352,9 +366,11 @@ def load_env_file(path: Path) -> dict[str, str]:
         # produce {"": "value"}, which is never a valid environment
         # variable name and will blow up later when passed to
         # subprocess/os.environ. Fail early with a clear line number.
+        # (Same no-raw-line policy as the separator error above -- don't
+        # echo the bad line because it may contain secrets.)
         if not key:
             raise ConfigError(
-                f"line {lineno}: empty key (missing name before '='): {raw_line!r}"
+                f"line {lineno}: empty key (missing name before '=')"
             )
 
         # Unwrap matching surrounding quotes. We only strip quotes when the
