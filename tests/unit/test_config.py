@@ -519,7 +519,7 @@ class TestEnvVarTypes:
         zero. The message names the key so the operator can fix the
         offending env var.
         """
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -538,7 +538,7 @@ class TestEnvVarTypes:
 
     def test_env_var_float_coercion_failure_raises(self, tmp_path: Path, monkeypatch):
         """Un-coercible float value raises ConfigError."""
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -556,7 +556,9 @@ class TestEnvVarTypes:
             )
 
     @pytest.mark.parametrize("truthy", ["true", "True", "TRUE", "1", "yes", "YES", "on", "On"])
-    def test_env_var_bool_truthy_strings_coerce_to_true(self, tmp_path: Path, monkeypatch, truthy: str):
+    def test_env_var_bool_truthy_strings_coerce_to_true(
+        self, tmp_path: Path, monkeypatch, truthy: str
+    ):
         """Explicit truthy-string set: true/1/yes/on (case-insensitive).
 
         WHY pin the exact set: Python's ``bool("false")`` is ``True``
@@ -582,7 +584,9 @@ class TestEnvVarTypes:
         assert config["enabled"] is True
 
     @pytest.mark.parametrize("falsy", ["false", "False", "FALSE", "0", "no", "NO", "off", "Off"])
-    def test_env_var_bool_falsy_strings_coerce_to_false(self, tmp_path: Path, monkeypatch, falsy: str):
+    def test_env_var_bool_falsy_strings_coerce_to_false(
+        self, tmp_path: Path, monkeypatch, falsy: str
+    ):
         """Explicit falsy-string set: false/0/no/off (case-insensitive)."""
         from clickwork.config import load_config
 
@@ -609,7 +613,7 @@ class TestEnvVarTypes:
         accepted tokens. This prevents the classic ``bool("false") ==
         True`` foot-cannon.
         """
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -711,7 +715,7 @@ class TestEnvVarTypes:
         into logs / stderr / CI output. Pinned so a future edit to
         the error path can't reintroduce the leak.
         """
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -749,7 +753,7 @@ class TestEnvVarTypes:
         over-eager redaction from swallowing useful diagnostics for
         regular keys.
         """
-        from clickwork.config import load_config, ConfigError
+        from clickwork.config import ConfigError, load_config
 
         config_file = tmp_path / ".test-cli.toml"
         config_file.write_text("[default]\n")
@@ -809,7 +813,7 @@ class TestEnvVarTypes:
         from clickwork.config import ConfigError, load_config
 
         config_path = tmp_path / ".my-tool.toml"
-        config_path.write_text('[default]\nport = true\n')
+        config_path.write_text("[default]\nport = true\n")
 
         schema = {"port": {"type": int}}
 
@@ -832,7 +836,7 @@ class TestEnvVarTypes:
         from clickwork.config import ConfigError, load_config
 
         config_path = tmp_path / ".my-tool.toml"
-        config_path.write_text('[default]\ndebug = 1\n')
+        config_path.write_text("[default]\ndebug = 1\n")
 
         schema = {"debug": {"type": bool}}
 

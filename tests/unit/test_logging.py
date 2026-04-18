@@ -178,8 +178,7 @@ class TestHostPreservingBehavior:
         non_null_stream_handlers = [
             h
             for h in clickwork_logger.handlers
-            if isinstance(h, logging.StreamHandler)
-            and not isinstance(h, logging.NullHandler)
+            if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.NullHandler)
         ]
         assert non_null_stream_handlers == [], (
             "clickwork should not attach its own StreamHandler when "
@@ -204,6 +203,7 @@ class TestHostPreservingBehavior:
         # Re-import clickwork's logging module fresh so the module-load
         # side effects re-run and we can observe them.
         import importlib
+
         import clickwork._logging
 
         importlib.reload(clickwork._logging)
@@ -212,9 +212,7 @@ class TestHostPreservingBehavior:
         # NullHandler attached. This is the "baseline" that prevents
         # stdlib's "no handlers" warning.
         clickwork_logger = logging.getLogger("clickwork")
-        has_null = any(
-            isinstance(h, logging.NullHandler) for h in clickwork_logger.handlers
-        )
+        has_null = any(isinstance(h, logging.NullHandler) for h in clickwork_logger.handlers)
         assert has_null, (
             f"clickwork logger must have a NullHandler baseline; "
             f"handlers are: {clickwork_logger.handlers}"
@@ -244,6 +242,7 @@ class TestHostPreservingBehavior:
         host's root handler. The 1.0 contract is propagate=True.
         """
         import importlib
+
         import clickwork._logging
 
         importlib.reload(clickwork._logging)
@@ -277,6 +276,7 @@ class TestHostPreservingBehavior:
         # root. Without the reload, module state from an earlier test
         # could pre-attach handlers and mask the "bare root" scenario.
         import importlib
+
         import clickwork._logging
 
         importlib.reload(clickwork._logging)
@@ -312,9 +312,7 @@ class TestHostPreservingBehavior:
         captured = capsys.readouterr()
         assert "standalone warn record" in captured.err
 
-    def test_stderr_handler_marker_survives_setup_logging_reinvocation(
-        self, reset_logging
-    ):
+    def test_stderr_handler_marker_survives_setup_logging_reinvocation(self, reset_logging):
         """setup_logging is idempotent: a second call updates-in-place, not stacks.
 
         Without the ``_clickwork_owned`` marker, the old
@@ -327,6 +325,7 @@ class TestHostPreservingBehavior:
         root = logging.getLogger()
         root.handlers = []
         import importlib
+
         import clickwork._logging
 
         importlib.reload(clickwork._logging)
@@ -341,8 +340,7 @@ class TestHostPreservingBehavior:
         logger = logging.getLogger(name)
         owned = [h for h in logger.handlers if getattr(h, "_clickwork_owned", False)]
         assert len(owned) == 1, (
-            f"setup_logging must not stack handlers on re-invocation; "
-            f"got: {logger.handlers}"
+            f"setup_logging must not stack handlers on re-invocation; " f"got: {logger.handlers}"
         )
         # Final level should reflect the LAST call (-v -> INFO).
         assert owned[0].level == logging.INFO

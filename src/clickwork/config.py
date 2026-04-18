@@ -56,7 +56,7 @@ def _coerce_value(
     value: object,
     expected_type: type,
     key: str,
-    key_schema: dict | None = None,
+    key_schema: dict[str, Any] | None = None,
 ) -> object:
     """Coerce a string value to ``expected_type``.
 
@@ -802,9 +802,7 @@ def load_config(
                 # here and coerces normally. Pass the schema entry into
                 # _coerce_value so the error path can redact the value
                 # for secret keys instead of echoing the raw token.
-                config[key] = _coerce_value(
-                    config[key], expected_type, key, key_schema
-                )
+                config[key] = _coerce_value(config[key], expected_type, key, key_schema)
                 # Post-coercion isinstance check is still the
                 # authoritative gate. If _coerce_value returned the
                 # value unchanged (unsupported target type, or a
@@ -820,11 +818,10 @@ def load_config(
                 # -- an int shouldn't satisfy ``type: bool``) to match
                 # the intent of the type declaration.
                 current = config[key]
-                wrong_bool_for_int = (
-                    expected_type is int and isinstance(current, bool)
-                )
+                wrong_bool_for_int = expected_type is int and isinstance(current, bool)
                 wrong_int_for_bool = (
-                    expected_type is bool and not isinstance(current, bool)
+                    expected_type is bool
+                    and not isinstance(current, bool)
                     and isinstance(current, int)
                 )
                 if (

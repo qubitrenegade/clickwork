@@ -390,9 +390,7 @@ class TestVersionFlag:
         from clickwork.cli import create_cli
 
         expected_version = importlib.metadata.version("clickwork")
-        cli = create_cli(
-            name="test-cli", commands_dir=tmp_path, package_name="clickwork"
-        )
+        cli = create_cli(name="test-cli", commands_dir=tmp_path, package_name="clickwork")
         runner = CliRunner()
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
@@ -429,6 +427,7 @@ class TestVersionFlag:
         # enough to contain only one version is enough to pin the
         # precedence rule.
         import importlib.metadata
+
         real_version = importlib.metadata.version("clickwork")
         if real_version != "override-9.9.9":  # sanity: they're different
             assert real_version not in result.output, (
@@ -734,9 +733,9 @@ class TestConvenienceMethods:
         assert result.exit_code == 0, f"CLI failed: {result.output!r}"
         assert received["returncode"] == 0
         captured = capfd.readouterr()
-        assert captured.out == "ctx-forwarded-token", (
-            f"Expected stdin payload to round-trip through ctx.run; got {captured.out!r}"
-        )
+        assert (
+            captured.out == "ctx-forwarded-token"
+        ), f"Expected stdin payload to round-trip through ctx.run; got {captured.out!r}"
 
     def test_ctx_run_with_confirm_forwards_stdin_text(self, tmp_path: Path, capfd):
         """ctx.run_with_confirm(stdin_text=...) must also forward.
