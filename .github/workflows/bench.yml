@@ -11,7 +11,13 @@ on:
 jobs:
   coldstart:
     name: import clickwork cold-start
-    runs-on: ubuntu-latest
+    # Pin to an exact runner image (not `ubuntu-latest`) because
+    # `ubuntu-latest` floats across OS image upgrades, and CPython
+    # startup timing is sensitive enough to runner-image changes that
+    # `ubuntu-latest` → next-year's image can flap the 20% gate on
+    # unchanged code. Treat runner image bumps like Python pin bumps:
+    # re-capture baseline in the same PR that bumps this value.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -62,15 +68,22 @@ jobs:
       - name: Publish results to step summary
         # Always run so reviewers can see the numbers even when the
         # regression gate fails — that's exactly when they're most
-        # useful.  bench-output.txt is pure JSON (the script separates
-        # JSON on stdout from human-readable prose on stderr) so the
-        # ```json fence here wraps valid JSON.
+        # useful.  bench-output.txt is pure JSON on success (the script
+        # separates JSON on stdout from human-readable prose on stderr).
+        # On catastrophic failure (e.g. `import clickwork` crashes in
+        # the subprocess warm-up) the file may be empty; we emit a tiny
+        # stub JSON so the `\`\`\`json` fence wraps something parseable
+        # and reviewers aren't left staring at an empty code block.
         if: always()
         run: |
           {
             echo "### Cold-start benchmark"
             echo
             echo '```json'
-            cat bench-output.txt
+            if [ -s bench-output.txt ]; then
+              cat bench-output.txt
+            else
+              echo '{"error": "benchmark script produced no stdout; see step log for traceback"}'
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
