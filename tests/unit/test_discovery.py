@@ -485,14 +485,13 @@ class TestMixedDiscovery:
         commands = discover_commands(commands_dir=tmp_path, discovery_mode="auto")
 
         assert "shared" in commands
-        # Identity check: the returned command must NOT be the installed
-        # one. This catches the subtle case where both ended up in the
-        # dict but the installed reference was held somewhere else.
-        assert commands["shared"] is not installed_shared
-
-        # Output check: invoke the merged command and confirm the local
-        # version's stdout text, not the installed version's. This is the
-        # end-to-end proof of shadowing from the caller's perspective.
+        # Note: identity comparison against ``installed_shared`` is
+        # unreliable here because ``discover_commands_from_entrypoints``
+        # wraps entry-point targets in a ``LazyEntryPointCommand`` proxy,
+        # so ``commands['shared']`` would not be ``is installed_shared``
+        # even in the broken shadowing case. The load-bearing assertion
+        # is the output check below -- invoking the merged command MUST
+        # print the local version's text, not the installed version's.
         runner = CliRunner()
         result = runner.invoke(commands["shared"], [])
         assert result.exit_code == 0
