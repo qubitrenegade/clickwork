@@ -59,10 +59,13 @@ def test_function_emits_warning_on_first_call():
     # just clickwork deprecations. Because ``stacklevel=2`` attributes
     # the warning to the CALLER's module (not to ``clickwork``), the
     # correct way to filter is against the **message field** (regex),
-    # not the module field. For example, in pytest::
+    # not the module field. For example, in ``pyproject.toml`` (note
+    # DOUBLE QUOTES -- TOML single-quoted strings don't escape the
+    # backslash, which would cause the filter to miss the warning)::
     #
+    #     [tool.pytest.ini_options]
     #     filterwarnings = [
-    #         'ignore:clickwork\\::DeprecationWarning',
+    #         "ignore:clickwork\\::DeprecationWarning",
     #     ]
     #
     # The second field of that spec is a regex matched against the

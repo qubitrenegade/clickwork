@@ -158,7 +158,7 @@ deprecated name warns exactly once per process regardless of how many
 times it's invoked. Every warning message begins with a
 `clickwork:` prefix so downstream test suites can filter narrowly via
 pytest's message-field regex (for example,
-`filterwarnings = ['ignore:clickwork\\::DeprecationWarning']`).
+`filterwarnings = ["ignore:clickwork\\::DeprecationWarning"]` (TOML double quotes are required so the `\\:` escape resolves to `\:`, the regex-escape for the `:` field separator)).
 Filtering by the module field is not reliable here, because
 `stacklevel=2` attributes the warning to the caller's module rather
 than to `clickwork`.
@@ -245,7 +245,7 @@ the deprecated behavior (e.g. inside `create_cli()` once per CLI,
 or from the deprecated function itself). Callers who want to silence
 deprecations in their own test runs can add a targeted message-regex
 entry such as
-`filterwarnings = ['ignore:clickwork\\::DeprecationWarning']` (the
+`filterwarnings = ["ignore:clickwork\\::DeprecationWarning"]` (TOML double quotes are required so the `\\:` escape resolves to `\:`, the regex-escape for the `:` field separator) (the
 second field is a regex against the warning text, and the
 `clickwork:` prefix on every message is what makes this match). The
 module-field form `ignore::DeprecationWarning:clickwork` looks

@@ -171,10 +171,16 @@ def deprecated(
     # Keeping the ``clickwork:`` prefix lets callers filter narrowly by
     # matching the **message field** (the second field of pytest's
     # ``filterwarnings`` spec, which is a regex against the warning text).
-    # Example pytest config::
+    # Example ``pyproject.toml`` pytest config -- note the DOUBLE QUOTES.
+    # TOML single-quoted strings don't process backslash escapes, so
+    # ``'ignore:clickwork\\::DeprecationWarning'`` ends up as the literal
+    # six-char sequence ``clickwork\\:`` and pytest never matches the
+    # warning. Use double quotes so TOML resolves ``\\:`` to ``\:``
+    # (the regex-escape for the ``:`` field separator)::
     #
+    #     [tool.pytest.ini_options]
     #     filterwarnings = [
-    #         'ignore:clickwork\\::DeprecationWarning',
+    #         "ignore:clickwork\\::DeprecationWarning",
     #     ]
     #
     # Note: the obvious-looking ``"ignore::DeprecationWarning:clickwork"``
