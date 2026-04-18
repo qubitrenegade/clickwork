@@ -967,9 +967,7 @@ class TestRealSignalForwarding:
             if ready_path.exists():
                 return
             time.sleep(0.01)
-        raise AssertionError(
-            f"child never wrote ready marker at {ready_path} within {timeout}s"
-        )
+        raise AssertionError(f"child never wrote ready marker at {ready_path} within {timeout}s")
 
     @staticmethod
     def _send_sigint_after_ready(
@@ -990,6 +988,7 @@ class TestRealSignalForwarding:
         SIGINT_TIMEOUT_SECONDS windows elapse before the signal arrives, if
         that's ever needed -- today it's effectively 0.
         """
+
         # daemon=True: if the test aborts for an unrelated reason, we don't
         # want a lingering helper thread to keep the interpreter alive.
         def _fire() -> None:
@@ -1087,9 +1086,7 @@ class TestRealSignalForwarding:
         # The 0.5s bound is generous: the child's SIGINT handler exits
         # immediately, so this should complete in well under 100ms in
         # practice.
-        assert elapsed < 0.9, (
-            f"child exit took {elapsed:.2f}s; expected <0.9s on the graceful path"
-        )
+        assert elapsed < 0.9, f"child exit took {elapsed:.2f}s; expected <0.9s on the graceful path"
 
     def test_run_sigkill_escalation_on_timeout(
         self,
@@ -1172,9 +1169,9 @@ class TestRealSignalForwarding:
             f"escalation happened too fast ({elapsed:.2f}s < 0.3s timeout) -- "
             "did SIGINT_TIMEOUT_SECONDS fail to apply?"
         )
-        assert elapsed < 2.0, (
-            f"escalation took {elapsed:.2f}s; expected <2s with a 0.3s patched timeout"
-        )
+        assert (
+            elapsed < 2.0
+        ), f"escalation took {elapsed:.2f}s; expected <2s with a 0.3s patched timeout"
 
         # (c) The child was terminated by SIGKILL. On POSIX, subprocess
         # reports "killed by signal N" as returncode == -N. SIGKILL is 9.
