@@ -188,21 +188,31 @@ def platform_dispatch(
 
     Example::
 
+        # Decorator ORDER matters: @click.command() must be the outermost
+        # (applied last), with @platform_dispatch *below* it so Click sees
+        # the completed dispatch wrapper as the command callback. If you
+        # put @platform_dispatch on top, @click.command() has already
+        # converted the function into a click.Command object and
+        # platform_dispatch would end up wrapping that Command object,
+        # which breaks Click's registration.
+        @click.command()
+        @click.argument("name")
         @clickwork.platform_dispatch(
             linux=my_lib.linux.up,
             windows=my_lib.windows.up,
             macos=my_lib.macos.up,
             macos_error="macOS not supported yet",
         )
-        @click.command()
-        @click.argument("name")
         @pass_cli_context
         def runner_up(ctx, name): ...
     """
-    # Bundle the kwargs so the inner wrapper can hand them to _select_impl
-    # without restating every key. Keeping this dict at decoration time means
-    # each call site pays the per-platform lookup cost once per invocation,
-    # not once per definition.
+    # Bundle the kwargs into a single dict once, at decoration time, so the
+    # inner wrapper can hand them to _select_impl without restating every
+    # key. This dict is allocated ONCE per @platform_dispatch(...) site --
+    # it's captured by closure into the wrapper -- so we don't rebuild it
+    # on each invocation. The per-platform lookup inside _select_impl still
+    # runs on every call (it has to -- sys.platform is effectively constant
+    # per process but we don't cache it to avoid test-patching surprises).
     dispatch_kwargs: dict[str, Any] = {
         "linux": linux,
         "windows": windows,
