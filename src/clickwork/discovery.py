@@ -139,9 +139,18 @@ class LazyEntryPointCommand(click.Command):
         # make_context() -> Context(), and Context accepts obj as a keyword arg.
         # parent=ctx wires the loaded command's context into this proxy's
         # context chain -- see the docstring above for why that matters.
+        #
+        # WHY prog_name=ctx.info_name (not ctx.command_path): Click computes
+        # a context's command_path as ``parent.command_path + " " + info_name``
+        # by walking the parent chain. With parent=ctx set, passing the full
+        # command_path as prog_name would double-count -- the loaded command's
+        # command_path would end up like "myapp plugin-cmd myapp plugin-cmd"
+        # and show up duplicated in Usage / help / error messages. Passing
+        # just the info_name lets Click reconstruct the full path from the
+        # chain, giving the correct "myapp plugin-cmd" output.
         return loaded.main(
             args=list(ctx.args),
-            prog_name=ctx.command_path,
+            prog_name=ctx.info_name,
             standalone_mode=False,
             obj=ctx.obj,
             parent=ctx,
