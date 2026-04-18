@@ -702,7 +702,28 @@ def discover_commands_from_entrypoints(
 
     # The group keyword has been stable since Python 3.10; this project
     # requires 3.11+ (see pyproject.toml), so no compat fallback is needed.
-    eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
+    #
+    # Guard the lookup itself: importlib.metadata can raise on malformed
+    # installed distribution metadata (truncated METADATA files,
+    # legacy egg-info with parsing errors, etc.) -- rare but observed in
+    # the wild. Treat that as an entrypoint_load failure rather than
+    # crashing the whole CLI; strict mode still surfaces it by raising
+    # after the scan.
+    try:
+        eps = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
+    except Exception as e:
+        logger.warning("entry_points lookup failed: %s", e)
+        failures.append(
+            DiscoveryFailure(
+                category="entrypoint_load",
+                message=f"Failed to enumerate entry points: {e}",
+                cause_path=None,
+                exception=e,
+            )
+        )
+        if strict:
+            raise ClickworkDiscoveryError(failures) from e
+        return commands
 
     for ep in eps:
         try:
