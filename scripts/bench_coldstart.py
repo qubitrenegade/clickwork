@@ -261,9 +261,7 @@ def main() -> int:
         args.update_baseline.parent.mkdir(parents=True, exist_ok=True)
         # Trailing newline is a common git-friendly convention and
         # keeps ``cat`` / diff output tidy.
-        args.update_baseline.write_text(
-            json.dumps(result, indent=2) + "\n", encoding="utf-8"
-        )
+        args.update_baseline.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         # Human-readable confirmation goes to stderr so stdout stays
         # pure JSON for ``--update-baseline`` runs too.
         print(f"wrote baseline to {args.update_baseline}", file=sys.stderr)

@@ -52,13 +52,15 @@ any ``showwarning`` override would all blame this file, which is useless
 to the user: they want to see "this call on line 47 of my_script.py is
 deprecated," not "line 100 of clickwork/_deprecated.py."
 """
+
 from __future__ import annotations
 
 import functools
 import inspect
 import threading
 import warnings
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar, cast
 
 # ``T`` carries the decorated callable's type through the decorator so
 # static type-checkers see the original signature on the return value.
@@ -111,11 +113,7 @@ def _qualname(obj: Any) -> str:
     ``_cache_key`` for that, which prefixes the module so two
     identically-named functions in different modules don't collide.
     """
-    return (
-        getattr(obj, "__qualname__", None)
-        or getattr(obj, "__name__", None)
-        or repr(obj)
-    )
+    return getattr(obj, "__qualname__", None) or getattr(obj, "__name__", None) or repr(obj)
 
 
 def _cache_key(obj: Any) -> str:
@@ -167,6 +165,7 @@ def deprecated(
             @deprecated(since="1.1", removed_in="1.2", reason="use NewWidget")
             class OldWidget: ...
     """
+
     # The warning text is templated once and reused every time we fire.
     # Keeping the ``clickwork:`` prefix lets callers filter narrowly by
     # matching the **message field** (the second field of pytest's
@@ -238,11 +237,16 @@ def deprecated(
                 # the return).
                 return original_init(self, *args, **kwargs)
 
-            cls.__init__ = new_init  # type: ignore[method-assign]
-            return cls  # type: ignore[return-value]
+            cls.__init__ = new_init
+            return cls
 
         # Function / method path.
-        func = target
+        # ``T`` is unbounded (so classes type-check too), but mypy can't
+        # prove the function-path ``target`` is callable. Cast here so
+        # ``functools.wraps`` and the inner ``func(...)`` both
+        # type-check; at runtime ``target`` was already confirmed
+        # non-class above, so the cast is sound.
+        func = cast("Callable[..., Any]", target)
         display = _qualname(func)
         cache_key = _cache_key(func)
         message = _build_message(display)
