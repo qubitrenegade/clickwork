@@ -25,7 +25,7 @@ Public API:
     testing           - Submodule exposing run_cli() + make_test_cli() helpers
 """
 
-__version__ = "0.2.0"
+__version__ = "1.0.0"
 
 # WHY ``testing`` is imported here alongside ``http`` / ``platform``: all
 # three are advertised as importable both as ``clickwork.<name>`` and as

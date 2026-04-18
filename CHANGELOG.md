@@ -39,10 +39,14 @@ complete 0.2.x → 1.0 upgrade guide including before/after diffs.
 - **Python floor bumped to 3.11+.** This is a hard floor:
   `tomllib` is now imported unconditionally from the standard
   library. Consumers on 3.9/3.10 must upgrade Python. (#46)
-- **Click floor pinned to `>=8.2,<9`.** 0.2.0 already required
-  `click>=8.2`; 1.0 makes this explicit in metadata and caps at `<9`
-  so a future Click major doesn't break consumers without a
-  clickwork release. (#46, PR #33)
+- **Click floor pinned to `>=8.2`, no upper bound.** 0.2.0 already
+  required `click>=8.2`; 1.0 keeps the floor and explicitly declines
+  to cap at `<9` because a speculative major-version cap creates a
+  dependency-resolution ratchet -- the day Click ships a new major,
+  any resolver trying to install clickwork alongside a package that
+  has already moved to the new major would see an unsolvable
+  constraint. See `docs/API_POLICY.md` "Click version range" for the
+  full rationale. (#46, PR #33)
 
 ### Added
 
