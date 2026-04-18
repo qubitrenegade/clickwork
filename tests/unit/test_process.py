@@ -15,8 +15,15 @@ instances, get version). The key design decisions tested here:
 9. On Ctrl-C, run() forwards SIGINT to the child and waits before re-raising
 """
 
+import os
 import signal
+import subprocess
 import sys
+import tempfile
+import textwrap
+import threading
+import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -840,3 +847,300 @@ class TestRunWithSecrets:
         )
         captured = capfd.readouterr()
         assert captured.out == "us-east-1:t"
+
+
+# ---------------------------------------------------------------------------
+# Real-signal end-to-end tests (issue #50)
+# ---------------------------------------------------------------------------
+#
+# The tests above this point mock subprocess.Popen with MagicMock to exercise
+# run()'s KeyboardInterrupt-handling branches in isolation. What they DON'T
+# verify is that the os-level signal plumbing actually works: that when the
+# parent forwards SIGINT, the child's SIGINT handler really fires; that the
+# SIGKILL escalation really terminates a wedged child. Those properties are
+# what the two tests below pin down by spawning a real subprocess and sending
+# a real signal.
+#
+# Windows caveat: CPython delivers SIGINT to a console process group via a
+# different mechanism (CTRL_C_EVENT / GenerateConsoleCtrlEvent). It does not
+# deliver signal.SIGINT the way POSIX does, and the "send SIGINT to the
+# parent's own PID" trick below behaves differently. Rather than write a
+# second Windows-specific test path, we simply skip these tests on Windows
+# (the underlying framework still works there -- just with OS-native
+# semantics) and rely on the mock-based tests for coverage parity.
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX-only signal semantics")
+class TestRealSignalForwarding:
+    """End-to-end SIGINT forwarding with a real child process.
+
+    Every test in this class spawns an actual ``python -c "..."`` child so the
+    signal handler inside the child runs for real, the parent's KeyboardInterrupt
+    path runs for real, and the OS-level wait/kill transitions run for real.
+    No ``subprocess.Popen`` mocking -- these tests exist precisely to cover
+    what the mock-based tests can't.
+    """
+
+    # The child-side Python program installs a SIGINT handler that writes a
+    # "received" marker to a file path passed in argv, then exits cleanly with
+    # status 0. Running the handler-installation inline via ``python -c``
+    # keeps the test self-contained (no helper scripts to check in) and
+    # re-uses the already-available ``sys.executable`` interpreter so the
+    # child matches the parent's Python version bit-for-bit.
+    #
+    # WHY a ready-marker file: the parent needs to wait until the child has
+    # actually installed its SIGINT handler before forwarding the signal.
+    # Without this sync, a fast test on a slow machine could fire SIGINT at
+    # a child that hasn't yet replaced the default handler, and the default
+    # handler on CPython raises KeyboardInterrupt which the child then
+    # propagates as exit code 130 -- not a "signal-received" observation,
+    # just an unhandled SIGINT race. The ready marker eliminates that race.
+    _GRACEFUL_CHILD_SCRIPT = textwrap.dedent(
+        """
+        import os, signal, sys, time
+        received_path = sys.argv[1]
+        ready_path = sys.argv[2]
+
+        def handler(signum, frame):
+            with open(received_path, "w") as fh:
+                fh.write("received-sigint")
+            # Clean exit on SIGINT. The parent's _wait_with_signal_forwarding
+            # then observes returncode 0 and re-raises KeyboardInterrupt.
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, handler)
+        # Mark ourselves ready AFTER the handler is installed -- any sooner
+        # and the parent could send SIGINT before we've installed the
+        # handler (default handler would raise KeyboardInterrupt, not
+        # run our observable handler). The marker write is the sync point.
+        with open(ready_path, "w") as fh:
+            fh.write("ready")
+        # Block until either our handler fires (sys.exit) or the parent
+        # escalates to SIGKILL. A long sleep is fine -- the test bounds
+        # the wait with its own timeout below.
+        while True:
+            time.sleep(0.05)
+        """
+    ).strip()
+
+    # The wedged-child variant installs a SIGINT handler that RECORDS the
+    # signal (so the parent can confirm the forward was delivered) but then
+    # keeps sleeping forever instead of exiting. This is the shape of a
+    # misbehaving child that catches SIGINT and ignores it -- exactly the
+    # case SIGINT_TIMEOUT_SECONDS + SIGKILL escalation is designed for.
+    _WEDGED_CHILD_SCRIPT = textwrap.dedent(
+        """
+        import os, signal, sys, time
+        received_path = sys.argv[1]
+        ready_path = sys.argv[2]
+
+        def handler(signum, frame):
+            with open(received_path, "w") as fh:
+                fh.write("received-sigint-but-ignoring")
+            # Intentionally do NOT exit -- simulate a child that catches
+            # SIGINT, logs it, but refuses to shut down. The parent must
+            # escalate to SIGKILL to unwedge.
+
+        signal.signal(signal.SIGINT, handler)
+        with open(ready_path, "w") as fh:
+            fh.write("ready")
+        while True:
+            time.sleep(0.05)
+        """
+    ).strip()
+
+    @staticmethod
+    def _wait_for_ready(ready_path: Path, timeout: float = 5.0) -> None:
+        """Block until the child writes the ready-marker file, or fail the test.
+
+        WHY polling instead of os.pipe()/inotify: keeping the child-side logic
+        in an inline ``python -c`` snippet means we can't share a Python object
+        (pipe fd, event) across the process boundary without smuggling fd
+        numbers through argv. A file-existence poll is the simplest synchronous
+        handshake that works on both Linux and macOS without extra deps.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if ready_path.exists():
+                return
+            time.sleep(0.01)
+        raise AssertionError(
+            f"child never wrote ready marker at {ready_path} within {timeout}s"
+        )
+
+    @staticmethod
+    def _send_sigint_after_ready(
+        ready_path: Path,
+        extra_delay: float = 0.0,
+    ) -> threading.Thread:
+        """Spawn a helper thread that sends SIGINT to the parent once child is ready.
+
+        WHY a background thread (instead of os.kill in the test body): the
+        test body needs to be blocked inside run() -> proc.wait() when the
+        signal arrives, because that's the codepath we're exercising.
+        If we sent SIGINT before calling run(), KeyboardInterrupt would raise
+        before the subprocess was even spawned. Issuing the signal from a
+        separate thread lets the main thread make forward progress to the
+        wait() call and THEN receive the signal at the right moment.
+
+        extra_delay gives the SIGKILL-escalation test a way to let several
+        SIGINT_TIMEOUT_SECONDS windows elapse before the signal arrives, if
+        that's ever needed -- today it's effectively 0.
+        """
+        # daemon=True: if the test aborts for an unrelated reason, we don't
+        # want a lingering helper thread to keep the interpreter alive.
+        def _fire() -> None:
+            TestRealSignalForwarding._wait_for_ready(ready_path)
+            if extra_delay > 0:
+                time.sleep(extra_delay)
+            # signal.SIGINT to our own PID is the POSIX equivalent of the user
+            # pressing Ctrl-C at the terminal: the kernel routes it to the
+            # main thread, which raises KeyboardInterrupt inside proc.wait().
+            os.kill(os.getpid(), signal.SIGINT)
+
+        thread = threading.Thread(target=_fire, daemon=True)
+        thread.start()
+        return thread
+
+    def test_ctx_run_forwards_sigint_to_child(self, tmp_path: Path) -> None:
+        """SIGINT received by the parent is forwarded to the child process.
+
+        Pins two properties of the production forwarding path:
+          (a) The child's OWN SIGINT handler fires -- proved by the marker
+              file the handler writes. If the signal weren't forwarded, the
+              child would either outlive the parent (orphan) or be killed
+              without running user code.
+          (b) The child exits within the forward-timeout window so SIGKILL
+              escalation is never reached -- proved by the elapsed time
+              being well under SIGINT_TIMEOUT_SECONDS.
+        """
+        from clickwork.process import run
+
+        # Separate paths for the two independent pieces of state keeps the
+        # poll logic trivial: existence alone is a meaningful signal.
+        received_path = tmp_path / "child-received-sigint.txt"
+        ready_path = tmp_path / "child-ready.txt"
+
+        sender = self._send_sigint_after_ready(ready_path)
+
+        start = time.monotonic()
+        with pytest.raises(KeyboardInterrupt):
+            # run() always re-raises KeyboardInterrupt after forwarding --
+            # that's the semantic we're testing. The child's exit code (0)
+            # is observed internally but never surfaced as a return value
+            # on this codepath; the raised KI is how the caller knows.
+            run(
+                [
+                    sys.executable,
+                    "-c",
+                    self._GRACEFUL_CHILD_SCRIPT,
+                    str(received_path),
+                    str(ready_path),
+                ]
+            )
+        elapsed = time.monotonic() - start
+
+        sender.join(timeout=1.0)
+        assert not sender.is_alive(), "signal-sender thread did not exit cleanly"
+
+        # (a) The child observably received and handled SIGINT.
+        assert received_path.exists(), "child never wrote its received-marker file"
+        assert received_path.read_text() == "received-sigint"
+
+        # (b) Graceful path -- well below the 10s forward timeout. The 5s
+        # bound is a generous ceiling for "the child exited on its own
+        # SIGINT handler without any SIGKILL escalation being needed".
+        assert elapsed < 5.0, (
+            f"child exit took {elapsed:.2f}s; expected <5s on the graceful path"
+        )
+
+    def test_ctx_run_sigkill_escalation_on_timeout(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A child that catches SIGINT but refuses to exit is killed with SIGKILL.
+
+        Pins three properties of the escalation path:
+          (a) Parent forwards SIGINT first (the child's handler records it).
+          (b) After SIGINT_TIMEOUT_SECONDS with no exit, parent escalates.
+          (c) Child's final exit status reflects SIGKILL (negative 9 on POSIX,
+              per subprocess convention when a child is terminated by a signal).
+
+        The production timeout is SIGINT_TIMEOUT_SECONDS = 10s. Running the
+        test at that value would make this one test a ~10s wallclock spike;
+        monkeypatching to a small value keeps the full suite fast while
+        still exercising every branch of the escalation code.
+        """
+        import clickwork.process as process_module
+        from clickwork.process import run
+
+        # WHY monkeypatch a module constant instead of passing a kwarg:
+        # process.run() reads SIGINT_TIMEOUT_SECONDS from the module at call
+        # time; there is no per-call timeout kwarg today (and exposing one
+        # is out of scope for this coverage-only issue). Patching the
+        # attribute is the least-invasive way to drive the escalation path
+        # in bounded time without modifying the production API.
+        monkeypatch.setattr(process_module, "SIGINT_TIMEOUT_SECONDS", 0.3)
+
+        received_path = tmp_path / "child-received-sigint.txt"
+        ready_path = tmp_path / "child-ready.txt"
+
+        # Capture the real Popen instance so we can inspect returncode after
+        # KeyboardInterrupt unwinds. We preserve the real Popen semantics by
+        # delegating to the original; we're only snooping, not replacing.
+        captured: dict[str, subprocess.Popen[bytes]] = {}
+        real_popen = subprocess.Popen
+
+        def _snooping_popen(*args: object, **kwargs: object) -> subprocess.Popen[bytes]:
+            proc: subprocess.Popen[bytes] = real_popen(*args, **kwargs)  # type: ignore[arg-type]
+            captured["proc"] = proc
+            return proc
+
+        monkeypatch.setattr(subprocess, "Popen", _snooping_popen)
+
+        sender = self._send_sigint_after_ready(ready_path)
+
+        start = time.monotonic()
+        with pytest.raises(KeyboardInterrupt):
+            run(
+                [
+                    sys.executable,
+                    "-c",
+                    self._WEDGED_CHILD_SCRIPT,
+                    str(received_path),
+                    str(ready_path),
+                ]
+            )
+        elapsed = time.monotonic() - start
+
+        sender.join(timeout=1.0)
+        assert not sender.is_alive(), "signal-sender thread did not exit cleanly"
+
+        # (a) SIGINT was delivered and the child's handler ran before the
+        # escalation kicked in -- otherwise we haven't actually exercised
+        # the "child caught SIGINT then ignored it" shape we care about.
+        assert received_path.exists(), "child never wrote its received-marker file"
+        assert received_path.read_text() == "received-sigint-but-ignoring"
+
+        # (b) Elapsed time sits on the right side of the escalation window:
+        # at least the (patched) timeout must have elapsed, and the whole
+        # thing must still complete quickly relative to the suite.
+        assert elapsed >= 0.3, (
+            f"escalation happened too fast ({elapsed:.2f}s < 0.3s timeout) -- "
+            "did SIGINT_TIMEOUT_SECONDS fail to apply?"
+        )
+        assert elapsed < 2.0, (
+            f"escalation took {elapsed:.2f}s; expected <2s with a 0.3s patched timeout"
+        )
+
+        # (c) The child was terminated by SIGKILL. On POSIX, subprocess
+        # reports "killed by signal N" as returncode == -N. SIGKILL is 9.
+        proc = captured["proc"]
+        # By the time run() re-raises KeyboardInterrupt, the parent has
+        # already awaited the killed child -- returncode is populated.
+        assert proc.returncode == -signal.SIGKILL, (
+            f"child exited with {proc.returncode}, expected -{signal.SIGKILL} "
+            "(SIGKILL). If the child exited cleanly, the escalation path "
+            "was never reached."
+        )
