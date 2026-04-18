@@ -808,8 +808,14 @@ class TestOverrideSemantics:
             """Subcommand that claims --env before the global is installed."""
 
         # Install-time conflict: the subcommand already owns --env, and
-        # ``add_global_option`` refuses to silently coexist.
-        with pytest.raises(ValueError, match="Cannot install global option"):
+        # ``add_global_option`` refuses to silently coexist. The match
+        # regex asserts BOTH the error-type prefix AND the colliding
+        # flag string so a future refactor that changes the message
+        # (e.g. drops the flag name) surfaces here.
+        with pytest.raises(
+            ValueError,
+            match=r"Cannot install global option.*--env",
+        ):
             add_global_option(root, "--env", default=None)
 
 
