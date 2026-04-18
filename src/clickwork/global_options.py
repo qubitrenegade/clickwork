@@ -253,13 +253,30 @@ def add_global_option(
     option_kwargs_with_cb["callback"] = _merge_callback
     option_kwargs_with_cb["expose_value"] = False
 
+    # Compute the full set of flag strings this option will claim, using
+    # Click's OWN parsing of param_decls (via the probe constructed above)
+    # rather than string matching on the raw decls.
+    #
+    # WHY reuse the probe: a slash-flag like "--shout/--no-shout" is a
+    # single element in param_decls, but Click splits it into
+    # probe.opts=["--shout"] + probe.secondary_opts=["--no-shout"]. A
+    # naive string-match would leave "--shout/--no-shout" intact and
+    # miss a collision with an existing command that already declares
+    # just "--shout" or "--no-shout" separately. Collecting from the
+    # probe gives us the actual set of strings Click will register on
+    # each command, matching how ``existing.opts`` / ``secondary_opts``
+    # is populated on already-installed options.
+    new_flag_strings = set(getattr(probe, "opts", ())) | set(
+        getattr(probe, "secondary_opts", ())
+    )
+
     # Walk the command tree and install a FRESH click.Option on every level.
     # WHY a fresh instance per level: click.Option objects are stateful
     # (they're bound to a specific command's parameter list), so sharing a
     # single instance across multiple commands causes subtle double-registration
     # issues. Constructing per-level is cheap and keeps each command
     # self-contained.
-    _install_on_group(cli, param_decls, option_kwargs_with_cb, name)
+    _install_on_group(cli, param_decls, option_kwargs_with_cb, name, new_flag_strings)
 
 
 def _derive_option_name(
@@ -308,6 +325,7 @@ def _install_on_group(
     param_decls: tuple[str, ...],
     option_kwargs: dict[str, Any],
     name: str,
+    new_flag_strings: set[str],
 ) -> None:
     """Recursively install the option on a group, all its subgroups, and all leaves.
 
@@ -336,7 +354,7 @@ def _install_on_group(
             already declare the flag manually) would otherwise produce a
             confusing Click "option already registered" error at parse time.
     """
-    _install_on_command(group, param_decls, option_kwargs, name)
+    _install_on_command(group, param_decls, option_kwargs, name, new_flag_strings)
 
     # Then visit every registered subcommand. group.commands is a dict of
     # {name: Command}; we ignore names and just dispatch on type.
@@ -344,12 +362,12 @@ def _install_on_group(
         if isinstance(sub, click.Group):
             # Recurse: the subgroup (and everything under it) gets the option
             # too. This handles arbitrarily-deep nesting.
-            _install_on_group(sub, param_decls, option_kwargs, name)
+            _install_on_group(sub, param_decls, option_kwargs, name, new_flag_strings)
         else:
             # Leaf command: just attach the option via the conflict-checked
             # helper so callers get a clear error instead of a runtime
             # Click surprise when something already claimed the name.
-            _install_on_command(sub, param_decls, option_kwargs, name)
+            _install_on_command(sub, param_decls, option_kwargs, name, new_flag_strings)
 
 
 def _install_on_command(
@@ -357,6 +375,7 @@ def _install_on_command(
     param_decls: tuple[str, ...],
     option_kwargs: dict[str, Any],
     name: str,
+    new_flag_strings: set[str],
 ) -> None:
     """Attach a fresh click.Option to one command, rejecting name conflicts.
 
@@ -385,12 +404,16 @@ def _install_on_command(
     # "--json")`` has ``name == "output_json"`` but opts ``["--json"]``, so a
     # name-only check would miss the flag-string collision and the caller
     # would hit Click's own "option already registered" error later.
-    new_opts = {d for d in param_decls if d.startswith("-")}
+    #
+    # ``new_flag_strings`` was computed once in add_global_option() from a
+    # probe click.Option (so slash-flags like "--shout/--no-shout" are
+    # already split into {"--shout", "--no-shout"} instead of being a
+    # single unsplit string).
     for existing in command.params:
         existing_opts = set(getattr(existing, "opts", ()))
         # Collect secondary_opts too (the "--no-foo" side of a slash-flag).
         existing_opts.update(getattr(existing, "secondary_opts", ()))
-        flag_conflict = new_opts & existing_opts
+        flag_conflict = new_flag_strings & existing_opts
         name_conflict = getattr(existing, "name", None) == name
         if flag_conflict or name_conflict:
             # Help the caller find the conflict: command.name is Click's

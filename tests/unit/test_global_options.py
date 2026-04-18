@@ -355,6 +355,30 @@ class TestAddGlobalOptionConflictDetection:
         with pytest.raises(ValueError, match="already uses flag string"):
             add_global_option(root, "--json", is_flag=True)
 
+    def test_rejects_slash_flag_conflict(self) -> None:
+        """A slash-flag param_decl must match against existing --foo/--no-foo.
+
+        '--shout/--no-shout' is a *single* string in param_decls but Click
+        splits it into two flag strings (opts=['--shout'] +
+        secondary_opts=['--no-shout']). Early drafts of the conflict
+        check filtered param_decls with .startswith('-'), which for slash-
+        flags left the unsplit '--shout/--no-shout' string -- intersection
+        with {'--shout','--no-shout'} is empty and the collision slips
+        through. This test pins the probe-based derivation that splits
+        the slash-flag correctly.
+        """
+        import pytest
+
+        @click.group()
+        def root() -> None: ...
+
+        @root.command("sub-cmd")
+        @click.option("--shout/--no-shout", is_flag=True, default=False)
+        def sub(shout: bool) -> None: ...
+
+        with pytest.raises(ValueError, match="already uses flag string"):
+            add_global_option(root, "--shout/--no-shout", is_flag=True, default=False)
+
 
 class TestAddGlobalOptionEntryPointPropagation:
     """ctx.meta values propagate into entry-point plugin commands.
