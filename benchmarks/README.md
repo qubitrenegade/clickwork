@@ -108,3 +108,20 @@ a broken benchmark.
 It runs as its own workflow (`.github/workflows/bench.yml`) so the
 failure signal stays separate and the job can be retried
 independently.
+
+## Heads-up: initial baseline vs CI runner
+
+The committed `baseline.json` was captured on the original author's
+dev machine (Linux / glibc 2.35 / Python 3.13.6). CI runs on
+`ubuntu-24.04` (glibc 2.39). glibc and kernel differences can shift
+absolute `import_ms` by more than the 20% gate, so the very first CI
+run on the PR that introduced this workflow may fail the regression
+check against the dev-captured baseline.
+
+The fix is straightforward: after the workflow exists on `main`, use
+the **Run workflow** button on the GitHub Actions UI
+(`bench.yml` has a `workflow_dispatch` trigger) to capture a fresh
+baseline directly on the CI runner, grab the stdout JSON from the
+logs, and commit it as `benchmarks/baseline.json` in a follow-up PR.
+Every subsequent PR is then compared against a baseline captured on
+the same hardware it's running on.

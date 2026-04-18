@@ -114,7 +114,12 @@ def compare_to_baseline(current: dict[str, object], baseline_path: Path) -> int:
     CI step summary can wrap stdout in a ``json`` fence and get valid
     JSON rather than a mix of JSON and prose.
     """
-    baseline = json.loads(baseline_path.read_text())
+    # Explicit utf-8 so a developer running the script under a non-utf-8
+    # locale (e.g. cp1252 on Windows) decodes the JSON identically to
+    # CI, which always runs in utf-8. Without this the default decoder
+    # would use locale.getencoding() and deltas could depend on where
+    # the script was last run, not what changed in the code.
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     current_ms = float(current["import_ms"])  # type: ignore[arg-type]
     baseline_ms = float(baseline["import_ms"])
     # ``max(1e-9, ...)`` guards against a zero baseline (shouldn't
@@ -180,7 +185,9 @@ def main() -> int:
         args.update_baseline.parent.mkdir(parents=True, exist_ok=True)
         # Trailing newline is a common git-friendly convention and
         # keeps ``cat`` / diff output tidy.
-        args.update_baseline.write_text(json.dumps(result, indent=2) + "\n")
+        args.update_baseline.write_text(
+            json.dumps(result, indent=2) + "\n", encoding="utf-8"
+        )
         # Human-readable confirmation goes to stderr so stdout stays
         # pure JSON for ``--update-baseline`` runs too.
         print(f"wrote baseline to {args.update_baseline}", file=sys.stderr)

@@ -7,6 +7,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # workflow_dispatch lets a maintainer kick off the bench from the
+  # GitHub Actions UI -- useful immediately after merging this PR, when
+  # the committed baseline.json (captured on a dev machine, glibc 2.35)
+  # needs to be replaced with a baseline captured on ubuntu-24.04 (glibc
+  # 2.39). Dispatch the workflow, grab the stdout JSON from the logs,
+  # commit it as the new baseline in a small follow-up PR.
+  workflow_dispatch:
 
 jobs:
   coldstart:
