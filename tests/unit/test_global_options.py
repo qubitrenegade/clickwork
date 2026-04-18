@@ -222,6 +222,112 @@ class TestAddGlobalOptionSnapshotSemantics:
         assert "no such option" in result.output.lower()
 
 
+class TestAddGlobalOptionGuards:
+    """add_global_option refuses caller configurations that would silently break.
+
+    These guards exist so misuse surfaces at add_global_option() call time
+    rather than later during parse or dispatch where the error message
+    would be from Click, buried, and hard to connect to the real cause.
+    """
+
+    def test_rejects_caller_supplied_expose_value_true(self) -> None:
+        """expose_value=True would inject the flag as a kwarg on every command.
+
+        That breaks existing command signatures (they weren't written to
+        receive the global option). We own expose_value=False as an API
+        invariant; raise if the caller tries to override.
+        """
+        import pytest
+
+        @click.group()
+        def root() -> None: ...
+
+        @root.command("sub-cmd")
+        def sub() -> None: ...
+
+        with pytest.raises(TypeError, match="expose_value"):
+            add_global_option(root, "--json", is_flag=True, expose_value=True)
+
+    def test_rejects_duplicate_install(self) -> None:
+        """Calling add_global_option twice with the same flag raises ValueError.
+
+        Click would otherwise fail at parse/help time with a confusing
+        "option already registered" error. Surfacing the conflict at the
+        second add_global_option call points the caller at the real cause.
+        """
+        import pytest
+
+        @click.group()
+        def root() -> None: ...
+
+        @root.command("sub-cmd")
+        def sub() -> None: ...
+
+        add_global_option(root, "--json", is_flag=True)
+
+        with pytest.raises(ValueError, match="already has a parameter"):
+            add_global_option(root, "--json", is_flag=True)
+
+    def test_rejects_conflict_with_existing_manual_option(self) -> None:
+        """If a command already has a matching option, installing raises.
+
+        Same cause as the duplicate-install case but surfaces when the
+        caller is mixing add_global_option with hand-declared options.
+        """
+        import pytest
+
+        @click.group()
+        def root() -> None: ...
+
+        @root.command("sub-cmd")
+        @click.option("--json", is_flag=True)
+        def sub(json: bool) -> None: ...
+
+        with pytest.raises(ValueError, match="already has a parameter"):
+            add_global_option(root, "--json", is_flag=True)
+
+    def test_slash_flag_uses_innermost_wins(self) -> None:
+        """--foo/--no-foo is a slash-flag and resolves innermost-wins.
+
+        For plain flags ("--foo" only) we OR across levels -- there's no
+        way to explicitly say "off" at an inner level. But slash-flags
+        give the user an explicit off-form ("--no-foo"), and the
+        intuitive semantic is "the level the user typed it at wins". An
+        inner --no-foo must be able to override an outer --foo, which
+        OR-merge can't produce (False never wins an OR).
+        """
+        captured: dict[str, object] = {}
+
+        @click.group()
+        def root() -> None: ...
+
+        @root.command("sub-cmd")
+        @click.pass_context
+        def sub(ctx: click.Context) -> None:
+            captured.update(ctx.find_root().meta)
+
+        add_global_option(root, "--shout/--no-shout", is_flag=True, default=False)
+
+        runner = CliRunner()
+
+        # Inner --no-shout should override outer --shout. With OR merge
+        # (the plain-flag rule) this would return True; with innermost-
+        # wins it correctly returns False.
+        captured.clear()
+        result = runner.invoke(root, ["--shout", "sub-cmd", "--no-shout"])
+        assert result.exit_code == 0, result.output
+        assert captured.get("shout") is False, (
+            "Inner --no-shout should override outer --shout (innermost-wins "
+            f"for slash-flags); got ctx.meta['shout']={captured.get('shout')!r}"
+        )
+
+        # Outer --shout alone still works.
+        captured.clear()
+        result = runner.invoke(root, ["--shout", "sub-cmd"])
+        assert result.exit_code == 0, result.output
+        assert captured.get("shout") is True
+
+
 class TestAddGlobalOptionIntegration:
     """End-to-end check that add_global_option composes with create_cli()."""
 

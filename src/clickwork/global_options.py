@@ -140,9 +140,21 @@ def add_global_option(
     # have to reimplement it.
     name = _derive_option_name(param_decls, option_kwargs)
 
-    # Flags use OR, value options use innermost-wins. Capture this once; the
-    # merge callback branches on it.
-    is_flag = bool(option_kwargs.get("is_flag", False))
+    # Flags use OR, value options use innermost-wins. But slash-flags
+    # (``--foo/--no-foo``) have TWO user-facing forms: the "on" value and
+    # an explicit "off" value. OR'ing them across levels would prevent an
+    # inner ``--no-foo`` from overriding an outer ``--foo`` (False never
+    # wins an OR). Detect slash-flags via the probe's ``secondary_opts``
+    # and treat them as value-innermost instead, so users get the
+    # intuitive "inner level wins" semantics for both forms.
+    #
+    # Plain flags (single ``--foo`` declaration) keep OR semantics: there
+    # is no way for the user to say "off" at an inner level, so truthy-
+    # anywhere is the only sensible rule.
+    probe_kwargs = {k: v for k, v in option_kwargs.items() if k != "callback"}
+    probe = click.Option(list(param_decls), **probe_kwargs)
+    is_slash_flag = bool(getattr(probe, "secondary_opts", None))
+    is_flag = bool(option_kwargs.get("is_flag", False)) and not is_slash_flag
 
     def _merge_callback(
         ctx: click.Context,
@@ -207,6 +219,18 @@ def add_global_option(
 
         return value
 
+    # Guard: expose_value is owned by add_global_option just like callback.
+    # A caller-supplied ``expose_value=True`` would surface the option as a
+    # kwarg on every existing command callback, breaking those signatures
+    # at runtime. Reject explicitly rather than letting that silently break.
+    if option_kwargs.get("expose_value", False):
+        raise TypeError(
+            "add_global_option() forces expose_value=False so installed "
+            "options don't show up as kwargs on every command's callback. "
+            "If you need the value injected into a specific command, use "
+            "click.option() directly on that command instead."
+        )
+
     # Merge our callback into the kwargs we'll forward to click.Option below.
     # We've already rejected caller-supplied callbacks above, so this assign
     # is safe.
@@ -219,7 +243,7 @@ def add_global_option(
     # as a kwarg. The merged value is still available via ctx.meta.
     option_kwargs_with_cb = dict(option_kwargs)
     option_kwargs_with_cb["callback"] = _merge_callback
-    option_kwargs_with_cb.setdefault("expose_value", False)
+    option_kwargs_with_cb["expose_value"] = False
 
     # Walk the command tree and install a FRESH click.Option on every level.
     # WHY a fresh instance per level: click.Option objects are stateful
@@ -227,7 +251,7 @@ def add_global_option(
     # single instance across multiple commands causes subtle double-registration
     # issues. Constructing per-level is cheap and keeps each command
     # self-contained.
-    _install_on_group(cli, param_decls, option_kwargs_with_cb)
+    _install_on_group(cli, param_decls, option_kwargs_with_cb, name)
 
 
 def _derive_option_name(
@@ -259,12 +283,15 @@ def _derive_option_name(
     probe_kwargs = {k: v for k, v in option_kwargs.items() if k != "callback"}
     probe = click.Option(list(param_decls), **probe_kwargs)
     # Option.name is set during __init__ by Click's own derivation rules.
-    # Cast to str because the attribute is typed as Optional[str] in Click's
-    # stubs, but in practice it's always populated for standard declarations.
-    assert probe.name is not None, (
-        f"Click failed to derive a name for option {param_decls!r}; "
-        "pass an explicit 'param_decls' that includes a long-form flag."
-    )
+    # The attribute is typed as Optional[str] in Click's stubs, so we
+    # validate explicitly. (Using ``assert`` here would be stripped under
+    # ``python -O`` and let ``None`` silently propagate into ctx.meta
+    # writes, producing confusing errors far from the real cause.)
+    if probe.name is None:
+        raise ValueError(
+            f"Click failed to derive a name for option {param_decls!r}; "
+            "pass an explicit 'param_decls' that includes a long-form flag."
+        )
     return probe.name
 
 
@@ -272,6 +299,7 @@ def _install_on_group(
     group: click.Group,
     param_decls: tuple[str, ...],
     option_kwargs: dict[str, Any],
+    name: str,
 ) -> None:
     """Recursively install the option on a group, all its subgroups, and all leaves.
 
@@ -290,12 +318,17 @@ def _install_on_group(
         param_decls: Param declarations, forwarded unchanged to each new
             ``click.Option`` instance.
         option_kwargs: Option kwargs (already including our merge callback).
+        name: Click-derived Python name for the option (used to detect
+            conflicts with options already on a command).
+
+    Raises:
+        ValueError: If any command or group in the tree already defines
+            an option with the same Python name. Calling add_global_option()
+            twice with the same flag (or against a tree whose commands
+            already declare the flag manually) would otherwise produce a
+            confusing Click "option already registered" error at parse time.
     """
-    # Attach to the group itself FIRST so the flag is accepted at this level.
-    # Click stores params on the command's ``.params`` list; appending is the
-    # documented way to add options programmatically (same as what the
-    # @click.option() decorator does under the hood).
-    group.params.append(click.Option(list(param_decls), **option_kwargs))
+    _install_on_command(group, param_decls, option_kwargs, name)
 
     # Then visit every registered subcommand. group.commands is a dict of
     # {name: Command}; we ignore names and just dispatch on type.
@@ -303,7 +336,53 @@ def _install_on_group(
         if isinstance(sub, click.Group):
             # Recurse: the subgroup (and everything under it) gets the option
             # too. This handles arbitrarily-deep nesting.
-            _install_on_group(sub, param_decls, option_kwargs)
+            _install_on_group(sub, param_decls, option_kwargs, name)
         else:
-            # Leaf command: just attach the option.
-            sub.params.append(click.Option(list(param_decls), **option_kwargs))
+            # Leaf command: just attach the option via the conflict-checked
+            # helper so callers get a clear error instead of a runtime
+            # Click surprise when something already claimed the name.
+            _install_on_command(sub, param_decls, option_kwargs, name)
+
+
+def _install_on_command(
+    command: click.Command,
+    param_decls: tuple[str, ...],
+    option_kwargs: dict[str, Any],
+    name: str,
+) -> None:
+    """Attach a fresh click.Option to one command, rejecting name conflicts.
+
+    Checks ``command.params`` for an existing parameter whose Python name
+    matches -- this catches both (a) calling ``add_global_option()`` twice
+    with the same flag and (b) installing a flag onto a command tree where
+    some command already declared it manually. Either case would later
+    surface as a confusing Click error at parse/help time; raising here
+    points the caller directly at the conflict.
+
+    Args:
+        command: The Click command (or group) to install on. Click stores
+            params on the command's ``.params`` list; appending is the
+            documented way to add options programmatically.
+        param_decls: Option declarations (``"--json"`` etc.)
+        option_kwargs: Fully prepared kwargs (callback + expose_value set).
+        name: The Python name Click would derive; used for the conflict check.
+
+    Raises:
+        ValueError: If a parameter with the same name is already on the
+            command. Message identifies the command so the caller can
+            locate the conflict.
+    """
+    for existing in command.params:
+        if getattr(existing, "name", None) == name:
+            # Help the caller find the conflict: command.name is Click's
+            # own identifier for the command (set via @click.command(name=)
+            # or derived from the function name).
+            cmd_label = getattr(command, "name", None) or type(command).__name__
+            raise ValueError(
+                f"Cannot install global option {param_decls!r}: command "
+                f"{cmd_label!r} already has a parameter named {name!r}. "
+                "Either rename the conflicting option, remove the manual "
+                "declaration, or don't call add_global_option() twice for "
+                "the same flag."
+            )
+    command.params.append(click.Option(list(param_decls), **option_kwargs))
