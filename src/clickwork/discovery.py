@@ -164,28 +164,59 @@ class LazyEntryPointCommand(click.Command):
         # classification, matches the rest of clickwork's error policy)
         # with a pointer to both sides so the caller can fix whichever
         # makes sense for their setup.
+        #
+        # WHY we walk the FULL loaded tree (not just loaded.params): if
+        # the plugin's entry-point target is a ``click.Group``, the
+        # group's own params don't include the options declared on its
+        # subcommands. A nested subcommand that declares ``--json``
+        # still has its token consumed at the proxy level because the
+        # proxy installed the ``--json`` option via add_global_option
+        # and Click's parser greedily matches it at whichever level
+        # declares it (the proxy, here) before descending. Walking the
+        # full tree catches those deeper collisions.
         proxy_flag_strings: set[str] = set()
         for proxy_param in self.params:
             proxy_flag_strings.update(getattr(proxy_param, "opts", ()))
             proxy_flag_strings.update(getattr(proxy_param, "secondary_opts", ()))
-        for loaded_param in loaded.params:
-            loaded_flag_strings: set[str] = set(
-                getattr(loaded_param, "opts", ())
+
+        # Collect (qualified_path, flag_string) pairs from loaded and any
+        # nested commands it contains. Group membership check uses the
+        # public isinstance on click.Group; Groups always expose their
+        # subcommands via ``.commands``.
+        collisions: list[tuple[str, str]] = []
+
+        def _walk(cmd: click.Command, prefix: str) -> None:
+            path = f"{prefix} {cmd.name}".strip()
+            for p in cmd.params:
+                cmd_flags = set(getattr(p, "opts", ()))
+                cmd_flags.update(getattr(p, "secondary_opts", ()))
+                for flag in cmd_flags & proxy_flag_strings:
+                    collisions.append((path, flag))
+            if isinstance(cmd, click.Group):
+                for sub in cmd.commands.values():
+                    _walk(sub, path)
+
+        _walk(loaded, self.name or "")
+
+        if collisions:
+            # Group collisions by flag so the error message names each
+            # conflicting flag once with all the command paths that
+            # declare it -- easier to read than one line per occurrence.
+            by_flag: dict[str, list[str]] = {}
+            for cmd_path, flag in collisions:
+                by_flag.setdefault(flag, []).append(cmd_path)
+            details = "; ".join(
+                f"{flag!r} declared on " + ", ".join(sorted(paths))
+                for flag, paths in sorted(by_flag.items())
             )
-            loaded_flag_strings.update(
-                getattr(loaded_param, "secondary_opts", ())
+            raise click.UsageError(
+                f"Entry-point plugin {self.name!r} contains option(s) that "
+                f"collide with a globally-installed option on the CLI root: "
+                f"{details}. The global option consumes these flags before "
+                f"the plugin command/subcommand sees them. Either rename "
+                f"the plugin-side option(s) or omit the global install for "
+                f"the colliding flag(s)."
             )
-            overlap = proxy_flag_strings & loaded_flag_strings
-            if overlap:
-                raise click.UsageError(
-                    f"Entry-point plugin {self.name!r} declares option "
-                    f"{sorted(overlap)!r} which collides with a globally-"
-                    f"installed option on the CLI root. The global option "
-                    f"consumes the flag before the plugin sees it, so "
-                    f"whichever side you want to act on it should be the "
-                    f"only one that declares it. Either rename the plugin's "
-                    f"option or omit the global install for that flag."
-                )
 
         # Pass obj=ctx.obj so the new context created by loaded.main() carries
         # the CliContext forward.  Click forwards **extra kwargs through

@@ -514,6 +514,73 @@ class TestAddGlobalOptionEntryPointPropagation:
         assert "plugin-cmd" in result.output
         assert "--json" in result.output
 
+    def test_global_option_flag_collision_on_nested_subcommand_raises(
+        self, monkeypatch
+    ) -> None:
+        """Collision on a nested subcommand of a loaded group also raises.
+
+        WHY this test exists: the runtime check walks the LOADED command's
+        tree, not just its own ``.params``. If a plugin's entry-point
+        target is a ``click.Group`` and the collision lives on one of the
+        group's subcommands, an earlier "only check loaded.params" version
+        would MISS it -- Click's parser would still consume the flag at
+        the proxy level, so the subcommand would silently never see its
+        own option. This test builds that exact shape (a loaded group
+        ``plugin`` with a subcommand ``sub`` that declares ``--json``)
+        and asserts the runtime check fires with both ``sub`` and
+        ``--json`` named in the error.
+        """
+        import click
+        from click.testing import CliRunner
+        from clickwork.discovery import discover_commands_from_entrypoints
+
+        class FakeEntryPoint:
+            name = "plugin"
+
+            def load(self):
+                @click.group(name="plugin")
+                def plugin_grp() -> None: ...
+
+                # Collision lives on the SUBCOMMAND, not the group itself.
+                # A "check loaded.params only" walk would miss this.
+                @plugin_grp.command("sub")
+                @click.option("--json", is_flag=True)
+                def sub(json: bool) -> None: ...
+
+                return plugin_grp
+
+        monkeypatch.setattr(
+            "importlib.metadata.entry_points",
+            lambda group=None: [FakeEntryPoint()] if group == "clickwork.commands" else [],
+        )
+
+        @click.group()
+        def root() -> None: ...
+
+        commands = discover_commands_from_entrypoints()
+        for cmd_name, cmd in commands.items():
+            root.add_command(cmd, cmd_name)
+
+        add_global_option(root, "--json", is_flag=True)
+
+        runner = CliRunner()
+        # Repro from the user review on PR #26: invoke the nested
+        # subcommand with the colliding flag. Without the recursive walk,
+        # this returns exit 0 with root meta['json']=True but the
+        # subcommand sees json=False -- a silent wrong-behaviour. With
+        # the walk, we get UsageError (exit 2) up front.
+        result = runner.invoke(root, ["plugin", "sub", "--json"])
+
+        assert result.exit_code == 2, (
+            f"Expected UsageError (exit 2) on nested-subcommand flag collision; "
+            f"got exit={result.exit_code}, output={result.output!r}"
+        )
+        assert "sub" in result.output, (
+            f"Error message must name the colliding subcommand path; got "
+            f"output={result.output!r}"
+        )
+        assert "--json" in result.output
+
 
 class TestAddGlobalOptionIntegration:
     """End-to-end check that add_global_option composes with create_cli()."""
