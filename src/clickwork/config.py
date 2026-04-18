@@ -691,6 +691,12 @@ def load_config(
         repo_config_path = Path.cwd() / f".{project_name}.toml"
 
     # Load the full TOML file once; we'll extract sections from it below.
+    # ``repo_config_exists`` tells us whether the file is actually on disk --
+    # the fail-fast unknown-env check below uses it to stay silent when
+    # there is no repo config at all (e.g. a CLI invoked outside a project
+    # dir with --env=staging from muscle memory). Only once a project has
+    # a config file does "unknown env" become an actionable misconfig.
+    repo_config_exists = repo_config_path.is_file()
     repo_data = _load_toml(repo_config_path)
 
     # The [default] section provides baseline values for all environments.
@@ -702,9 +708,39 @@ def load_config(
     # [env.production], [env.staging], etc. overlay [default] -- keys present
     # in the env section override [default], but keys absent from the env
     # section still fall through to [default].
+    #
+    # Fail-fast on unknown env names: when the caller explicitly selects an
+    # env (via ``--env production`` or the ``{PROJECT_NAME}_ENV`` fallback)
+    # but the TOML file has no matching ``[env.production]`` section, silently
+    # loading ``[default]`` is a footgun -- the operator thinks they're on
+    # "production" settings, but they're actually on dev defaults. Matching
+    # the "fail loud" discipline applied elsewhere (required keys, unsafe
+    # file perms, secret-in-repo), we raise ConfigError with a message that
+    # names the missing section AND the envs that ARE defined so the
+    # operator can pick the right one or add the section.
     repo_env: dict[str, Any] = {}
-    if env and "env" in repo_data and env in repo_data["env"]:
-        repo_env = _flatten_mapping(repo_data["env"][env])
+    if env is not None and repo_config_exists:
+        # ``env_sections`` is the set of environment names the loader found
+        # in the file. It might be empty (file declares no [env.*] tables at
+        # all) or missing the selected name. Either case is a misconfig.
+        env_sections = repo_data.get("env", {})
+        if env in env_sections:
+            repo_env = _flatten_mapping(env_sections[env])
+        else:
+            # Sort the defined-sections list so error messages are stable
+            # across dict-iteration orderings (Python 3.7+ preserves insertion
+            # order, but a user editing the TOML file shouldn't have test
+            # failures depend on the order keys were typed).
+            defined = sorted(env_sections.keys())
+            if defined:
+                defined_clause = f"Defined sections: {defined}."
+            else:
+                defined_clause = "No [env.*] sections are defined in this file."
+            raise ConfigError(
+                f"Config env '{env}' is not defined in {repo_config_path}. "
+                f"{defined_clause} "
+                f"Add an [env.{env}] section or select a defined env."
+            )
 
     # -------------------------------------------------------------------------
     # Build the merged config dict: user < default < env-specific
