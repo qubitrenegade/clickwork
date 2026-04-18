@@ -34,7 +34,13 @@ __version__ = "0.2.0"
 # resolution (which doesn't fire until the user imports the submodule
 # explicitly somewhere else first).
 from clickwork import http, platform, testing
-from clickwork._types import CliContext, CliProcessError, PrerequisiteError, Secret, normalize_prefix
+from clickwork._types import (
+    CliContext,
+    CliProcessError,
+    PrerequisiteError,
+    Secret,
+    normalize_prefix,
+)
 from clickwork.cli import create_cli, pass_cli_context
 from clickwork.config import ConfigError, load_config
 from clickwork.discovery import ClickworkDiscoveryError

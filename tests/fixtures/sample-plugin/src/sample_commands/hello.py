@@ -7,6 +7,7 @@ This command group shows:
 - Using require() for prerequisite checks
 - Using run()/capture() for subprocess execution
 """
+
 import click
 
 

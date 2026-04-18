@@ -13,6 +13,7 @@ find_repo_root() walks up from a starting directory looking for .git as
 either a directory (normal repo) or a file (worktree/submodule). Falls back
 to `git rev-parse --show-toplevel` if the walk fails.
 """
+
 from __future__ import annotations
 
 import functools
@@ -20,7 +21,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 
@@ -116,7 +117,7 @@ def _select_impl(
     return None, None, sys.platform
 
 
-def _raise_unsupported(custom_message: str | None, platform_name: str) -> None:
+def _raise_unsupported(custom_message: str | None, platform_name: str) -> NoReturn:
     """Raise click.UsageError with a custom or default 'not supported' message.
 
     Extracted so decorator and functional forms share the exact same wording
@@ -237,6 +238,7 @@ def platform_dispatch(
         to define the signature and carry the Click decorator stack. All
         real work happens in the selected per-OS impl.
         """
+
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             impl, error_message, platform_name = _select_impl(dispatch_kwargs)
@@ -247,6 +249,7 @@ def platform_dispatch(
             # arguments flow straight through to the per-OS impl with the
             # same names the decorated function declared.
             return impl(*args, **kwargs)
+
         return wrapper
 
     return decorator

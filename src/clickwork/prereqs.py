@@ -10,6 +10,7 @@ This catches missing/misconfigured tools early -- before the command does
 any work -- instead of failing cryptically when a subprocess call fails
 halfway through a deploy.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,26 +52,26 @@ def require(binary: str, authenticated: bool = False) -> None:
     """
     if shutil.which(binary) is None:
         raise PrerequisiteError(
-            f"Required tool '{binary}' is not installed or not on PATH. "
-            f"Install it and try again."
+            f"Required tool '{binary}' is not installed or not on PATH. Install it and try again."
         )
 
     if authenticated:
         auth_cmd = AUTH_CHECKS.get(binary)
         if auth_cmd is None:
             logger.warning(
-                "No auth check known for '%s'. "
-                "Skipping authentication verification.",
+                "No auth check known for '%s'. Skipping authentication verification.",
                 binary,
             )
             return
 
         try:
             subprocess.run(
-                auth_cmd, capture_output=True, check=True, shell=False,
+                auth_cmd,
+                capture_output=True,
+                check=True,
+                shell=False,
             )
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as exc:
             raise PrerequisiteError(
-                f"'{binary}' is not authenticated. "
-                f"Run the appropriate login command and try again."
-            )
+                f"'{binary}' is not authenticated. Run the appropriate login command and try again."
+            ) from exc

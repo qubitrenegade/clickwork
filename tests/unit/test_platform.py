@@ -10,6 +10,7 @@ per-OS implementation at call time. Tests monkeypatch ``sys.platform`` to
 the strings clickwork's ``is_linux``/``is_macos``/``is_windows`` helpers
 check for: ``"linux"``, ``"darwin"``, and (importantly) ``"win32"``.
 """
+
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -316,6 +317,7 @@ class TestPlatformDispatchViaClickRunner:
         Patches ``sys.platform`` to ``"linux"`` before invocation.
         """
         from click.testing import CliRunner
+
         from clickwork.cli import create_cli, pass_cli_context
         from clickwork.platform import platform_dispatch
 
@@ -343,7 +345,9 @@ class TestPlatformDispatchViaClickRunner:
             windows=_windows_up,
             macos=_macos_up,
         )
-        def runner_up(ctx, name): ...  # body intentionally empty -- platform_dispatch never calls it
+        def runner_up(
+            ctx, name
+        ): ...  # body intentionally empty -- platform_dispatch never calls it
 
         cmd_dir = tmp_path / "commands"
         cmd_dir.mkdir()

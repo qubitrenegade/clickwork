@@ -11,6 +11,7 @@ convention in isolation. That way a future refactor of the helpers produces a
 single focused failure, instead of a wall of broken assertions that all
 collapse into the same root cause.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -10,13 +10,14 @@ Test structure:
 - TestFrameworkErrorHandling: tests that unhandled exceptions exit with code 2
 - TestPassCliContextDecorator: tests the @pass_cli_context decorator
 """
+
+import sys
 from pathlib import Path
 from unittest.mock import patch
-import sys
 
 import click
-from click.testing import CliRunner
 import pytest
+from click.testing import CliRunner
 
 
 class TestCreateCli:
@@ -97,7 +98,6 @@ class TestCreateCli:
         The CliContext carries all of that from the group callback.
         """
         from clickwork.cli import create_cli
-        from clickwork._types import CliContext
 
         received_ctx = {}
 
@@ -316,8 +316,177 @@ class TestCreateCli:
         assert received["bucket"] == "from-config"
 
 
+class TestVersionFlag:
+    """create_cli(version=..., package_name=...) wires up --version (issue #48).
+
+    WHY this class exists: pre-#48, every clickwork consumer had to
+    reinvent ``--version`` with their own ``@click.version_option`` or a
+    custom callback. Standardizing the pattern inside ``create_cli()``
+    means consumers opt in once and get consistent output
+    (``<name>, version <version>``), consistent flag spellings
+    (``-V`` / ``--version``), and consistent behaviour around
+    auto-resolution from installed package metadata.
+
+    Design decisions pinned by these tests (per the issue and the 1.0
+    roadmap Wave 2a #48 entry):
+
+    - Two kwargs: ``version=`` (literal string) and ``package_name=``
+      (distribution name for ``importlib.metadata.version()`` lookup).
+    - Explicit ``version=`` wins when both are set.
+    - Both unset means NO ``--version`` flag is installed -- silently
+      adding one would be a behaviour change for every 0.x consumer.
+    - A bad ``package_name=`` raises ``ValueError`` at construction
+      time, not at ``--version`` invocation time. Loud > quiet.
+    """
+
+    def test_version_flag_emits_literal_version_string(self, tmp_path: Path):
+        """create_cli(version=...) must expose --version with that exact string.
+
+        WHY: the explicit-string path is the simplest/most common case.
+        Consumers who already know their version (read from
+        ``__version__``, fed in at packaging time, etc.) can pass it
+        straight through without any indirection.
+        """
+        from clickwork.cli import create_cli
+
+        cli = create_cli(name="test-cli", commands_dir=tmp_path, version="9.9.9")
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+        assert result.exit_code == 0
+        # Click's default version message is "<prog>, version <version>".
+        # We pin both halves because prog_name=name was part of the
+        # design decision (users should not see the import path).
+        assert "9.9.9" in result.output
+        assert "test-cli" in result.output
+
+    def test_version_short_flag_dash_big_v_works(self, tmp_path: Path):
+        """-V must work as a short alias for --version.
+
+        WHY a dedicated test: it's easy to accidentally bind
+        ``click.version_option(version)`` without the short flag, and
+        that drift wouldn't be caught by the long-flag test above.
+        Pinning -V separately protects the documented CLI surface.
+        """
+        from clickwork.cli import create_cli
+
+        cli = create_cli(name="test-cli", commands_dir=tmp_path, version="1.2.3")
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-V"])
+        assert result.exit_code == 0
+        assert "1.2.3" in result.output
+
+    def test_version_auto_resolves_from_package_name(self, tmp_path: Path):
+        """package_name= should auto-resolve via importlib.metadata.
+
+        WHY we test against ``clickwork`` itself: it's guaranteed to be
+        installed in the dev environment (editable install driven by
+        uv/pyproject), and its version matches
+        ``importlib.metadata.version('clickwork')``. Using a real
+        installed distribution keeps the test honest about the
+        ``importlib.metadata`` integration instead of mocking the lookup.
+        """
+        import importlib.metadata
+
+        from clickwork.cli import create_cli
+
+        expected_version = importlib.metadata.version("clickwork")
+        cli = create_cli(name="test-cli", commands_dir=tmp_path, package_name="clickwork")
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+        assert result.exit_code == 0
+        assert expected_version in result.output
+
+    def test_version_wins_over_package_name_when_both_set(self, tmp_path: Path):
+        """Explicit version= must override any package_name= lookup.
+
+        WHY: a caller who passes both is almost certainly doing
+        something deliberate (e.g. injecting a CI-computed version
+        string). Silently preferring the metadata lookup would surprise
+        them. The rule is simple and local: if ``version is not None``,
+        skip the metadata path entirely. The check is ``is not None``
+        specifically -- an empty ``version=""`` still wins over
+        ``package_name=``, because the caller explicitly chose to
+        suppress the resolved version in favour of an empty string.
+        """
+        from clickwork.cli import create_cli
+
+        cli = create_cli(
+            name="test-cli",
+            commands_dir=tmp_path,
+            version="override-9.9.9",
+            package_name="clickwork",  # would resolve to 0.2.0 or similar
+        )
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+        assert result.exit_code == 0
+        assert "override-9.9.9" in result.output
+        # Guard against the metadata value leaking through. We don't
+        # hard-code the real clickwork version here because the dev
+        # environment's version bumps over time; asserting the
+        # override substring is present AND the output line is short
+        # enough to contain only one version is enough to pin the
+        # precedence rule.
+        import importlib.metadata
+
+        real_version = importlib.metadata.version("clickwork")
+        if real_version != "override-9.9.9":  # sanity: they're different
+            assert real_version not in result.output, (
+                "Both version= and package_name= were passed, but the "
+                "package_name lookup appears to have leaked into the "
+                "output -- version= must take precedence."
+            )
+
+    def test_no_version_flag_when_neither_arg_provided(self, tmp_path: Path):
+        """When neither kwarg is provided, --version must not exist.
+
+        WHY this is a regression guard, not just a "behaviour" test:
+        silently installing --version for every 0.x consumer would
+        shadow any --version they already implemented via custom
+        Click decorators (e.g. orbit-admin's legacy version handler
+        before it migrates to clickwork's built-in). Keeping the flag
+        opt-in means existing consumers see zero behaviour change.
+        """
+        from clickwork.cli import create_cli
+
+        cli = create_cli(name="test-cli", commands_dir=tmp_path)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["--version"])
+        # Click reports "no such option: --version" as a UsageError.
+        # UsageError exit code is 2; the important signal is non-zero
+        # plus the error message in stderr.
+        assert result.exit_code != 0
+        # Click formats unknown options as "no such option: --version"
+        # (newer Click) or similar. We look for the core phrase.
+        assert "no such option" in result.output.lower() or "--version" in result.output
+
+    def test_package_name_not_installed_raises_clear_error(self, tmp_path: Path):
+        """A bogus package_name must raise ValueError at create_cli() time.
+
+        WHY eager validation: if we silently omitted the --version
+        flag on PackageNotFoundError, a typo like
+        ``package_name="click_work"`` (underscore vs hyphen) would
+        go undetected until a user ran ``--version`` and got a
+        confusing "no such option" error. Raising at construction
+        time pins the error to the caller's stack frame where the
+        typo lives.
+
+        We also check the message names the bogus distribution so
+        debugging is straightforward -- a wrapped PackageNotFoundError
+        with no context would be less useful than the original.
+        """
+        from clickwork.cli import create_cli
+
+        bogus_name = "definitely-not-an-installed-package-xyz"
+        with pytest.raises(ValueError, match=bogus_name):
+            create_cli(
+                name="test-cli",
+                commands_dir=tmp_path,
+                package_name=bogus_name,
+            )
+
+
 class TestEnableParentPackageImports:
-    """create_cli(enable_parent_package_imports=True) inserts commands_dir.parent.parent into sys.path.
+    """enable_parent_package_imports=True inserts commands_dir.parent.parent into sys.path.
 
     WHY this feature exists: plugin authors want their command files to be able
     to ``from tools.lib.X import Y`` without having to add sys.path boilerplate
@@ -564,9 +733,9 @@ class TestConvenienceMethods:
         assert result.exit_code == 0, f"CLI failed: {result.output!r}"
         assert received["returncode"] == 0
         captured = capfd.readouterr()
-        assert captured.out == "ctx-forwarded-token", (
-            f"Expected stdin payload to round-trip through ctx.run; got {captured.out!r}"
-        )
+        assert (
+            captured.out == "ctx-forwarded-token"
+        ), f"Expected stdin payload to round-trip through ctx.run; got {captured.out!r}"
 
     def test_ctx_run_with_confirm_forwards_stdin_text(self, tmp_path: Path, capfd):
         """ctx.run_with_confirm(stdin_text=...) must also forward.
@@ -615,8 +784,8 @@ class TestConvenienceMethods:
         ctx-level forwarding shape, mirroring the symmetry of
         test_ctx_run_forwards_stdin_text / test_ctx_run_with_confirm_forwards_stdin_text.
         """
-        from clickwork.cli import create_cli
         from clickwork._types import Secret
+        from clickwork.cli import create_cli
 
         received = {}
 
@@ -778,8 +947,8 @@ class TestFrameworkErrorHandling:
         framework bug. Exit code 1 tells CI it's a fixable configuration
         error, not an internal failure.
         """
-        from clickwork.cli import create_cli
         from clickwork._types import PrerequisiteError
+        from clickwork.cli import create_cli
 
         @click.command()
         @click.pass_obj
@@ -885,9 +1054,7 @@ class TestClickExceptionHandling:
         assert "myfile.txt" in result.output
         assert "file not found" in result.output
 
-    def test_generic_click_exception_exits_1_without_internal_prefix(
-        self, tmp_path: Path
-    ):
+    def test_generic_click_exception_exits_1_without_internal_prefix(self, tmp_path: Path):
         """A plain click.ClickException should exit 1 with Click's own format.
 
         WHY: Plugin authors sometimes raise ClickException directly to signal
@@ -927,8 +1094,8 @@ class TestPassCliContextDecorator:
         remembering to call ensure_object(). It also gives a clear error
         if the command is somehow invoked outside a create_cli() harness.
         """
-        from clickwork.cli import create_cli, pass_cli_context
         from clickwork._types import CliContext
+        from clickwork.cli import create_cli, pass_cli_context
 
         received = {}
 

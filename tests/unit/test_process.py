@@ -14,10 +14,10 @@ instances, get version). The key design decisions tested here:
 8. run_with_confirm() prompts before executing destructive commands
 9. On Ctrl-C, run() forwards SIGINT to the child and waits before re-raising
 """
-import sys
-import subprocess
+
 import signal
-from unittest.mock import patch, MagicMock
+import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -32,8 +32,8 @@ class TestRun:
         assert result.returncode == 0
 
     def test_raises_cli_process_error_on_failure(self):
-        from clickwork.process import run
         from clickwork._types import CliProcessError
+        from clickwork.process import run
 
         with pytest.raises(CliProcessError) as exc_info:
             run([sys.executable, "-c", "import sys; sys.exit(1)"])
@@ -88,14 +88,14 @@ class TestRun:
         assert proc.wait.call_count == 2
 
     def test_missing_binary_raises_cli_process_error(self):
-        """A nonexistent binary should raise CliProcessError (exit 1), not FileNotFoundError (exit 2).
+        """A nonexistent binary should raise CliProcessError (exit 1), not FileNotFoundError.
 
         WHY: a missing binary is a user/environment error, not a framework bug.
         Without this catch, the framework's wrapped_invoke handler classifies it
         as an unhandled exception and exits with code 2, which is misleading.
         """
-        from clickwork.process import run
         from clickwork._types import CliProcessError
+        from clickwork.process import run
 
         with pytest.raises(CliProcessError, match="Command not found"):
             run(["definitely-not-a-real-binary-xyz123"])
@@ -227,8 +227,8 @@ class TestCapture:
         assert output.strip() == "hello world"
 
     def test_raises_on_failure(self):
-        from clickwork.process import capture
         from clickwork._types import CliProcessError
+        from clickwork.process import capture
 
         with pytest.raises(CliProcessError):
             capture([sys.executable, "-c", "import sys; sys.exit(1)"])
@@ -260,8 +260,8 @@ class TestCapture:
         Same policy as run(): missing binary is exit 1 (user error), not
         exit 2 (framework bug).
         """
-        from clickwork.process import capture
         from clickwork._types import CliProcessError
+        from clickwork.process import capture
 
         with pytest.raises(CliProcessError, match="Command not found"):
             capture(["definitely-not-a-real-binary-xyz123"])
@@ -271,8 +271,9 @@ class TestRunWithConfirm:
     """run_with_confirm() prompts before executing destructive commands."""
 
     def test_executes_when_confirmed(self):
-        from clickwork.process import run_with_confirm
         from unittest.mock import patch
+
+        from clickwork.process import run_with_confirm
 
         # Patch the imported binding in the process module so the already-
         # resolved _prompt_confirm name is replaced for this test.
@@ -285,8 +286,9 @@ class TestRunWithConfirm:
             assert result.returncode == 0
 
     def test_skips_when_denied(self):
-        from clickwork.process import run_with_confirm
         from unittest.mock import patch
+
+        from clickwork.process import run_with_confirm
 
         # Patch the imported binding in the process module so the already-
         # resolved _prompt_confirm name is replaced for this test.
@@ -393,8 +395,8 @@ class TestRunWithSecrets:
         leaking the secret, and an error message that echoes .get() back
         would undermine that.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         secret = Secret("supersecret-leaky")
         with pytest.raises(ValueError) as exc_info:
@@ -402,9 +404,9 @@ class TestRunWithSecrets:
 
         # Error message must reference the position (index 1) so the
         # caller knows which arg to fix.
-        assert "1" in str(exc_info.value), (
-            f"Expected error to name the offending position, got: {exc_info.value!r}"
-        )
+        assert "1" in str(
+            exc_info.value
+        ), f"Expected error to name the offending position, got: {exc_info.value!r}"
         # The raw secret value must NOT appear anywhere in the error -- a
         # regression here would mean our "don't leak secrets" helper leaks
         # secrets in its own rejection path.
@@ -418,8 +420,8 @@ class TestRunWithSecrets:
         themselves is error-prone. Giving ``secrets=`` its own channel
         makes the "this is sensitive" signal visible at each call site.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         # Child reads the env var we claim to have set and exits 0 iff
         # the value matches -- we assert exit code here. The companion
@@ -447,8 +449,8 @@ class TestRunWithSecrets:
         guaranteeing Secret.get() was called and the value was placed
         into env under the right key.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         run_with_secrets(
             [
@@ -471,8 +473,8 @@ class TestRunWithSecrets:
         env -- that's intentional; some tools read from one channel, some
         from the other, and the caller shouldn't have to pick.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         run_with_secrets(
             [
@@ -495,8 +497,9 @@ class TestRunWithSecrets:
         ``<redacted>`` is the canonical placeholder.
         """
         import logging
-        from clickwork.process import run_with_secrets
+
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         # caplog captures records from the clickwork logger. INFO level
         # so the helper's own info-level message is retained.
@@ -508,9 +511,9 @@ class TestRunWithSecrets:
 
         # Flatten all captured log messages for substring checks.
         all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
-        assert "<redacted>" in all_log_text, (
-            f"Expected '<redacted>' marker in log output, got: {all_log_text!r}"
-        )
+        assert (
+            "<redacted>" in all_log_text
+        ), f"Expected '<redacted>' marker in log output, got: {all_log_text!r}"
         # The env-var NAME stays visible so operators can see which keys
         # were set.
         assert "K" in all_log_text
@@ -520,9 +523,7 @@ class TestRunWithSecrets:
         # which has no 'v' -- or inside words like "secrets" / "env" /
         # "delegate". For safety, grep for "=v" which would be the shape
         # of a leaked "K=v" pair.)
-        assert "=v" not in all_log_text, (
-            f"Secret value leaked into log: {all_log_text!r}"
-        )
+        assert "=v" not in all_log_text, f"Secret value leaked into log: {all_log_text!r}"
 
     def test_run_with_secrets_does_not_leak_non_secret_env_values(self, caplog):
         """Non-secret env values ALSO redacted (tightened after Copilot PR #28).
@@ -541,8 +542,9 @@ class TestRunWithSecrets:
         log output.
         """
         import logging
-        from clickwork.process import run_with_secrets
+
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         accidental_plaintext = "ghp_totallyNotWrappedInSecret_12345"
 
@@ -554,9 +556,9 @@ class TestRunWithSecrets:
             )
 
         all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
-        assert accidental_plaintext not in all_log_text, (
-            f"Non-secret env value leaked into log: {all_log_text!r}"
-        )
+        assert (
+            accidental_plaintext not in all_log_text
+        ), f"Non-secret env value leaked into log: {all_log_text!r}"
         # Non-secret VALUES also hidden: "us-east-1" must not appear either.
         assert "us-east-1" not in all_log_text
         # But the NAMES must still be visible so operators can see shape.
@@ -575,8 +577,8 @@ class TestRunWithSecrets:
         child process. Raising early with a ValueError makes the mistake
         obvious. The error message must NOT leak any secret value.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         # Case 1: secrets dict is empty.
         with pytest.raises(ValueError) as exc_info:
@@ -606,8 +608,8 @@ class TestRunWithSecrets:
         output would defeat the purpose (and could leak the secret to
         the child even if we never read its output).
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         with patch("subprocess.Popen") as mock_popen:
             result = run_with_secrets(
@@ -630,8 +632,8 @@ class TestRunWithSecrets:
         tracks every .get() call; the assertion is that it was called
         ZERO times.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         unwrap_count = {"count": 0}
 
@@ -672,8 +674,9 @@ class TestRunWithSecrets:
         the offending index instead of a mysterious "command did the
         wrong thing" bug at runtime.
         """
-        from clickwork.process import run_with_secrets
         from pathlib import Path
+
+        from clickwork.process import run_with_secrets
 
         with pytest.raises(TypeError) as exc_info:
             run_with_secrets(
@@ -684,7 +687,11 @@ class TestRunWithSecrets:
         # locate the bad arg without a traceback hunt.
         assert "cmd[1]" in str(exc_info.value)
         # Mention the type so the fix (str(path)) is obvious.
-        assert "PosixPath" in str(exc_info.value) or "WindowsPath" in str(exc_info.value) or "Path" in str(exc_info.value)
+        assert (
+            "PosixPath" in str(exc_info.value)
+            or "WindowsPath" in str(exc_info.value)
+            or "Path" in str(exc_info.value)
+        )
 
     def test_run_with_secrets_rejects_non_str_env_value_before_unwrap(self):
         """Non-str env values must raise BEFORE any Secret.get() runs.
@@ -696,8 +703,8 @@ class TestRunWithSecrets:
         touch" promise: no Secret ever gets unwrapped on a call that
         was doomed anyway. The Spy-Secret counter pins that.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         unwrap_count = {"count": 0}
 
@@ -729,8 +736,8 @@ class TestRunWithSecrets:
 
     def test_run_with_secrets_rejects_non_str_env_key(self):
         """Non-str env keys also rejected up front (same rationale)."""
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         with pytest.raises(TypeError, match="env keys must be str"):
             run_with_secrets(
@@ -749,8 +756,8 @@ class TestRunWithSecrets:
         far from the real cause. Validate key types up front so the
         Secret.get() never happens on the bad call.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
         with pytest.raises(TypeError) as exc_info:
             run_with_secrets(
@@ -817,15 +824,17 @@ class TestRunWithSecrets:
         key in both env and secrets -- the secrets value is what the
         call was set up to deliver.
         """
-        from clickwork.process import run_with_secrets
         from clickwork._types import Secret
+        from clickwork.process import run_with_secrets
 
+        # Inline Python snippet kept on one line so the child shell invocation
+        # stays self-contained; noqa since E501 isn't worth splitting a string
+        # literal argument here.
+        snippet = (
+            "import os, sys; sys.stdout.write(os.environ['REGION'] + ':' + os.environ['TOKEN'])"
+        )
         run_with_secrets(
-            [
-                sys.executable,
-                "-c",
-                "import os, sys; sys.stdout.write(os.environ['REGION'] + ':' + os.environ['TOKEN'])",
-            ],
+            [sys.executable, "-c", snippet],
             secrets={"TOKEN": Secret("t")},
             env={"REGION": "us-east-1"},
         )

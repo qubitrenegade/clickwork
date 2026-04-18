@@ -9,17 +9,19 @@ Four types are defined here:
   - PrerequisiteError : raised when a required tool is missing or not authenticated
   - CliContext        : dataclass threaded through Click's ctx.obj to every command
 """
+
 from __future__ import annotations
 
 import logging
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
-
+from typing import Any, NoReturn
 
 # ---------------------------------------------------------------------------
 # Secret
 # ---------------------------------------------------------------------------
+
 
 class Secret:
     """An opaque wrapper that prevents accidental logging of sensitive values.
@@ -122,7 +124,7 @@ class Secret:
 
     # --- serialisation block ---
 
-    def __reduce__(self):
+    def __reduce__(self) -> NoReturn:
         """Block pickling to prevent accidental serialisation of secrets.
 
         pickle calls __reduce__ to determine how to serialise an object.
@@ -139,7 +141,7 @@ class Secret:
 
     # --- safe copy semantics ---
 
-    def __copy__(self) -> "Secret":
+    def __copy__(self) -> Secret:
         """Return a new Secret wrapping the same value.
 
         copy.copy() calls __copy__ when available. We return a new Secret
@@ -150,7 +152,7 @@ class Secret:
         """
         return Secret(self._value)
 
-    def __deepcopy__(self, memo: dict) -> "Secret":
+    def __deepcopy__(self, memo: dict[int, Any]) -> Secret:
         """Return a new Secret wrapping the same value (deep copy is shallow here).
 
         copy.deepcopy() follows __deepcopy__. Strings are immutable, so a
@@ -169,6 +171,7 @@ class Secret:
 # ---------------------------------------------------------------------------
 # CliProcessError
 # ---------------------------------------------------------------------------
+
 
 class CliProcessError(Exception):
     """A subprocess failure wrapped with enough context to act on.
@@ -220,6 +223,7 @@ class CliProcessError(Exception):
 # PrerequisiteError
 # ---------------------------------------------------------------------------
 
+
 class PrerequisiteError(Exception):
     """Raised when a required tool is missing or not authenticated.
 
@@ -237,6 +241,7 @@ class PrerequisiteError(Exception):
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def normalize_prefix(name: str) -> str:
     """Convert a project/CLI name to a shell-safe env-var prefix.
@@ -258,6 +263,7 @@ def normalize_prefix(name: str) -> str:
 # ---------------------------------------------------------------------------
 # CliContext
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class CliContext:
@@ -304,7 +310,7 @@ class CliContext:
 
     # --- core configuration ---
 
-    config: dict = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     """Merged config from layered TOML files, keyed by string."""
 
     env: str | None = None
@@ -334,18 +340,24 @@ class CliContext:
     # without wiring up a full subprocess harness.  The CLI harness injects
     # concrete implementations before dispatching to command handlers.
 
-    run: Callable[..., subprocess.CompletedProcess | None] | None = field(
-        default=None, repr=False, compare=False,
+    run: Callable[..., subprocess.CompletedProcess[Any] | None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Run a command, inheriting stdio. Raises CliProcessError on failure."""
 
     capture: Callable[..., str] | None = field(
-        default=None, repr=False, compare=False,
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Run a command and return stripped stdout as a string."""
 
     require: Callable[..., None] | None = field(
-        default=None, repr=False, compare=False,
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Assert that a binary exists on PATH, raising PrerequisiteError if not.
 
@@ -359,22 +371,30 @@ class CliContext:
     """
 
     confirm: Callable[..., bool] | None = field(
-        default=None, repr=False, compare=False,
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Prompt the user for confirmation unless --yes is set."""
 
     confirm_destructive: Callable[..., bool] | None = field(
-        default=None, repr=False, compare=False,
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Like confirm, but adds extra warnings for irreversible operations."""
 
-    run_with_confirm: Callable[..., subprocess.CompletedProcess | None] | None = field(
-        default=None, repr=False, compare=False,
+    run_with_confirm: Callable[..., subprocess.CompletedProcess[Any] | None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Confirm then run: wraps confirm() + run() in a single call."""
 
-    run_with_secrets: Callable[..., subprocess.CompletedProcess | None] | None = field(
-        default=None, repr=False, compare=False,
+    run_with_secrets: Callable[..., subprocess.CompletedProcess[Any] | None] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
     )
     """Run a subprocess with secrets delivered via env (and optionally stdin).
 

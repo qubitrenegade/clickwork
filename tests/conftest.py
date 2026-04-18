@@ -4,6 +4,7 @@ Provides a CliContext factory so tests don't need to construct one with
 7 positional args every time. Fixtures are added incrementally as modules
 are built.
 """
+
 import logging
 
 import pytest
@@ -17,6 +18,7 @@ def make_cli_context():
         def test_something(make_cli_context):
             ctx = make_cli_context(dry_run=True)
     """
+
     def _factory(**overrides):
         from clickwork._types import CliContext
 

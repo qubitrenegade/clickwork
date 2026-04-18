@@ -46,11 +46,13 @@ Design choices worth reading before changing this file:
    Flags get simpler treatment: any truthy occurrence wins via OR, because
    the flag's presence is itself the signal regardless of the default.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 import click
+
 # NOTE on the click.core import: at the project's declared minimum
 # Click version (``click>=8.2`` per pyproject.toml) ``ParameterSource``
 # lives at ``click.core.ParameterSource`` and is NOT re-exported to
@@ -338,9 +340,7 @@ def add_global_option(
     # probe gives us the actual set of strings Click will register on
     # each command, matching how ``existing.opts`` / ``secondary_opts``
     # is populated on already-installed options.
-    new_flag_strings = set(getattr(probe, "opts", ())) | set(
-        getattr(probe, "secondary_opts", ())
-    )
+    new_flag_strings = set(getattr(probe, "opts", ())) | set(getattr(probe, "secondary_opts", ()))
 
     # Walk the command tree and install a FRESH click.Option on every level.
     # WHY a fresh instance per level: click.Option objects are stateful
@@ -389,7 +389,10 @@ def _derive_option_name(
             f"Click failed to derive a name for option {param_decls!r}; "
             "pass an explicit 'param_decls' that includes a long-form flag."
         )
-    return probe.name
+    # Click types Option.name as Optional[str]; after the None guard above
+    # the value is always a str, but mypy needs the explicit cast because
+    # Click's own stubs mark the attribute as Optional.
+    return str(probe.name)
 
 
 def _install_on_group(

@@ -13,12 +13,16 @@ Plugin authors call this once in their entry point script:
     from clickwork import create_cli
     cli = create_cli(name="orbit-admin", commands_dir=Path(__file__).parent / "commands")
 """
+
 from __future__ import annotations
 
 import functools
+import importlib.metadata
 import os
 import sys
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -29,12 +33,18 @@ from clickwork.config import ConfigError, load_config
 from clickwork.discovery import discover_commands
 from clickwork.process import (
     capture as _capture,
+)
+from clickwork.process import (
     run as _run,
+)
+from clickwork.process import (
     run_with_confirm as _run_with_confirm,
+)
+from clickwork.process import (
     run_with_secrets as _run_with_secrets,
 )
-from clickwork.prompts import confirm as _confirm, confirm_destructive as _confirm_destructive
-
+from clickwork.prompts import confirm as _confirm
+from clickwork.prompts import confirm_destructive as _confirm_destructive
 
 # Exit codes per spec:
 # 0 = success
@@ -67,7 +77,7 @@ EXIT_FRAMEWORK_ERROR = 2
 # can introspect it. The wrapper's *body* still goes through
 # ``_prereqs.require`` on every call, so patching remains effective.
 @functools.wraps(_prereqs.require)
-def _require_via_prereqs(*args, **kwargs):
+def _require_via_prereqs(*args: Any, **kwargs: Any) -> None:
     return _prereqs.require(*args, **kwargs)
 
 
@@ -85,7 +95,12 @@ class MutuallyExclusive(click.Option):
     are parsed, so it sees the complete picture regardless of order.
     """
 
-    def __init__(self, *args, mutually_exclusive: list[str] | None = None, **kwargs):
+    def __init__(
+        self,
+        *args: Any,
+        mutually_exclusive: list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Create a Click option that enforces mutual exclusivity.
 
         Stores the list of conflicting option names for later checking in
@@ -102,7 +117,12 @@ class MutuallyExclusive(click.Option):
         self._mutually_exclusive = mutually_exclusive or []
         super().__init__(*args, **kwargs)
 
-    def handle_parse_result(self, ctx, opts, args):
+    def handle_parse_result(
+        self,
+        ctx: click.Context,
+        opts: Mapping[str, Any],
+        args: list[str],
+    ) -> tuple[Any, list[str]]:
         """Check for mutual exclusivity conflicts after all options are parsed.
 
         Raises a UsageError only when BOTH this option and a conflicting option
@@ -122,17 +142,21 @@ class MutuallyExclusive(click.Option):
             click.UsageError: If this option and any option in
                 ``_mutually_exclusive`` are both truthy.
         """
+        # ``self.name`` is Optional[str] in Click's stubs but always set by
+        # the time ``handle_parse_result`` runs (Click assigns it from the
+        # declared param decls during Parameter.__init__); the guard below
+        # keeps mypy happy without changing runtime behaviour.
+        if self.name is None:
+            return super().handle_parse_result(ctx, opts, args)
         current_value = opts.get(self.name)
         for other in self._mutually_exclusive:
             other_value = opts.get(other)
             if current_value and other_value:
-                raise click.UsageError(
-                    f"--{self.name} and --{other} are mutually exclusive."
-                )
+                raise click.UsageError(f"--{self.name} and --{other} are mutually exclusive.")
         return super().handle_parse_result(ctx, opts, args)
 
 
-def pass_cli_context(f):
+def pass_cli_context(f: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator that injects a CliContext into a Click command function.
 
     Safer than ``@click.pass_obj`` because it traverses the full Click
@@ -154,9 +178,10 @@ def pass_cli_context(f):
         def deploy(ctx: CliContext) -> None:
             ctx.run(["kubectl", "apply", "-f", "manifests/"])
     """
+
     @click.pass_context
     @functools.wraps(f)
-    def wrapper(click_ctx, *args, **kwargs):
+    def wrapper(click_ctx: click.Context, *args: Any, **kwargs: Any) -> Any:
         """Resolve CliContext from the Click context chain and call f.
 
         Traverses the context chain with ``find_object(CliContext)`` so this
@@ -185,6 +210,7 @@ def pass_cli_context(f):
                 "a CLI created by clickwork.create_cli()."
             )
         return f(cli_ctx, *args, **kwargs)
+
     return wrapper
 
 
@@ -192,12 +218,14 @@ def create_cli(
     name: str,
     commands_dir: Path | None = None,
     discovery_mode: str = "auto",
-    config_schema: dict | None = None,
+    config_schema: dict[str, Any] | None = None,
     repo_config_path: Path | None = None,
     *,
     description: str | None = None,
     enable_parent_package_imports: bool = False,
     strict: bool = False,
+    version: str | None = None,
+    package_name: str | None = None,
 ) -> click.Group:
     """Create a Click CLI group with global flags and plugin discovery.
 
@@ -211,6 +239,11 @@ def create_cli(
       --dry-run       (flag -- preview without executing)
       --env           (string -- select config environment)
       --yes / -y      (flag -- skip confirmation prompts)
+
+    If ``version`` or ``package_name`` is provided, the CLI also gains
+    ``-V`` / ``--version`` at the root level (wired via
+    :func:`click.version_option`). When neither kwarg is set, no
+    version flag is installed -- existing callers see no change.
 
     Args:
         name: CLI name (e.g., "orbit-admin"). Used for config paths and logging.
@@ -266,6 +299,16 @@ def create_cli(
             behaviour so upgraders see no change unless they opt in.
             Keyword-only to keep the positional signature stable. See
             issue #42 for the full rationale.
+        version: Explicit version string (e.g. ``"1.2.3"``). If provided,
+            it is used verbatim as the value displayed by ``--version``.
+            Takes precedence over ``package_name`` when both are set.
+        package_name: Installed distribution name to auto-resolve the
+            version from via :func:`importlib.metadata.version`. Only
+            used when ``version`` is ``None``. Raises ``ValueError`` at
+            ``create_cli()`` call time if the named distribution is not
+            installed -- we prefer failing loud to silently omitting the
+            flag, since a misspelled package name would otherwise go
+            unnoticed until someone happened to run ``--version``.
 
     Returns:
         A configured Click group with all discovered commands registered.
@@ -275,7 +318,55 @@ def create_cli(
             one or more failures while building the command tree. The
             exception carries a ``.failures`` list describing each
             problem so CI can print them all at once.
+        ValueError: If ``package_name`` is provided (and ``version`` is
+            ``None``) but the named distribution cannot be found by
+            :mod:`importlib.metadata`.
+
+    Example:
+        Explicit version string::
+
+            cli = create_cli(name="orbit-admin", version="1.2.3")
+
+        Auto-resolve from the installing package's metadata::
+
+            cli = create_cli(name="orbit-admin", package_name="orbit-admin")
     """
+
+    # Resolve the version string to display via --version, if any.
+    #
+    # Three cases:
+    #   1. ``version`` is set -> use it verbatim. Wins over package_name.
+    #   2. ``version`` is None and ``package_name`` is set -> look it up
+    #      via importlib.metadata. PackageNotFoundError is wrapped as
+    #      ValueError so the caller gets a loud, actionable error at
+    #      create_cli() time instead of a silent "no --version flag".
+    #   3. Both None -> no --version flag is installed at all. This is
+    #      the default and preserves behaviour for pre-#48 callers.
+    #
+    # WHY eagerly resolve (instead of letting click.version_option do it
+    # at --version invocation time via its own ``package_name=``): Click
+    # only consults importlib.metadata when the user actually runs
+    # ``--version``. A typo in ``package_name`` would go undetected until
+    # someone hits that code path (possibly in production). Eager
+    # resolution at create_cli() call time surfaces the error at CLI
+    # construction, which is always exercised on startup.
+    resolved_version: str | None = None
+    if version is not None:
+        resolved_version = version
+    elif package_name is not None:
+        try:
+            resolved_version = importlib.metadata.version(package_name)
+        except importlib.metadata.PackageNotFoundError as e:
+            # Re-raise as ValueError with a message that names both the
+            # missing distribution and the ``create_cli`` context, so
+            # stack traces point at the real problem (a wrong
+            # package_name=) rather than the internal metadata lookup.
+            raise ValueError(
+                f"create_cli(package_name={package_name!r}) could not resolve a version: "
+                f"distribution {package_name!r} is not installed. "
+                "Pass an explicit version= string, or ensure the package name matches "
+                "the distribution name on PyPI / in pyproject.toml's [project] table."
+            ) from e
 
     # Optionally make commands_dir's parent package importable.
     #
@@ -326,7 +417,8 @@ def create_cli(
     # This is the standard Click pattern for parameterised group factories.
     @click.group(name=name, help=group_help)
     @click.option(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         count=True,
         # count=True means -v gives 1, -vv gives 2, etc.
         # We map these to INFO / DEBUG in setup_logging().
@@ -335,7 +427,8 @@ def create_cli(
         mutually_exclusive=["quiet"],
     )
     @click.option(
-        "--quiet", "-q",
+        "--quiet",
+        "-q",
         is_flag=True,
         default=False,
         help="Suppress non-error output.",
@@ -357,7 +450,8 @@ def create_cli(
         help="Select config environment (e.g., staging, production).",
     )
     @click.option(
-        "--yes", "-y",
+        "--yes",
+        "-y",
         is_flag=True,
         default=False,
         help="Skip confirmation prompts.",
@@ -464,14 +558,18 @@ def create_cli(
         # cli_ctx's flags. This keeps the logic single-sourced in process.py
         # (confirmation + execution + dry-run + signal forwarding) while still
         # letting ctx.run_with_confirm(cmd, msg) work without extra args.
-        cli_ctx.run_with_confirm = lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: _run_with_confirm(
-            cmd,
-            msg,
-            yes=cli_ctx.yes,
-            dry_run=cli_ctx.dry_run,
-            env=env,
-            stdin_text=stdin_text,
-            stdin_bytes=stdin_bytes,
+        cli_ctx.run_with_confirm = (
+            lambda cmd, msg, env=None, *, stdin_text=None, stdin_bytes=None: (  # noqa: E501
+                _run_with_confirm(
+                    cmd,
+                    msg,
+                    yes=cli_ctx.yes,
+                    dry_run=cli_ctx.dry_run,
+                    env=env,
+                    stdin_text=stdin_text,
+                    stdin_bytes=stdin_bytes,
+                )
+            )
         )
 
         # run_with_secrets: safety-focused wrapper for subprocesses that
@@ -480,17 +578,49 @@ def create_cli(
         # and accepts ``env=`` as a non-secret passthrough, matching the shape
         # of the other bindings above. secrets / stdin_secret are keyword-only
         # at the helper level; we mirror that here.
-        cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None, env=None: _run_with_secrets(
-            cmd,
-            secrets=secrets,
-            stdin_secret=stdin_secret,
-            dry_run=cli_ctx.dry_run,
-            env=env,
+        cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None, env=None: (
+            _run_with_secrets(
+                cmd,
+                secrets=secrets,
+                stdin_secret=stdin_secret,
+                dry_run=cli_ctx.dry_run,
+                env=env,
+            )
         )
 
         # Attach the CliContext to Click's ctx.obj so all subcommands can
         # receive it via @click.pass_obj or @pass_cli_context.
         ctx.obj = cli_ctx
+
+    # Install --version / -V if a version string was resolved above.
+    #
+    # WHY this lives here (after the @click.group decorator ran, before
+    # discover_commands): click.version_option() returns a decorator that
+    # wraps a Command. We already have the decorated group object
+    # ``cli_group``, so applying the decorator in-place (``cli_group =
+    # click.version_option(...)(cli_group)``) installs the option on the
+    # exact group we're about to return. Doing this after command
+    # discovery would also work, but grouping all group-level option
+    # wiring in one place keeps the factory's structure easier to read.
+    #
+    # WHY we pass the already-resolved string (not package_name) to
+    # click.version_option: Click would otherwise defer the
+    # importlib.metadata lookup until --version is actually invoked --
+    # see the resolution block at the top of this function for why we
+    # want the error surfaced at construction time instead.
+    #
+    # WHY prog_name=name: without it, Click derives the prog name from
+    # the command's invocation path (e.g. ``python -m orbit_admin``),
+    # which is rarely what the end user expects. Forcing ``name`` makes
+    # ``--version`` output read ``<cli-name>, version <version>`` no
+    # matter how the CLI was launched.
+    if resolved_version is not None:
+        cli_group = click.version_option(
+            resolved_version,
+            "-V",
+            "--version",
+            prog_name=name,
+        )(cli_group)
 
     # Discover and register commands from the commands directory and/or
     # installed entry points, depending on the discovery_mode setting.
@@ -520,7 +650,7 @@ def create_cli(
     # unexpected RuntimeError and similar bugs.
     original_invoke = cli_group.invoke
 
-    def wrapped_invoke(ctx: click.Context):
+    def wrapped_invoke(ctx: click.Context) -> Any:
         """Invoke the CLI group and classify any unhandled exceptions.
 
         Known exception types are routed by semantic category:
@@ -581,6 +711,13 @@ def create_cli(
             click.echo(f"Internal error: {e}", err=True)
             ctx.exit(EXIT_FRAMEWORK_ERROR)
 
-    cli_group.invoke = wrapped_invoke
+    # Deliberate method assignment: wrapped_invoke intercepts unhandled
+    # exceptions before they reach Click's default handler. Standard library
+    # method-assignment is the least-invasive way to splice in the wrapper
+    # without subclassing click.Group (which would force every caller into a
+    # custom class hierarchy). mypy flags this as [method-assign] in strict
+    # mode because instance-level method overrides bypass normal method-
+    # resolution -- here that's the point.
+    cli_group.invoke = wrapped_invoke  # type: ignore[method-assign]
 
     return cli_group

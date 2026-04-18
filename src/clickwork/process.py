@@ -16,6 +16,7 @@ Signal handling: when the user presses Ctrl-C, the framework forwards SIGINT to
 the child process, waits for it to exit, then re-raises KeyboardInterrupt so the
 caller sees the interruption only after the child has had a chance to clean up.
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,6 +24,7 @@ import os
 import shlex
 import signal
 import subprocess
+from typing import Any
 
 from clickwork._types import CliProcessError, Secret
 from clickwork.prompts import confirm as _prompt_confirm
@@ -36,16 +38,21 @@ logger = logging.getLogger("clickwork")
 SIGINT_TIMEOUT_SECONDS = 10
 
 
-def _validate_cmd(cmd: list[str] | str) -> None:
+def _validate_cmd(cmd: list[Any] | str) -> None:
     """Reject string commands to prevent shell injection.
 
     Accepting a raw string like "echo hello" would require shell=True, which
     opens the door to injection (e.g., "echo hello; rm -rf /"). Enforcing a
     list forces callers to be explicit about each argument boundary.
 
+    The parameter is typed as ``list[Any]`` rather than ``list[str]`` because
+    ``run_with_secrets`` also routes through this guard with
+    ``list[str | Secret]`` elements (the Secret-in-argv check runs separately
+    afterwards). Element-type enforcement happens at the call sites, not here.
+
     Args:
-        cmd: The command to validate. Must be a ``list[str]``; raises if it
-            is a string, tuple, or any other type.
+        cmd: The command to validate. Must be a ``list``; raises if it is a
+            string, tuple, or any other type.
 
     Raises:
         TypeError: If cmd is not a list.
@@ -98,7 +105,7 @@ def _format_cmd(cmd: list[str]) -> str:
     return " ".join(shlex.quote(arg) for arg in cmd)
 
 
-def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
+def _wait_with_signal_forwarding(proc: subprocess.Popen[bytes]) -> int:
     """Wait for a child process, forwarding SIGINT before re-raising.
 
     This preserves Ctrl-C semantics for long-running deploy/build commands:
@@ -147,10 +154,7 @@ def _wait_with_signal_forwarding(proc: subprocess.Popen) -> int:
         raise
 
 
-
-def _validate_stdin_params(
-    stdin_text: str | None, stdin_bytes: bytes | None
-) -> None:
+def _validate_stdin_params(stdin_text: str | None, stdin_bytes: bytes | None) -> None:
     """Enforce mutual exclusivity between stdin_text and stdin_bytes.
 
     WHY two separate kwargs instead of one polymorphic stdin=str|bytes:
@@ -182,7 +186,7 @@ def run(
     *,
     stdin_text: str | None = None,
     stdin_bytes: bytes | None = None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[Any] | None:
     """Execute a command, streaming output in real-time.
 
     Args:
@@ -267,7 +271,7 @@ def run(
     # closed stdin as a signal). When neither was provided, we inherit
     # the parent's stdin (the existing behavior) so interactive tools
     # that read from the TTY still work.
-    popen_kwargs: dict = {"env": full_env, "shell": False}
+    popen_kwargs: dict[str, Any] = {"env": full_env, "shell": False}
     if stdin_payload is not None:
         popen_kwargs["stdin"] = subprocess.PIPE
         # Deliberately NOT setting text=True: we normalized to bytes above
@@ -279,7 +283,7 @@ def run(
     # subprocess.run() has no hook for signal interception.
     try:
         proc = subprocess.Popen(cmd, **popen_kwargs)
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         # The binary doesn't exist. This is a user/environment error (like
         # PrerequisiteError), not a framework bug. Surface it as exit code 1
         # via CliProcessError with an actionable message.
@@ -287,7 +291,7 @@ def run(
             subprocess.CalledProcessError(
                 returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
             )
-        )
+        ) from exc
 
     # If we opened a stdin pipe, write the payload and close it so the child
     # sees EOF and can proceed. We do this BEFORE _wait_with_signal_forwarding
@@ -382,9 +386,7 @@ def run(
 
     returncode = _wait_with_signal_forwarding(proc)
     if returncode != 0:
-        raise CliProcessError(
-            subprocess.CalledProcessError(returncode=returncode, cmd=cmd)
-        )
+        raise CliProcessError(subprocess.CalledProcessError(returncode=returncode, cmd=cmd))
     return subprocess.CompletedProcess(cmd, returncode)
 
 
@@ -420,18 +422,22 @@ def capture(
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, env=full_env,
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=full_env,
             shell=False,
         )
         return result.stdout.strip()
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         # Same treatment as run(): missing binary is a user/environment
         # error (exit 1), not a framework bug (exit 2).
         raise CliProcessError(
             subprocess.CalledProcessError(
                 returncode=127, cmd=cmd, stderr=f"Command not found: {cmd[0]}"
             )
-        )
+        ) from exc
     except subprocess.CalledProcessError as e:
         raise CliProcessError(e) from e
 
@@ -445,7 +451,7 @@ def run_with_confirm(
     *,
     stdin_text: str | None = None,
     stdin_bytes: bytes | None = None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[Any] | None:
     """Prompt for confirmation, then execute a destructive command.
 
     Combines confirmation + execution so command authors don't forget either
@@ -541,7 +547,7 @@ def _validate_no_secret_in_argv(cmd: list[str | Secret]) -> None:
             raise ValueError(
                 f"cmd[{idx}] is a Secret instance. Do not place secrets "
                 "in argv (visible in `ps` output). Pass them via "
-                "`secrets={...}` (env) or `stdin_secret=\"NAME\"` (stdin) instead."
+                '`secrets={...}` (env) or `stdin_secret="NAME"` (stdin) instead.'
             )
 
 
@@ -602,7 +608,7 @@ def run_with_secrets(
     stdin_secret: str | None = None,
     dry_run: bool = False,
     env: dict[str, str] | None = None,
-) -> subprocess.CompletedProcess | None:
+) -> subprocess.CompletedProcess[Any] | None:
     """Execute a command with secrets delivered via env and/or stdin, never argv.
 
     This is a safety-focused wrapper over :func:`run` for subprocesses that
@@ -784,7 +790,7 @@ def run_with_secrets(
         raise TypeError(
             f"stdin_secret must be a str (or None); got "
             f"{type(stdin_secret).__name__}. Pass the KEY name from "
-            "your ``secrets={}`` dict, e.g. stdin_secret=\"TOKEN\"."
+            'your ``secrets={}`` dict, e.g. stdin_secret="TOKEN".'
         )
 
     # 6. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
@@ -804,9 +810,7 @@ def run_with_secrets(
     # (run, _format_cmd) get the concrete list[str] they expect.
     plain_cmd: list[str] = list(cmd)  # type: ignore[arg-type]
 
-    stdin_display = (
-        f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
-    )
+    stdin_display = f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
 
     # 7. Dry-run short-circuit. Docstring promises dry_run does not
     # pull secret values into memory. Honouring that means bailing out

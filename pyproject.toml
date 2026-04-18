@@ -21,6 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
 ]
 dependencies = [
     "click>=8.2",
@@ -37,6 +38,7 @@ Documentation = "https://github.com/qubitrenegade/clickwork/blob/main/docs/GUIDE
 dev = [
     "pytest>=8.0",
     "pytest-mock>=3.12",
+    "mypy>=1.14",
 ]
 
 [build-system]
@@ -55,3 +57,44 @@ filterwarnings = [
 markers = [
     "network: requires network access (pip install, HTTP calls)",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Conservative initial rule selection. Expand in follow-up PRs once the
+# project settles into a house style.
+#   E, W  — pycodestyle errors + warnings
+#   F     — pyflakes (undefined names, unused imports, etc.)
+#   B     — flake8-bugbear (likely bugs)
+#   I     — isort (import ordering)
+#   UP    — pyupgrade (modern Python idioms)
+select = ["E", "F", "W", "B", "I", "UP"]
+ignore = []
+
+[tool.ruff.format]
+# Use ruff's defaults. Don't set quote-style / indent-style unless/until the
+# project adopts an explicit house style.
+
+# ---------------------------------------------------------------------------
+# mypy configuration
+# ---------------------------------------------------------------------------
+#
+# WHY strict mode from day one: clickwork is a framework library; downstream
+# projects inherit our types through the shipped `py.typed` marker and the
+# `Typing :: Typed` classifier. Shipping loose annotations would flow Any
+# into every consumer, silently defeating the type-checker promise the Typed
+# classifier implies. Strict mode enforces "no implicit Any, no unchecked
+# decorators, no unused ignores" so the package's public surface stays typed
+# end-to-end.
+#
+# WHY python_version = "3.11": this is the floor declared in
+# requires-python. mypy type-checks against the oldest supported runtime
+# so we catch accidental use of 3.12-only syntax (PEP 698 override, etc.).
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true

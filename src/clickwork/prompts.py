@@ -9,6 +9,7 @@ Safety rules:
 - Non-TTY stdin (piped, redirected) auto-denies to prevent hangs
 - Default answer is always "no" (safe default)
 """
+
 from __future__ import annotations
 
 import sys

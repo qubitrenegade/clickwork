@@ -63,6 +63,7 @@ pattern::
     except URLError:
         ...  # network/transport issue -- retry, fail over, etc.
 """
+
 from __future__ import annotations
 
 import base64
@@ -71,9 +72,9 @@ import logging
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any, cast
 
 from clickwork._types import Secret
-
 
 # ---------------------------------------------------------------------------
 # JSONValue recursive alias
@@ -84,15 +85,7 @@ from clickwork._types import Secret
 # JSON contract visible in signatures rather than hiding it behind ``Any``.
 # Callers that need a concrete type (e.g., a dict) should narrow at the
 # call site with ``isinstance`` or ``typing.cast``.
-JSONValue = (
-    dict[str, "JSONValue"]
-    | list["JSONValue"]
-    | str
-    | int
-    | float
-    | bool
-    | None
-)
+JSONValue = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +102,7 @@ logger = logging.getLogger("clickwork.http")
 # ---------------------------------------------------------------------------
 # HttpError
 # ---------------------------------------------------------------------------
+
 
 class HttpError(Exception):
     """Raised when the server returns a non-2xx response.
@@ -178,6 +172,7 @@ class HttpError(Exception):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     """urllib redirect handler that refuses to follow 3xx responses.
 
@@ -194,7 +189,15 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
     header from ``HttpError.headers`` and decide whether to follow.
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> urllib.request.Request | None:
         # Returning None signals "do not redirect"; urllib converts the
         # 3xx into an HTTPError that propagates out of opener.open().
         return None
@@ -209,7 +212,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirectHandler())
 
 
-def _dispatch_request(request: urllib.request.Request, *, timeout: float):
+def _dispatch_request(request: urllib.request.Request, *, timeout: float) -> Any:
     """Send ``request`` through the no-redirect opener; return the response.
 
     WHY a thin module-level wrapper exists: tests need a single obvious
@@ -306,9 +309,7 @@ def _sanitize_url_for_log(url: str) -> str:
     # params aren't credential-carrying the way query strings are, and
     # the path-level semantics still go out on the wire, so the log
     # should show the same shape.
-    return urllib.parse.urlunparse(
-        (parts.scheme, host_and_port, parts.path, parts.params, "", "")
-    )
+    return urllib.parse.urlunparse((parts.scheme, host_and_port, parts.path, parts.params, "", ""))
 
 
 def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
@@ -396,9 +397,7 @@ def _check_allowed_hosts(url: str, allowed_hosts: list[str] | None) -> None:
     hostname_lower = parts.hostname.lower()
     allowed_lower = {h.lower() for h in allowed_hosts}
     if hostname_lower not in allowed_lower:
-        raise ValueError(
-            f"Host {parts.hostname!r} is not in allowed_hosts={allowed_hosts!r}."
-        )
+        raise ValueError(f"Host {parts.hostname!r} is not in allowed_hosts={allowed_hosts!r}.")
 
 
 def _unwrap_secret(value: str | Secret) -> str:
@@ -463,7 +462,7 @@ def _build_headers(
             auth_attached = True
         elif basic_auth is not None:
             user, pw = basic_auth
-            credentials = f"{user}:{_unwrap_secret(pw)}".encode("utf-8")
+            credentials = f"{user}:{_unwrap_secret(pw)}".encode()
             encoded = base64.b64encode(credentials).decode("ascii")
             merged["Authorization"] = f"Basic {encoded}"
             auth_attached = True
@@ -572,7 +571,7 @@ def _is_json_content_type(content_type: str | None) -> bool:
     return media_type == "application/json"
 
 
-def _headers_to_dict(raw_headers) -> dict[str, str]:
+def _headers_to_dict(raw_headers: Any) -> dict[str, str]:
     """Flatten an HTTPMessage-like headers object into a plain dict.
 
     ``http.client.HTTPResponse.headers`` is an ``HTTPMessage`` which supports
@@ -596,7 +595,9 @@ def _headers_to_dict(raw_headers) -> dict[str, str]:
     return dict(raw_headers)
 
 
-def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool) -> JSONValue | bytes:
+def _parse_response_body(
+    body: bytes, content_type: str | None, parse_json: bool
+) -> JSONValue | bytes:
     """Decode a raw response body according to the parse_json + Content-Type rules.
 
     See the module docstring for the full policy. Used in two places: the
@@ -633,7 +634,9 @@ def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool
         if not body.strip():
             return body
         try:
-            return json.loads(body)
+            # json.loads returns Any; cast to the declared JSONValue union so
+            # the function's return type is honoured under mypy --strict.
+            return cast("JSONValue", json.loads(body))
         except (json.JSONDecodeError, UnicodeError):
             # Server sent JSON Content-Type with a payload that either
             # isn't valid JSON (JSONDecodeError) or isn't valid UTF-8
@@ -650,6 +653,7 @@ def _parse_response_body(body: bytes, content_type: str | None, parse_json: bool
 # ---------------------------------------------------------------------------
 # Shared core
 # ---------------------------------------------------------------------------
+
 
 def _send(
     method: str,
@@ -712,7 +716,10 @@ def _send(
     # wrong for PUT and DELETE, and for a GET-with-body edge case. Passing
     # ``method`` explicitly removes the ambiguity.
     request = urllib.request.Request(
-        url, data=body_bytes, method=method, headers=merged_headers,
+        url,
+        data=body_bytes,
+        method=method,
+        headers=merged_headers,
     )
 
     # WHY we install an opener that REFUSES HTTP redirects (3xx). urllib's
@@ -760,11 +767,11 @@ def _send(
         # and any buffering on err.fp.
         try:
             err_body_raw = err.read() if err.fp is not None else b""
-            err_content_type = (
-                err.headers.get("Content-Type") if err.headers is not None else None
-            )
+            err_content_type = err.headers.get("Content-Type") if err.headers is not None else None
             err_response_body = _parse_response_body(
-                err_body_raw, err_content_type, parse_json,
+                err_body_raw,
+                err_content_type,
+                parse_json,
             )
             err_headers = _headers_to_dict(err.headers)
         finally:
@@ -817,6 +824,7 @@ def _send(
 # Public methods (thin wrappers around _send)
 # ---------------------------------------------------------------------------
 
+
 def get(
     url: str,
     *,
@@ -857,7 +865,8 @@ def get(
         urllib.error.URLError: On transport failures (timeout, DNS, etc.).
     """
     return _send(
-        "GET", url,
+        "GET",
+        url,
         allowed_hosts=allowed_hosts,
         bearer_token=bearer_token,
         basic_auth=basic_auth,
@@ -896,7 +905,8 @@ def post(
               and must supply their own Content-Type if appropriate).
     """
     return _send(
-        "POST", url,
+        "POST",
+        url,
         body=body,
         allowed_hosts=allowed_hosts,
         bearer_token=bearer_token,
@@ -920,7 +930,8 @@ def put(
 ) -> JSONValue | bytes:
     """Issue an HTTP PUT. See :func:`get` / :func:`post` for shared kwargs."""
     return _send(
-        "PUT", url,
+        "PUT",
+        url,
         body=body,
         allowed_hosts=allowed_hosts,
         bearer_token=bearer_token,
@@ -949,7 +960,8 @@ def delete(
     than forcing a different signature.
     """
     return _send(
-        "DELETE", url,
+        "DELETE",
+        url,
         body=body,
         allowed_hosts=allowed_hosts,
         bearer_token=bearer_token,

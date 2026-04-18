@@ -1,0 +1,96 @@
+name: Cold-start benchmark
+
+# Runs on every push to main and on every pull_request event so the
+# median `import clickwork` cost is checked against the committed
+# baseline before code lands.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # workflow_dispatch lets a maintainer kick off the bench from the
+  # GitHub Actions UI -- useful immediately after merging this PR, when
+  # the committed baseline.json (captured on a dev machine, glibc 2.35)
+  # needs to be replaced with a baseline captured on ubuntu-24.04 (glibc
+  # 2.39). Dispatch the workflow, grab the stdout JSON from the logs,
+  # commit it as the new baseline in a small follow-up PR.
+  workflow_dispatch:
+
+jobs:
+  coldstart:
+    name: import clickwork cold-start
+    # Pin to an exact runner image (not `ubuntu-latest`) because
+    # `ubuntu-latest` floats across OS image upgrades, and CPython
+    # startup timing is sensitive enough to runner-image changes that
+    # `ubuntu-latest` → next-year's image can flap the 20% gate on
+    # unchanged code. Treat runner image bumps like Python pin bumps:
+    # re-capture baseline in the same PR that bumps this value.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        # Pinned to an exact patch version (3.13.6) rather than "3.13"
+        # because baseline.json captures are patch-sensitive: we've
+        # observed ~1-2% drift per patch release from CPython startup
+        # changes alone. Floating to 3.13.x would bake that drift into
+        # every PR delta and muddy the regression signal. The baseline
+        # records the exact Python version it was captured on; this
+        # pin must match that. If we bump the pin, the baseline must
+        # be re-captured in the same PR.
+        run: uv python install 3.13.6
+
+      # Editable install so the benchmark loads *this* PR's clickwork
+      # source, not a released wheel. `uv sync` respects uv.lock so
+      # dependency versions are reproducible between the machine that
+      # captured baseline.json and CI — dependency drift could move
+      # import cost independently of our code changes, which would
+      # defeat the point of the regression check.  `--frozen` fails
+      # loudly if the lockfile is out of date rather than silently
+      # resolving new versions.
+      - name: Install clickwork (locked, editable)
+        run: uv sync --frozen
+
+      - name: Run cold-start benchmark
+        id: bench
+        # `uv run` uses the venv `uv sync` created. If the median
+        # regresses >20% relative to benchmarks/baseline.json the
+        # script exits 1 and fails the job.
+        #
+        # The script writes JSON to stdout and human-readable
+        # baseline/current/delta lines to stderr.  We `tee` only
+        # stdout into bench-output.txt so the step-summary file
+        # contains pure JSON (wrapped in a ```json fence below) —
+        # reviewers still see the human-readable context in the
+        # raw Actions log because stderr is interleaved there.
+        run: |
+          set -euo pipefail
+          uv run python scripts/bench_coldstart.py \
+            --runs 7 \
+            --baseline benchmarks/baseline.json | tee bench-output.txt
+
+      - name: Publish results to step summary
+        # Always run so reviewers can see the numbers even when the
+        # regression gate fails — that's exactly when they're most
+        # useful.  bench-output.txt is pure JSON on success (the script
+        # separates JSON on stdout from human-readable prose on stderr).
+        # On catastrophic failure (e.g. `import clickwork` crashes in
+        # the subprocess warm-up) the file may be empty; we emit a tiny
+        # stub JSON so the `\`\`\`json` fence wraps something parseable
+        # and reviewers aren't left staring at an empty code block.
+        if: always()
+        run: |
+          {
+            echo "### Cold-start benchmark"
+            echo
+            echo '```json'
+            if [ -s bench-output.txt ]; then
+              cat bench-output.txt
+            else
+              echo '{"error": "benchmark script produced no stdout; see step log for traceback"}'
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
