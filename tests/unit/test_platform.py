@@ -315,7 +315,6 @@ class TestPlatformDispatchViaClickRunner:
         through ``@pass_cli_context`` and then into the dispatched impl.
         Patches ``sys.platform`` to ``"linux"`` before invocation.
         """
-        import click
         from click.testing import CliRunner
         from clickwork.cli import create_cli, pass_cli_context
         from clickwork.platform import platform_dispatch
