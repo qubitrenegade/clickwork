@@ -20,8 +20,11 @@ clickwork targets Python 3.11+ (see `requires-python` in
 environment manager.
 
 ```bash
-# Install uv if you don't already have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
+# Install uv. See https://docs.astral.sh/uv/getting-started/installation/
+# for the full list of platform-appropriate install methods (Homebrew,
+# apt, winget, pipx, standalone installer, etc.). Picking the installer
+# your project already trusts is safer than piping a remote script into
+# a shell.
 
 # Clone and enter the repo
 git clone https://github.com/qubitrenegade/clickwork.git
@@ -38,9 +41,10 @@ edit `pyproject.toml` and re-run `uv sync --extra dev` to regenerate
 
 ## Running the verification suite
 
-Run these four commands locally before you push. They are the same checks
-CI runs, in the same order, with the same pins. A green local run should
-mean a green CI run.
+Run these four commands locally before you push. CI runs the same tools
+with the same pins, though split across separate workflows (test, types,
+lint) that may execute in parallel. A green local run of all four should
+mean a green CI run across every workflow.
 
 ```bash
 uv run pytest tests/ -q
