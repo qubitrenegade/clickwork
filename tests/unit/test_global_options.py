@@ -588,6 +588,231 @@ class TestAddGlobalOptionEntryPointPropagation:
         assert "--json" in result.output
 
 
+class TestOverrideSemantics:
+    """A plugin subcommand can override a global option within its own scope.
+
+    The pattern: call ``add_global_option(cli, "--env", ...)`` FIRST, THEN
+    attach a subcommand that itself declares ``@click.option("--env", ...)``.
+
+    This works naturally because ``add_global_option`` takes a CALL-TIME
+    SNAPSHOT of the command tree (see the module docstring in
+    ``clickwork/global_options.py``). Commands attached after the snapshot
+    are NOT instrumented with the global option, so:
+
+      - Inside the overriding subcommand's scope, Click only sees the
+        subcommand's OWN ``--env`` declaration, and the subcommand's handler
+        receives ``--env=foo`` via its own kwarg. ``ctx.meta['env']`` stays
+        untouched by that subcommand's parse (no global callback runs there).
+      - On other subcommands (those that DID exist at snapshot time and
+        didn't redeclare ``--env``), the global is installed normally and
+        continues to write through to ``ctx.find_root().meta['env']``.
+
+    The reverse order -- subcommand declares ``--env`` FIRST, then caller
+    invokes ``add_global_option(cli, "--env", ...)`` -- is caught at install
+    time by the conflict-detection guard and raises ``ValueError``. That
+    failure mode is pinned in ``TestAddGlobalOptionGuards`` above; this
+    class only exercises the supported override direction.
+    """
+
+    def test_subcommand_option_overrides_global_in_its_scope(self) -> None:
+        """Subcommand's own --env wins inside its own scope.
+
+        When the global is installed BEFORE the overriding subcommand is
+        attached, the global is not applied to that subcommand (snapshot
+        semantics). The subcommand's own option then owns the ``--env``
+        flag inside its scope: ``--env=foo`` passed after the subcommand
+        name flows into the subcommand's own kwarg, NOT through the
+        global's merge-callback (which doesn't run for this subcommand).
+
+        Concrete assertion:
+
+          - Subcommand's own kwarg receives ``"foo"``.
+          - ``ctx.meta['env']`` is still the ROOT-level resolution (which
+            is the global's Click default, ``None``, since the caller did
+            not pass ``--env`` BEFORE the subcommand name). The value
+            ``"foo"`` must NOT appear in meta; that would indicate the
+            global's callback intercepted the inner ``--env``, which is
+            exactly the shadowing we're verifying against.
+        """
+        # Capture what the subcommand sees -- its own kwarg AND the root
+        # meta dict (so we can assert meta was NOT written-through).
+        captured: dict[str, object] = {}
+
+        @click.group()
+        def root() -> None:
+            """Root group."""
+
+        # Install the global option FIRST so the snapshot sees only the
+        # empty group. The overriding subcommand is attached next.
+        add_global_option(root, "--env", default=None, help="Global env flag.")
+
+        @root.command("override-cmd")
+        @click.option("--env", default="override-default", help="Override env.")
+        @click.pass_context
+        def override_cmd(ctx: click.Context, env: str) -> None:
+            """Subcommand with its own --env that shadows the global."""
+            captured["own_env"] = env
+            # Also snapshot what the ROOT meta holds. The global's
+            # callback ran at the ROOT-GROUP level before Click descended
+            # into the subcommand, so the meta slot reflects that root
+            # parse -- NOT the subcommand's inner --env. That's exactly
+            # the isolation we want.
+            captured["meta_env"] = ctx.find_root().meta.get("env")
+            # And capture the ParameterSource at the subcommand level.
+            # The SUBCOMMAND's own --env should report COMMANDLINE (the
+            # user typed it); it must NOT report DEFAULT (which would
+            # indicate the global consumed the flag and the subcommand's
+            # option only saw its fallback).
+            captured["sub_env_source"] = ctx.get_parameter_source("env")
+
+        runner = CliRunner()
+        result = runner.invoke(root, ["override-cmd", "--env=foo"])
+
+        assert result.exit_code == 0, result.output
+        # Primary assertion: subcommand's own kwarg received the value the
+        # user typed AFTER the subcommand name. The global didn't swallow it.
+        assert captured["own_env"] == "foo"
+        # Negative assertion: the global's meta slot must NOT contain the
+        # subcommand's inner ``--env`` value. If the global had intercepted
+        # the inner flag, meta_env would be "foo"; the correct behaviour
+        # leaves meta at the root-level resolution (here: the Click default
+        # ``None``, because no ``--env`` was passed BEFORE the subcommand).
+        assert captured["meta_env"] != "foo", (
+            "Global --env callback intercepted the subcommand's inner "
+            f"--env=foo; got ctx.meta['env']={captured['meta_env']!r}. The "
+            "subcommand's own option should own --env inside its scope."
+        )
+        # ParameterSource check: the subcommand's own option saw the value
+        # from the command line (COMMANDLINE), not from its fallback
+        # default (DEFAULT). Importing here keeps the top of the test
+        # file free of a ParameterSource dependency that only one test
+        # needs.
+        from click.core import ParameterSource
+
+        assert captured["sub_env_source"] == ParameterSource.COMMANDLINE, (
+            "Subcommand's own --env should have reported COMMANDLINE "
+            f"(user typed --env=foo); got {captured['sub_env_source']!r}. "
+            "A DEFAULT source here would mean the global's merge-callback "
+            "swallowed the flag before the subcommand's option saw it."
+        )
+
+    def test_global_option_still_active_on_non_overriding_subcommands(self) -> None:
+        """Other subcommands (that don't redeclare --env) still see the global.
+
+        WHY this matters: overriding in one subcommand must NOT break the
+        global elsewhere. The snapshot captures whichever subcommands exist
+        at install time, so those continue to have the global option
+        installed and the merge callback still writes through to root meta.
+        """
+        captured: dict[str, object] = {}
+
+        @click.group()
+        def root() -> None:
+            """Root group."""
+
+        # Attach the non-overriding subcommand BEFORE the snapshot so it
+        # gets the global installed on it. This is the "normal" path.
+        @root.command("plain-cmd")
+        @click.pass_context
+        def plain_cmd(ctx: click.Context) -> None:
+            """A subcommand that doesn't touch --env."""
+            captured["meta_env"] = ctx.find_root().meta.get("env")
+
+        add_global_option(root, "--env", default=None, help="Global env flag.")
+
+        # Also attach an overriding subcommand AFTER the snapshot. This
+        # one is not exercised in this test -- its presence just confirms
+        # the two patterns coexist without the snapshot erroring out.
+        @root.command("override-cmd")
+        @click.option("--env", default="override-default")
+        def override_cmd(env: str) -> None:  # pragma: no cover - unused
+            """Unused overrider; keeps the coexistence shape realistic."""
+
+        runner = CliRunner()
+        result = runner.invoke(root, ["--env=bar", "plain-cmd"])
+
+        assert result.exit_code == 0, result.output
+        # Global option fired as normal on the non-overriding subcommand.
+        assert captured["meta_env"] == "bar"
+
+    def test_override_help_text_comes_from_subcommand(self) -> None:
+        """--help for the overriding subcommand shows the subcommand's text.
+
+        WHY this matters: users reading ``cli override-cmd --help`` need to
+        see the subcommand's own description for ``--env``, not the global
+        one. Because the global isn't installed on the post-snapshot
+        subcommand, Click only knows about the subcommand's declaration
+        here, so the help output naturally reflects the override.
+
+        We assert on a distinctive substring rather than an exact match so
+        Click's help-text layout changes don't break the test.
+        """
+
+        @click.group()
+        def root() -> None:
+            """Root group."""
+
+        add_global_option(
+            root,
+            "--env",
+            default=None,
+            help="GLOBAL-ENV-HELP-TEXT",
+        )
+
+        @root.command("override-cmd")
+        @click.option("--env", default="d", help="SUBCOMMAND-ENV-HELP-TEXT")
+        def override_cmd(env: str) -> None:  # pragma: no cover - help-only invoke
+            """Overriding subcommand (body unused in help-only test)."""
+
+        runner = CliRunner()
+        result = runner.invoke(root, ["override-cmd", "--help"])
+
+        assert result.exit_code == 0, result.output
+        # The subcommand's help text is what appears. The global's help
+        # text must NOT leak into this subcommand's help because the
+        # global was never installed on it.
+        assert "SUBCOMMAND-ENV-HELP-TEXT" in result.output
+        assert "GLOBAL-ENV-HELP-TEXT" not in result.output, (
+            "Global option's help text leaked into overriding subcommand's "
+            f"--help output; got:\n{result.output}"
+        )
+
+    def test_install_after_manual_option_raises_clean_error(self) -> None:
+        """The REVERSE order is rejected loudly at install time.
+
+        This pins the only "clean failure mode" for override scenarios:
+        if a subcommand declared ``--env`` BEFORE ``add_global_option`` ran,
+        the install-time conflict guard raises ``ValueError`` with a
+        message that names the colliding flag string.
+
+        WHY we pin this: it's the only codepath through which a caller gets
+        a deterministic, actionable error for a collision. If a future
+        refactor accidentally loosened this to "silently install and pick
+        one winner", overrides could become order-dependent landmines --
+        this test would then start failing and force the refactor author
+        to reconsider.
+
+        (The SUPPORTED override direction -- add_global_option first, then
+        attach the overriding subcommand -- is exercised by the other three
+        tests in this class.)
+        """
+        import pytest
+
+        @click.group()
+        def root() -> None:
+            """Root group."""
+
+        @root.command("override-cmd")
+        @click.option("--env", default="d")
+        def override_cmd(env: str) -> None:  # pragma: no cover - install-only
+            """Subcommand that claims --env before the global is installed."""
+
+        # Install-time conflict: the subcommand already owns --env, and
+        # ``add_global_option`` refuses to silently coexist.
+        with pytest.raises(ValueError, match="Cannot install global option"):
+            add_global_option(root, "--env", default=None)
+
+
 class TestAddGlobalOptionIntegration:
     """End-to-end check that add_global_option composes with create_cli()."""
 
