@@ -193,20 +193,25 @@ def create_cli(
             developer-only implementation detail. Plugin authors should
             pass something like "Admin CLI for orbit" to give users a
             one-line summary of what the CLI does.
-        enable_parent_package_imports: When True (and ``commands_dir`` is provided),
-            prepend ``commands_dir.parent.parent`` (resolved) to
-            ``sys.path`` so command files can ``from your_project.lib.X
-            import Y`` without the CLI entry script having to manually
-            poke sys.path. *Note:* we insert the **grandparent** of
-            ``commands_dir``, not the parent -- see the implementation
-            comment below for why that's what's needed to make the parent
-            package (e.g. ``your_project``) importable. Defaults to False
+        enable_parent_package_imports: When True (and ``commands_dir`` is
+            provided), prepend ``commands_dir.parent.parent`` (resolved)
+            to ``sys.path`` so command files can import the parent
+            package. For example, with the conventional layout
+            ``project_root/tools/commands/*.py`` (where ``commands_dir``
+            points at ``project_root/tools/commands``), this makes the
+            ``tools`` package importable, so command files can write
+            ``from tools.lib.X import Y`` without the CLI entry script
+            having to manually poke sys.path. *Note:* we insert the
+            **grandparent** of ``commands_dir`` -- the directory that
+            *contains* the parent package -- not the parent itself; see
+            the implementation comment below for why. Defaults to False
             (opt-in) so existing callers experience no change in import
             resolution. Keyword-only to keep the positional signature
-            stable. The inserted path is de-duplicated against ``sys.path``
-            using ``Path.resolve()``, so repeated calls with the same
-            directory (potentially spelled differently) don't stack
-            duplicate entries.
+            stable. Dedup uses the resolved path against ``sys.path``'s
+            existing entries; repeated calls with the same ``commands_dir``
+            don't stack duplicate entries (known limitation: the dedup
+            does not normalize *existing* ``sys.path`` entries that were
+            added via relative/unresolved spellings elsewhere).
 
     Returns:
         A configured Click group with all discovered commands registered.
