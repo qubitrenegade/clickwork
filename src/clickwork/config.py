@@ -339,10 +339,9 @@ def load_env_file(path: Path) -> dict[str, str]:
         #
         # The shared helper already formats errors as
         # "{kind} {path} ..." so we only need to pass a generic
-        # category label here; the path itself comes from the
-        # helper's own interpolation. Keeping kind short avoids the
-        # "dotenv file '.env' /tmp/.../.env ..." double-labelling
-        # Copilot caught.
+        # category label here; the path itself is interpolated by
+        # the helper. Keeping kind short avoids double-labelling like
+        # "dotenv file '.env' /tmp/.../.env ...".
         _check_owner_only_permissions(fd, path, kind="dotenv file")
         text = f.read()
 
@@ -415,9 +414,14 @@ def load_env_file(path: Path) -> dict[str, str]:
         # leading whitespace:
         #   KEY = "  value"   -> value becomes "  value" (inside quotes)
         #   KEY =   value     -> value becomes "value"   (bare, space stripped)
-        # Trailing whitespace is NOT stripped: .env files seldom have
-        # trailing spaces, and preserving them is safer when someone does
-        # intentionally include one.
+        # Trailing whitespace of the BARE (unquoted) value is already
+        # gone because raw_line.strip() at the top of the loop stripped
+        # both ends of the whole line. That's fine: .env files don't
+        # conventionally carry trailing whitespace in values; anyone
+        # who needs a trailing space can preserve it inside quotes
+        # (the quote-unwrap below runs AFTER the quote characters are
+        # still intact, so "KEY = 'value '" yields "value " with the
+        # intended trailing space).
         value = value.lstrip()
 
         # Unwrap matching surrounding quotes. We only strip quotes when the
