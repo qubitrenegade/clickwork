@@ -1,6 +1,6 @@
 # clickwork
 
-[![PyPI](https://img.shields.io/pypi/v/clickwork.svg)](https://pypi.org/project/clickwork/) [![Python Versions](https://img.shields.io/pypi/pyversions/clickwork.svg)](https://pypi.org/project/clickwork/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/clickwork.svg)](https://pypi.org/project/clickwork/) [![Python Versions](https://img.shields.io/pypi/pyversions/clickwork.svg)](https://pypi.org/project/clickwork/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/qubitrenegade/clickwork/blob/main/LICENSE)
 
 Reusable CLI framework for project automation. Build project-specific CLIs
 with plugin discovery, layered config, subprocess helpers, and common
