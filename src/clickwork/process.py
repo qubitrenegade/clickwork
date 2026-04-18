@@ -739,7 +739,21 @@ def run_with_secrets(
                 "Secret(...) before passing them into run_with_secrets."
             )
 
-    # 5. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
+    # 5. stdin_secret must be a str (or None) before we use it in a
+    # dict-membership test. Without this check a caller who passes
+    # a list/dict (common typo: ``stdin_secret=["TOKEN"]`` when they
+    # meant the string) would crash on the ``in secrets`` check below
+    # with an opaque ``TypeError: unhashable type: 'list'`` far from
+    # the real cause. Validate the type up front with an actionable
+    # message.
+    if stdin_secret is not None and not isinstance(stdin_secret, str):
+        raise TypeError(
+            f"stdin_secret must be a str (or None); got "
+            f"{type(stdin_secret).__name__}. Pass the KEY name from "
+            "your ``secrets={}`` dict, e.g. stdin_secret=\"TOKEN\"."
+        )
+
+    # 7. stdin_secret must resolve to a key in ``secrets``. Done BEFORE
     # we touch Secret.get() for any reason, so a typo surfaces as a
     # clear ValueError with no secret material in flight.
     if stdin_secret is not None and stdin_secret not in secrets:
@@ -760,7 +774,7 @@ def run_with_secrets(
         f"<redacted:{stdin_secret}>" if stdin_secret is not None else "<none>"
     )
 
-    # 6. Dry-run short-circuit. Docstring promises dry_run does not
+    # 8. Dry-run short-circuit. Docstring promises dry_run does not
     # pull secret values into memory. Honouring that means bailing out
     # BEFORE Secret.get() on any entry of ``secrets`` -- only the
     # caller-supplied ``env`` (which is already plain strings) and the
@@ -782,7 +796,7 @@ def run_with_secrets(
         )
         return None
 
-    # 7. Build the full env for the subprocess. Caller's env goes first
+    # 9. Build the full env for the subprocess. Caller's env goes first
     # so secrets win on key conflict -- the helper's job is to deliver
     # the secret, and a stale override from ``env`` would silently break
     # that contract. Each Secret.get() is called EXACTLY ONCE and the
@@ -796,14 +810,14 @@ def run_with_secrets(
     # label so operators can tell them apart. Neither leaks the value.
     secret_keys = set(secret_env.keys())
 
-    # 8. Resolve the stdin payload from the ALREADY-unwrapped secret_env
+    # 10. Resolve the stdin payload from the ALREADY-unwrapped secret_env
     # dict rather than calling Secret.get() a second time -- one unwrap
     # per secret keeps the "minimal touch" contract explicit.
     stdin_payload: str | None = None
     if stdin_secret is not None:
         stdin_payload = secret_env[stdin_secret]
 
-    # 9. Emit the helper's own log line. This is the SINGLE place where
+    # 11. Emit the helper's own log line. This is the SINGLE place where
     # the "secrets-in-play" subprocess launch is recorded. We log
     # BEFORE delegating to run() so:
     #   - the argv (already validated Secret-free and all-str) appears
@@ -818,7 +832,7 @@ def run_with_secrets(
         stdin_display,
     )
 
-    # 10. Delegate. run() handles signal forwarding and stdin piping --
+    # 12. Delegate. run() handles signal forwarding and stdin piping --
     # we reuse all of it instead of reinventing the wheel (and instead
     # of teaching run() about Secret). dry_run was already handled
     # above so we pass False here to make that explicit.
