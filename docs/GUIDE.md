@@ -656,3 +656,35 @@ from clickwork import (
     normalize_prefix,    # Convert project name to env-var prefix
 )
 ```
+
+## Release notes
+
+This section is for clickwork maintainers cutting a release; framework users
+can skip it.
+
+Release notes for clickwork itself are produced by GitHub's built-in
+auto-generated release notes feature, configured via
+[`.github/release.yml`](../.github/release.yml). When a maintainer creates a
+release via the GitHub UI or `gh release create`, GitHub groups merged PRs
+by their labels into the sections defined in that config file.
+
+To make sure a PR lands in the right section, apply one of these labels
+before merging:
+
+| Label | Section |
+|-------|---------|
+| `enhancement` | Features |
+| `bug` | Bug fixes |
+| `documentation` | Documentation |
+| (no label, or any other label) | Other changes |
+
+PRs labeled `duplicate`, `invalid`, or `wontfix` are excluded from the notes
+entirely.
+
+Maintainers can still tweak the generated notes in the GitHub Release UI
+before publishing -- the auto-generated text is a starting point, not a
+finished artifact. This is the right place to call out breaking changes,
+highlight the most user-visible work, or add an upgrade blurb.
+
+For the underlying mechanism and full config grammar, see GitHub's docs on
+[automatically-generated release notes](https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes#configuring-automatically-generated-release-notes).
