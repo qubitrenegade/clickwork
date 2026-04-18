@@ -20,12 +20,15 @@ jobs:
         run: uv python install 3.13
 
       - name: Ruff lint
-        # `uvx` resolves ruff on demand so we don't need to pin it as a dev
-        # dependency. Configuration still comes from pyproject.toml.
-        run: uvx ruff check .
+        # Pin Ruff to an exact version so CI remains stable across future
+        # upstream releases. A new Ruff can introduce rules or change format
+        # output and break PRs that didn't touch code. Bumping this pin is a
+        # deliberate, reviewed change in its own PR. Configuration still
+        # comes from pyproject.toml.
+        run: uvx --from ruff==0.6.9 ruff check .
 
       - name: Ruff format check
-        # Always run the formatter check even if `ruff check` fails, so a single
-        # CI run surfaces every class of issue at once.
+        # Always run the formatter check even if `ruff check` fails, so a
+        # single CI run surfaces every class of issue at once.
         if: always()
-        run: uvx ruff format --check .
+        run: uvx --from ruff==0.6.9 ruff format --check .
