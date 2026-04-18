@@ -35,30 +35,51 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Set up Python 3.13
-        run: uv python install 3.13
+        # WHY both install AND pin: `uv python install 3.13` downloads the
+        # interpreter into uv's managed cache but does NOT change which
+        # `python` runs when invoked bare. `uv python pin 3.13` writes
+        # `.python-version` in the repo root so every subsequent
+        # `uv run python ...` and `uv venv --python 3.13 ...` uses 3.13
+        # deterministically, regardless of what the runner image ships
+        # with by default.
+        run: |
+          uv python install 3.13
+          uv python pin 3.13
 
       - name: Build wheel and sdist
         # `uv build` produces both dist/*.whl and dist/*.tar.gz in one call.
+        # It respects the `.python-version` pin set above.
         run: uv build
 
       - name: Assert py.typed is present in the wheel
-        # Until #37 (py.typed marker) lands, this assertion FAILS. We mark
-        # it continue-on-error so this workflow can land independently of
-        # #37. Once #37 merges, the step starts passing automatically and
-        # this comment + continue-on-error can be removed to make it a
-        # hard gate.
+        # HARD GATE: py.typed landed in #66 on main, so this assertion must
+        # pass for every build. If it ever fails, the wheel shipped without
+        # the PEP 561 marker and type-checkers downstream will silently
+        # ignore clickwork's type hints -- that's a release-blocking bug.
         #
-        # See: https://github.com/qubitrenegade/clickwork/issues/37
-        continue-on-error: true
+        # WHY `uv run python` (not bare `python`): bare `python` resolves
+        # to whatever PATH points at -- on ubuntu-latest today that's 3.12,
+        # not the 3.13 we pinned above. `uv run python` honors the pin.
+        #
+        # WHY exact-path match `clickwork/py.typed` (not substring
+        # `py.typed`): a substring match would also accept a file like
+        # `foo_py.typed_bar`. We want the real marker file at its exact
+        # location inside the wheel.
+        #
+        # WHY length-1 assert on the glob: if a previous run left a stale
+        # wheel in dist/, `glob(...)[0]` would silently pick the first one
+        # lexicographically and mask the real build. Fail loudly instead.
         run: |
-          python - <<'PY'
+          uv run python - <<'PY'
           import glob
           import zipfile
 
-          whl = glob.glob("dist/*.whl")[0]
+          wheels = glob.glob("dist/*.whl")
+          assert len(wheels) == 1, f"expected exactly one wheel, found {wheels}"
+          whl = wheels[0]
           names = zipfile.ZipFile(whl).namelist()
-          assert any("py.typed" in n for n in names), (
-              f"py.typed missing from wheel: {names}"
+          assert "clickwork/py.typed" in names, (
+              f"py.typed missing: {[n for n in names if 'clickwork' in n]}"
           )
           print(f"py.typed present in {whl}")
           PY
@@ -67,8 +88,8 @@ jobs:
         # WHY a fresh venv (not `uv sync`): `uv sync` installs the project
         # in editable mode from `src/`. We need to exercise the BUILT
         # artifact, not the source tree, to catch missing-file bugs in
-        # the wheel itself. `python -m venv` creates a standalone venv
-        # that has no connection to the repo's .venv.
+        # the wheel itself. `uv venv` creates a standalone venv that has
+        # no connection to the repo's .venv.
         #
         # WHY we copy tests to a temp dir: running `pytest` from the
         # repo root would pick up `src/clickwork/` on `sys.path` (via
@@ -90,9 +111,25 @@ jobs:
         # copied tests live in /tmp/wheel-smoke-tests so parents[2]
         # points at /tmp, not the repo. Those tests are covered by
         # test.yml's editable run; here we deselect them.
+        #
+        # WHY `uv venv --python 3.13` (not `python -m venv`): bare
+        # `python` on the runner is 3.12, not the 3.13 we pinned. Passing
+        # `--python 3.13` bakes the correct interpreter into the venv so
+        # everything downstream (`pip install`, `pytest`) runs on 3.13.
+        #
+        # WHY we resolve the wheel path first (not `pip install dist/*.whl`):
+        # pip expands the glob itself and installs EVERY match. If a stale
+        # wheel from a previous build survives, pip happily installs both
+        # and one overrides the other non-deterministically. Resolve to
+        # exactly one path and fail loudly otherwise.
         run: |
-          python -m venv /tmp/wheel-smoke
-          /tmp/wheel-smoke/bin/pip install dist/*.whl pytest pytest-mock
+          WHEEL=$(ls dist/*.whl)
+          if [ "$(printf '%s\n' "$WHEEL" | wc -l)" -ne 1 ]; then
+            echo "expected exactly one wheel, got: $WHEEL"
+            exit 1
+          fi
+          uv venv --python 3.13 /tmp/wheel-smoke
+          /tmp/wheel-smoke/bin/pip install "$WHEEL" pytest pytest-mock
           cp -r tests /tmp/wheel-smoke-tests
           cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
           [pytest]
@@ -112,13 +149,22 @@ jobs:
         run: rm -rf /tmp/wheel-smoke /tmp/wheel-smoke-tests
 
       - name: Install sdist into fresh venv and run tests
-        # Identical flow to the wheel step, but `pip install dist/*.tar.gz`
-        # forces pip to rebuild from the sdist. Catches sdist-specific
-        # packaging bugs (e.g. a file that got into the wheel via hatchling
-        # but is missing from the sdist's MANIFEST).
+        # Identical flow to the wheel step, but pointed at the .tar.gz so
+        # pip rebuilds from the sdist. Catches sdist-specific packaging
+        # bugs (e.g. a file that got into the wheel via hatchling but is
+        # missing from the sdist's MANIFEST).
+        #
+        # Same discipline as the wheel step: pin the venv to 3.13 via
+        # `uv venv --python 3.13`, and resolve the sdist glob to exactly
+        # one path so a stale tarball can't sneak in.
         run: |
-          python -m venv /tmp/wheel-smoke
-          /tmp/wheel-smoke/bin/pip install dist/*.tar.gz pytest pytest-mock
+          SDIST=$(ls dist/*.tar.gz)
+          if [ "$(printf '%s\n' "$SDIST" | wc -l)" -ne 1 ]; then
+            echo "expected exactly one sdist, got: $SDIST"
+            exit 1
+          fi
+          uv venv --python 3.13 /tmp/wheel-smoke
+          /tmp/wheel-smoke/bin/pip install "$SDIST" pytest pytest-mock
           cp -r tests /tmp/wheel-smoke-tests
           cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
           [pytest]
