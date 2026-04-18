@@ -422,9 +422,12 @@ class TestMixedDiscovery:
         Creates a tiny FakeEntryPoint whose ``.load()`` returns ``command``,
         then monkeypatches ``importlib.metadata.entry_points`` to return a
         list containing that one entry point when queried for the
-        ``clickwork.commands`` group (and an empty list for any other group,
-        so unrelated lookups elsewhere in the interpreter are not affected).
+        ``clickwork.commands`` group. Queries for every other group are
+        forwarded to the real ``importlib.metadata.entry_points`` via the
+        snapshot we captured before patching, so unrelated lookups (e.g.
+        ``console_scripts``) keep working during the test.
         """
+        import importlib.metadata
 
         class FakeEntryPoint:
             # Matches the shape importlib.metadata.EntryPoint exposes: a
@@ -439,18 +442,21 @@ class TestMixedDiscovery:
         ep = FakeEntryPoint()
         ep.name = name
 
-        def _fake_entry_points(*, group: str | None = None):
-            # Only surface the stub for the clickwork group so the patch
-            # can't accidentally pollute unrelated metadata queries.
-            if group == "clickwork.commands":
+        # Capture the real function BEFORE monkeypatching so the fallback
+        # doesn't recurse into itself once the patch is live.
+        real_entry_points = importlib.metadata.entry_points
+
+        def _fake_entry_points(*args, **kwargs):
+            # Replace the clickwork group with just our stub EP; forward
+            # anything else straight through to the real implementation so
+            # the patch only affects the code path under test.
+            if kwargs.get("group") == "clickwork.commands":
                 return [ep]
-            return []
+            return real_entry_points(*args, **kwargs)
 
         monkeypatch.setattr("importlib.metadata.entry_points", _fake_entry_points)
 
-    def test_local_command_shadows_installed_entry_point(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_local_command_shadows_installed_entry_point(self, tmp_path: Path, monkeypatch) -> None:
         """Local directory command must win over a same-named entry point.
 
         Stubs ``importlib.metadata.entry_points`` to return a fake EP
@@ -545,9 +551,7 @@ class TestMixedDiscovery:
         assert result.exit_code == 0
         assert result.output.strip() == "installed-solo"
 
-    def test_dev_mode_ignores_entry_points(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_dev_mode_ignores_entry_points(self, tmp_path: Path, monkeypatch) -> None:
         """Dev mode must not include entry-point commands.
 
         Pins the mode-isolation contract for ``discovery_mode="dev"``:
@@ -590,9 +594,7 @@ class TestMixedDiscovery:
         # Entry-point command must be ABSENT -- dev mode never loads it.
         assert "ep-only" not in commands
 
-    def test_installed_mode_ignores_directory(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_installed_mode_ignores_directory(self, tmp_path: Path, monkeypatch) -> None:
         """Installed mode must not include directory commands.
 
         Symmetric counterpart to the dev-mode test: even when a valid
@@ -630,9 +632,7 @@ class TestMixedDiscovery:
         # the directory even when commands_dir points at a valid one.
         assert "dir-cmd" not in commands
 
-    def test_shadowing_is_logged_at_info_level(
-        self, tmp_path: Path, monkeypatch, caplog
-    ) -> None:
+    def test_shadowing_is_logged_at_info_level(self, tmp_path: Path, monkeypatch, caplog) -> None:
         """The shadowing event must be announced on the clickwork logger at INFO.
 
         Pins the "informational, not silent" contract. Operators need to
@@ -681,6 +681,8 @@ class TestMixedDiscovery:
             f"from the clickwork logger mentioning the command name 'collide'; "
             f"got records: {[(r.name, r.levelname, r.getMessage()) for r in caplog.records]}"
         )
+
+
 class TestStrictDiscovery:
     """strict=True promotes every silent-drop branch to a raise.
 
