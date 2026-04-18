@@ -68,12 +68,17 @@ A test that says "the error message was printed to stderr" should assert
 on ``result.stderr``, not ``result.output``. See the GUIDE.md "Testing
 commands" section for a worked example.
 
-Historical note: older Click versions exposed a ``mix_stderr`` kwarg on
-``CliRunner.__init__``. That kwarg was **removed**; current Click
-(8.2+) always populates all three stream attributes separately, with
-``output`` containing the interleaved form for free. Do not copy
-snippets from old docs that reference ``CliRunner(mix_stderr=False)`` --
-they will fail with ``TypeError``.
+Historical note: Click 8.2 removed the ``mix_stderr`` kwarg that
+``CliRunner.__init__`` used to accept. Post-removal, all three stream
+attributes on ``Result`` are populated separately (``output`` is the
+interleaved form; ``stdout`` and ``stderr`` are kept independent).
+clickwork declares ``click>=8.1`` so in principle a consumer could be
+running on 8.1 where ``mix_stderr`` still exists -- the pinned
+environment (see ``uv.lock``) tracks a 8.2+ release. If you are
+looking at an older snippet that uses ``CliRunner(mix_stderr=False)``,
+check the Click version in your test environment rather than
+assuming the 8.2+ API: 8.2+ will raise ``TypeError``, older releases
+still accept the kwarg.
 """
 from __future__ import annotations
 

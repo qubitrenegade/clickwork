@@ -525,14 +525,16 @@ assert "error line" in result.output          # ALSO yes (interleaved)
 assert "normal line" in result.stderr         # NO -- would fail
 ```
 
-> **Footgun:** old Click releases exposed a `mix_stderr` kwarg on
-> `CliRunner.__init__` that toggled whether stderr was folded into
-> `output`. That kwarg has been **removed** in current Click (8.2+).
-> Both streams are always available separately via `result.stdout` /
-> `result.stderr`, with `result.output` continuing to provide the
-> interleaved form for backwards compatibility. Do not copy snippets
-> from older docs that still reference `CliRunner(mix_stderr=False)` --
-> they will fail with `TypeError`.
+> **Footgun:** Click 8.2 removed the `mix_stderr` kwarg on
+> `CliRunner.__init__` that used to toggle whether stderr was folded
+> into `output`. Post-removal, `result.stdout` / `result.stderr` are
+> populated independently and `result.output` keeps providing the
+> interleaved form. clickwork declares `click>=8.1`, so in principle
+> a consumer could be on 8.1 where the kwarg still works -- the
+> pinned environment (`uv.lock`) tracks 8.2+. If you are reading an
+> older snippet that uses `CliRunner(mix_stderr=False)`, check the
+> Click version in your test environment: 8.2+ will raise
+> `TypeError`, older releases still accept it.
 
 ### Unit Testing with CliRunner
 
@@ -557,7 +559,11 @@ def test_deploy_dry_run(tmp_path):
     )
 
     cli = create_cli(name="test-cli", commands_dir=cmd_dir)
-    result = CliRunner().invoke(cli, ["--dry-run", "deploy"])
+    # Pass ``catch_exceptions=False`` here for the same reason
+    # ``run_cli`` pins it above: without it, a bug inside the command
+    # surfaces only as ``result.exception`` with a generic exit code,
+    # and the real traceback is swallowed.
+    result = CliRunner().invoke(cli, ["--dry-run", "deploy"], catch_exceptions=False)
 
     assert result.exit_code == 0
     assert "dry_run=True" in result.output

@@ -147,16 +147,12 @@ when asserting on a specific stream. See
 [GUIDE.md "Testing commands with `clickwork.testing`"](GUIDE.md#testing-commands-with-clickworktesting).
 
 ```python
-from click.testing import CliRunner
-from clickwork import create_cli
+from clickwork.testing import make_test_cli, run_cli
 
 def test_deploy_dry_run(tmp_path):
-    cmd_dir = tmp_path / "commands"
-    cmd_dir.mkdir()
-    (cmd_dir / "deploy.py").write_text(...)
-
-    cli = create_cli(name="test-cli", commands_dir=cmd_dir)
-    result = CliRunner().invoke(cli, ["--dry-run", "deploy"])
+    (tmp_path / "deploy.py").write_text(...)
+    cli = make_test_cli(commands_dir=tmp_path)
+    result = run_cli(cli, ["--dry-run", "deploy"])
     assert result.exit_code == 0
 ```
 
