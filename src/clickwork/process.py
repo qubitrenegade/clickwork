@@ -452,9 +452,11 @@ def run_with_confirm(
         env: Extra environment variables merged with os.environ.
         stdin_text: If set, encode this string as UTF-8 and pipe the bytes
             to the child's stdin. Mutually exclusive with stdin_bytes.
-            (Implementation note: delegates to ``run()``, which always
-            opens stdin in binary mode and encodes here -- no locale
-            dependency, no newline translation.)
+            (Implementation note: this function delegates to ``run()``,
+            which opens stdin in binary mode and itself encodes
+            ``stdin_text`` to UTF-8 before writing -- so the encoding
+            happens in ``run()``, not here. No locale dependency, no
+            newline translation.)
         stdin_bytes: If set, pipe these raw bytes to the child's stdin.
             Mutually exclusive with stdin_text.
 
