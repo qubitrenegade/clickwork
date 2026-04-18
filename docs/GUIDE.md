@@ -325,9 +325,9 @@ on every command.
 Personal settings (credentials, local overrides) go in
 `~/.config/my-tool/config.toml`. This file sits **below** repo config
 in the precedence order -- repo config overrides it. (Schema-declared
-defaults are the only thing lower; see [Config
-Precedence](#config-precedence) for the full table.) To override a
-repo value locally, use an environment variable instead.
+defaults are the only thing lower; see
+[Config Precedence](#config-precedence) for the full table.) To
+override a repo value locally, use an environment variable instead.
 
 User config may contain secrets, so the framework enforces owner-only
 permissions on Unix (`chmod 600`). Files that are group- or
