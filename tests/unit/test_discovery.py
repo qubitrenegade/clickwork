@@ -447,13 +447,15 @@ class TestMixedDiscovery:
     ) -> None:
         """Local directory command must win over a same-named entry point.
 
-        Installs a fake entry point named "shared" whose command echoes
-        "installed-won", then plants a local ``commands/shared.py`` file
-        whose command echoes "local-won". After ``discover_commands(mode="auto")``,
-        the returned dict's "shared" entry must be the local one, verified
-        by actually invoking it and checking the output string. This is
-        the load-bearing assertion: if the merge order ever flipped, the
-        output would change to "installed-won" and the test would fail.
+        Stubs ``importlib.metadata.entry_points`` to return a fake EP
+        named ``shared`` whose command echoes ``installed-won``, then
+        plants a file at ``<tmp_path>/shared.py`` whose command echoes
+        ``local-won``. After ``discover_commands(commands_dir=tmp_path,
+        discovery_mode="auto")``, the returned dict's ``"shared"``
+        entry must be the local one, verified by actually invoking it
+        and checking the output string. If the merge order ever flipped,
+        the output would change to ``installed-won`` and the test would
+        fail.
         """
         from clickwork.discovery import discover_commands
 
