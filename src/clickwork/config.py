@@ -758,7 +758,7 @@ def load_config(
                 raise ConfigError(
                     f"Config env '{env}' is not a TOML table in "
                     f"{repo_config_path}. Check the TOML syntax: the "
-                    f"section must be declared as ``[env.{env}]`` with "
+                    f"section must be declared as [env.{env}] with "
                     "nested keys, not as a bare dotted-key assignment."
                 )
             repo_env = _flatten_mapping(env_section_raw)

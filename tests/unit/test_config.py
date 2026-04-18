@@ -13,6 +13,7 @@ Key behaviors tested:
 - Secret safety (refuse secrets in repo config)
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -1030,7 +1031,7 @@ class TestInFileEnvPrecedence:
         and flap. This fixture is autouse on the class so every test in
         TestInFileEnvPrecedence starts from a deterministic empty env.
         """
-        for name in list(__import__("os").environ):
+        for name in list(os.environ):
             if name.startswith("TEST_CLI_"):
                 monkeypatch.delenv(name, raising=False)
 
@@ -1212,6 +1213,40 @@ class TestInFileEnvPrecedence:
         # Message lists the defined sections so the operator knows their
         # choices without re-reading the TOML file.
         assert "staging" in msg
+
+    def test_env_section_parsed_as_scalar_raises(self, tmp_path: Path) -> None:
+        """``env.<name> = "scalar"`` fails with a ``[env.<name>]``-table hint.
+
+        TOML permits dotted-key assignment (``env.production = "x"``), which
+        parses into ``{"env": {"production": "x"}}`` -- structurally the same
+        path the loader walks for a real ``[env.production]`` section, but the
+        value is a string rather than a sub-table. Without the guard added in
+        #52, ``_flatten_mapping`` would be called on the string and raise an
+        opaque ``AttributeError``. This test pins the contract that the guard
+        raises ``ConfigError`` with a message naming the env and recommending
+        the correct table syntax so the operator can fix the TOML.
+        """
+        from clickwork.config import ConfigError, load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        # TOML dotted-key form: legal syntax, wrong shape for load_config.
+        config_file.write_text('env.production = "oops"\n')
+        user_cfg = tmp_path / "user-config.toml"  # intentionally absent
+
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                user_config_path=user_cfg,
+                env="production",
+            )
+
+        msg = str(excinfo.value)
+        # Names the env the operator asked for, and the path of the offender.
+        assert "production" in msg
+        assert str(config_file) in msg
+        # Points at the correct fix: a real ``[env.production]`` table.
+        assert "[env.production]" in msg
 
 
 class TestLoadEnvFile:
