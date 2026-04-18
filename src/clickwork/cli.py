@@ -38,6 +38,33 @@ EXIT_USER_ERROR = 1
 EXIT_FRAMEWORK_ERROR = 2
 
 
+# Module-level wrapper for the lazy require binding (issue #8).
+#
+# WHY defined here and not inside create_cli(): the inner cli_group()
+# factory runs every time the CLI is constructed, and defining a new
+# wrapper function object there creates needless per-invocation garbage.
+# A single module-level wrapper is created exactly once, and every
+# CliContext reuses the same object.
+#
+# WHY a wrapper function that dispatches through _prereqs.require at call
+# time, rather than binding cli_ctx.require to _prereqs.require directly:
+# binding the imported reference freezes it at import time, so tests that
+# do ``patch("clickwork.prereqs.require")`` silently have no effect -- the
+# CliContext already holds the original function. Resolving the attribute
+# through the ``_prereqs`` module object on every call means the patched
+# function is picked up naturally, matching what test authors expect.
+#
+# WHY @functools.wraps(_prereqs.require): copies the signature and docstring
+# from the import-time reference onto the wrapper (via __wrapped__), so
+# ``inspect.signature(ctx.require)`` shows the real
+# ``(binary: str, authenticated: bool = ...)`` parameters and IDE tooling
+# can introspect it. The wrapper's *body* still goes through
+# ``_prereqs.require`` on every call, so patching remains effective.
+@functools.wraps(_prereqs.require)
+def _require_via_prereqs(*args, **kwargs):
+    return _prereqs.require(*args, **kwargs)
+
+
 class MutuallyExclusive(click.Option):
     """Click option that is mutually exclusive with another option.
 
@@ -325,32 +352,10 @@ def create_cli(
 
         # require() has no dry_run / yes concept -- it's always a live check.
         # The call site is ctx.require("docker") not ctx.require("docker", dry_run=...).
-        #
-        # WHY a lambda that looks up prereqs.require at call time instead of
-        # capturing the imported function directly (issue #8): binding
-        # ``cli_ctx.require = _require`` freezes the reference at import time,
-        # so tests that do ``patch("clickwork.prereqs.require")`` silently
-        # have no effect -- the CliContext already holds the original
-        # function. Resolving the attribute through the ``_prereqs`` module
-        # object on every call means the patched function is picked up
-        # naturally, matching what test authors expect.
-        #
-        # WHY not @functools.partial or a closure over a local name: both
-        # would also freeze the reference at bind time. The only shape that
-        # defers lookup is one that re-reads the module attribute each call,
-        # which this wrapper does via ``_prereqs.require``.
-        #
-        # WHY @functools.wraps(_prereqs.require) on the wrapper: the import-
-        # time reference is used solely to copy the *signature* and docstring
-        # onto the wrapper (via __wrapped__), so ``inspect.signature`` and
-        # IDE tooling show the real ``(binary: str, authenticated: bool = ...)``
-        # parameters rather than the generic ``(*args, **kwargs)``. The
-        # wrapper's *body* still goes through ``_prereqs.require`` on every
-        # call, so patching remains effective.
-        @functools.wraps(_prereqs.require)
-        def _require_via_prereqs(*args, **kwargs):
-            return _prereqs.require(*args, **kwargs)
-
+        # Uses the module-level _require_via_prereqs wrapper (defined above)
+        # so patching clickwork.prereqs.require takes effect even though the
+        # binding here looks like a frozen reference. See that wrapper's
+        # comment block for the full "why" (issue #8).
         cli_ctx.require = _require_via_prereqs
 
         # confirm() and confirm_destructive() close over yes so --yes propagates.
