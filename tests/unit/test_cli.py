@@ -404,8 +404,11 @@ class TestVersionFlag:
         WHY: a caller who passes both is almost certainly doing
         something deliberate (e.g. injecting a CI-computed version
         string). Silently preferring the metadata lookup would surprise
-        them. The rule is simple and local: if ``version`` is truthy,
-        skip the metadata path entirely.
+        them. The rule is simple and local: if ``version is not None``,
+        skip the metadata path entirely. The check is ``is not None``
+        specifically -- an empty ``version=""`` still wins over
+        ``package_name=``, because the caller explicitly chose to
+        suppress the resolved version in favour of an empty string.
         """
         from clickwork.cli import create_cli
 
