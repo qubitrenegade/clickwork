@@ -90,6 +90,9 @@ working example with subcommand groups.
 - **[Guide](docs/GUIDE.md)** -- Step-by-step tutorial: building a CLI,
   adding config, using subprocess helpers, distributing as a package,
   testing your commands.
+- **[Plugins](docs/PLUGINS.md)** -- 15-minute walkthrough for shipping
+  a pip-installable plugin via the `clickwork.commands` entry-point
+  group.
 - **[Architecture](docs/ARCHITECTURE.md)** -- Design decisions, module
   responsibilities, security model, and the reasoning behind non-obvious
   choices.
