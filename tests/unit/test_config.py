@@ -468,3 +468,330 @@ class TestUserConfigPermissions:
             user_config_path=user_config,
         )
         assert config["region"] == "us-east-1"
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX file-mode semantics don't apply on Windows",
+    )
+    def test_group_writable_config_is_refused(self, tmp_path: Path):
+        """User config with ANY group/other bit (e.g. 0o620) must fail.
+
+        WHY this regression test exists: the permission check was
+        extracted into _check_owner_only_permissions and tightened from
+        "group/other READ only" to "ANY group/other bit" so group-
+        writable secrets files (a tampering risk even when not readable)
+        are also rejected. The old test covered 0o644; this one pins
+        the group-WRITE-only case so a future reader can't relax the
+        check back to read-only without a loud test failure.
+        """
+        import os
+        from clickwork.config import load_config, ConfigError
+
+        user_config = tmp_path / "config.toml"
+        user_config.write_text('token = "secret"\n')
+        # 0o620 = owner rw, group w, other ---. Not group-readable,
+        # so a pre-tightening check (S_IRGRP | S_IROTH) would let this
+        # through. The current S_IRWXG | S_IRWXO check catches it.
+        os.chmod(user_config, 0o620)
+
+        repo_config = tmp_path / ".test-cli.toml"
+        repo_config.write_text("[default]\n")
+
+        with pytest.raises(ConfigError, match="permission"):
+            load_config(
+                project_name="test-cli",
+                repo_config_path=repo_config,
+                user_config_path=user_config,
+            )
+
+
+class TestLoadEnvFile:
+    """load_env_file() reads dotenv-style files into a plain dict.
+
+    This helper is intentionally *not* integrated into load_config() -- it
+    is a sibling utility so callers (deploy/release/admin commands) can
+    source credentials from a .env file and pass them to ctx.run(env=...)
+    or inject into os.environ themselves. Keeping it standalone means
+    the TOML pipeline stays focused on structured data, and the dotenv
+    grammar stays deliberately tiny (no variable substitution, no
+    command substitution, no heredocs -- see the load_env_file()
+    docstring itself for the explicit out-of-scope list; the module
+    docstring on config.py describes TOML layered config, not dotenv).
+    """
+
+    def test_load_env_file_parses_simple_key_value(self, tmp_path: Path):
+        """The simplest case: one KEY=VALUE line produces one dict entry."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("K=v\n")
+        # Owner-only permissions: this file may hold secrets, same treatment
+        # as user config.
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "v"}
+
+    def test_load_env_file_strips_export_prefix(self, tmp_path: Path):
+        """A leading 'export ' (shell-style) is stripped so the same file
+        works with both ``source .env`` and load_env_file()."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("export K=v\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "v"}
+
+    def test_load_env_file_strips_leading_whitespace_around_equals(self, tmp_path: Path):
+        """``KEY = value`` and ``KEY= value`` produce a value without the
+        leading space.
+
+        WHY this regression test exists: the partition-on-'=' parse
+        leaves leading whitespace on the value side for forms like
+        ``KEY = value`` (spaces around '=', a common shape in hand-edited
+        .env files). Without lstrip, the value would be ``" value"`` with
+        a real leading space -- easy to miss and trivial to mangle a
+        secret token. Pins the strip so a regression produces a loud
+        test failure rather than a silent content bug.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("KEY = value\nKEY2= value\nKEY3 =value\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {
+            "KEY": "value",
+            "KEY2": "value",
+            "KEY3": "value",
+        }
+
+    def test_load_env_file_strips_whitespace_before_quote_unwrap(self, tmp_path: Path):
+        """``KEY = "value"`` must still unwrap the quotes.
+
+        If the value-side whitespace isn't stripped BEFORE the quote-
+        unwrap check, the check sees a value starting with a space and
+        doesn't recognise the quotes as wrapping. The parser would then
+        leave the quote characters literally in the stored value
+        (``' "value"'`` instead of ``"value"``) -- subtle enough that
+        callers wouldn't notice until the subprocess tries to use the
+        literal quoted form of the token.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text('KEY = "wrapped"\nK2=   \'singly\'\n')
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"KEY": "wrapped", "K2": "singly"}
+
+    def test_load_env_file_preserves_whitespace_inside_quotes(self, tmp_path: Path):
+        """Leading whitespace INSIDE quotes is intentional and preserved.
+
+        The lstrip on the pre-quote-unwrap value removes only whitespace
+        AROUND the '=' operator; whitespace kept inside a quoted value is
+        a deliberate user choice (e.g. a token formatted with a leading
+        space, or a human-readable prefix) and must survive.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text('KEY = "  leading spaces preserved"\n')
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"KEY": "  leading spaces preserved"}
+
+    def test_load_env_file_handles_double_quotes(self, tmp_path: Path):
+        """Values wrapped in double quotes have the quotes stripped so
+        spaces and other whitespace-adjacent characters survive parsing."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text('K="v with spaces"\n')
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "v with spaces"}
+
+    def test_load_env_file_handles_single_quotes(self, tmp_path: Path):
+        """Single quotes are treated identically to double quotes for the
+        purposes of this minimal parser -- the grammar deliberately does
+        not distinguish shell's 'literal vs interpolated' semantics."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("K='v'\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "v"}
+
+    def test_load_env_file_skips_comments(self, tmp_path: Path):
+        """Full-line comments (# ...) are skipped; inline trailing comments
+        are NOT supported -- the `#` in ``K=val # comment`` is treated as
+        part of the value. See the load_env_file() docstring's "Not
+        supported" section for the full anti-feature list (variable
+        substitution, inline comments, heredocs, etc.)."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("# this is a comment\nK=v\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "v"}
+
+    def test_load_env_file_skips_blank_lines(self, tmp_path: Path):
+        """Blank lines (whitespace-only or empty) are harmless and ignored."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("\n\nK=v\n\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "v"}
+
+    def test_load_env_file_handles_multiple_keys(self, tmp_path: Path):
+        """Multiple KEY=VALUE lines produce multiple dict entries."""
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("A=1\nB=2\nC=3\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"A": "1", "B": "2", "C": "3"}
+
+    def test_load_env_file_raises_on_missing_file(self, tmp_path: Path):
+        """Missing env file is an error -- unlike user config, callers
+        ask for this file by name, so absence is a bug, not a fallback."""
+        from clickwork.config import load_env_file
+
+        # Don't create the file -- load_env_file should raise.
+        # FileNotFoundError bubbles up from os.open; this keeps the
+        # semantics obvious to the caller.
+        with pytest.raises(FileNotFoundError):
+            load_env_file(tmp_path / "missing.env")
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX file-mode semantics don't apply on Windows",
+    )
+    def test_load_env_file_rejects_world_readable_file(self, tmp_path: Path):
+        """A .env file commonly holds secrets; any group/other bit rejects it.
+
+        The implementation forbids any group or other permission bit
+        (read, write, or execute) -- not just "looser than 0o600". Modes
+        like 0o400 or 0o700 pass the check; 0o644 here fails because
+        group/other have the read bit set.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("K=v\n")
+        os.chmod(env_file, 0o644)  # world-readable
+
+        with pytest.raises(ConfigError, match="permission"):
+            load_env_file(env_file)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX file-mode semantics don't apply on Windows",
+    )
+    def test_load_env_file_rejects_group_writable_file(self, tmp_path: Path):
+        """Group-WRITE alone (0o620) must also fail -- tampering risk.
+
+        WHY: a group-writable secrets file lets another user replace or
+        modify our secrets even when they can't read them directly. The
+        permission guard rejects ANY group/other bit, not just readability.
+        This regression test pins that -- without it, someone could
+        accidentally relax the check back to S_IRGRP|S_IROTH and lose
+        tamper-resistance without any test failing.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("K=v\n")
+        # 0o620 = owner rw, group w only, other ---. Not group-readable,
+        # so a pre-tightening check (S_IRGRP | S_IROTH) would let this
+        # through. The current S_IRWXG | S_IRWXO check catches it.
+        os.chmod(env_file, 0o620)
+
+        with pytest.raises(ConfigError, match="permission"):
+            load_env_file(env_file)
+
+    def test_load_env_file_raises_on_malformed_line(self, tmp_path: Path):
+        """A line without '=' is ambiguous -- the parser refuses it rather
+        than silently dropping or misinterpreting. The error message must
+        name the 1-based line number so the caller can locate the problem."""
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        # Line 1: valid. Line 2: malformed (no '='). Line 3: valid.
+        env_file.write_text("A=1\nBROKEN\nC=3\n")
+        os.chmod(env_file, 0o600)
+
+        with pytest.raises(ConfigError, match="line 2"):
+            load_env_file(env_file)
+
+    def test_load_env_file_raises_on_empty_key(self, tmp_path: Path):
+        """'=value' (or 'export =value') has no variable name.
+
+        Without a guard, the parser would return {"": "value"}, which is
+        never a valid environment variable name and blows up later when
+        passed to subprocess or os.environ. Fail fast with a line number
+        so the caller can fix the bad line immediately.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        # Line 1: valid. Line 2: empty key. Line 3: valid.
+        env_file.write_text("A=1\n=orphaned\nC=3\n")
+        os.chmod(env_file, 0o600)
+
+        with pytest.raises(ConfigError, match="line 2"):
+            load_env_file(env_file)
+
+    def test_load_env_file_raises_on_empty_key_after_export(self, tmp_path: Path):
+        """'export =value' is the same bug, just with the export prefix.
+
+        Ensures the empty-key guard runs AFTER the export strip so we
+        don't miss the bad case.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("export =value\n")
+        os.chmod(env_file, 0o600)
+
+        with pytest.raises(ConfigError, match="line 1"):
+            load_env_file(env_file)
+
+    def test_load_env_file_does_not_expand_variables(self, tmp_path: Path):
+        """Variable substitution (K=$OTHER) is deliberately unsupported.
+
+        This is an anti-test: the parser stores the literal string '$OTHER'
+        rather than trying to resolve it from os.environ or other entries
+        in the file. If someone "helpfully" adds substitution later, this
+        test will flag it as a breaking change. Callers who want shell
+        semantics should use 'sh -c "set -a; source .env; env"' instead.
+        """
+        import os
+        from clickwork.config import load_env_file
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("K=$OTHER\n")
+        os.chmod(env_file, 0o600)
+
+        assert load_env_file(env_file) == {"K": "$OTHER"}

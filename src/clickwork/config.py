@@ -18,6 +18,7 @@ is refused (not just warned) to prevent secret leakage.
 from __future__ import annotations
 
 import os
+import shlex
 import stat
 import sys
 from pathlib import Path
@@ -120,12 +121,86 @@ def _load_toml_from_bytes(data: bytes) -> dict:
     return tomllib.load(io.BytesIO(data))
 
 
+def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
+    """Raise ConfigError if the file behind ``fd`` has any group/other perms.
+
+    "Owner-only" in the informal sense: nothing outside the file's owner
+    can read, write, or execute it. The owner's own bits are NOT
+    constrained (so ``0o600``, ``0o700``, ``0o400``, etc. all pass) --
+    the helper is about keeping *other* users out, not about the owner's
+    own mode choices.
+
+    Factored out of the user-config reader so the same permission guard can
+    be reused by any secrets-bearing file (user config TOML, .env dotenv
+    files, etc.) without duplicating the TOCTOU-safe fstat() logic or the
+    Windows carve-out.
+
+    The check uses ``os.fstat(fd)`` (not ``os.stat(path)``) so it operates
+    on the already-opened file descriptor. This closes the TOCTOU
+    (time-of-check/time-of-use) window: an attacker cannot swap the file
+    between permission check and read, because both operate on the same
+    kernel fd.
+
+    On Windows the Unix permission model does not apply (NTFS ACLs use a
+    completely different mechanism), so the check is a no-op there. Callers
+    should still gate file creation on platform-appropriate ACLs; this
+    helper only enforces the POSIX mode-bit portion.
+
+    Args:
+        fd: An open file descriptor to check. The caller retains ownership
+            -- this function does not close it.
+        path: The path used to open ``fd``; only used to build a helpful
+            error message pointing the user at the right file to chmod.
+        kind: Human-readable label for the file type (e.g., "User config",
+            ".env file"). Interpolated into the error message so the
+            caller sees which file failed the check.
+
+    Raises:
+        ConfigError: If ANY group or other permission bits are set on the
+            file (read, write, OR execute). A group-writable file is a
+            tampering risk even when not group-readable, so the check
+            covers all three bit classes for group/other rather than
+            just read bits. Owner bits are NOT constrained -- the helper
+            only cares that no one *else* can access the file; owner
+            execute (or setuid, etc.) is the caller's problem. This
+            matches the standard "chmod 600" remediation, which clears
+            every bit except owner read/write.
+    """
+    # Skip the check entirely on Windows -- POSIX mode bits are meaningless
+    # there, and fstat() on Windows typically returns 0o666 for any file.
+    if sys.platform == "win32":
+        return
+
+    st = os.fstat(fd)
+    mode = stat.S_IMODE(st.st_mode)
+    # Reject ANY group/other permission bits (not just read). A file with
+    # mode 0o620 (owner rw, group w, other ---) has group-write, which
+    # means another user could *tamper* with our secrets file -- still a
+    # compromise even though they can't read it directly. S_IRWXG and
+    # S_IRWXO cover all of read/write/execute for group/other, matching
+    # the "chmod 600" remediation we recommend.
+    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+        # Shell-quote the path in the remediation hint so paths with
+        # spaces or leading '-' characters remain safe to copy/paste into
+        # a terminal. shlex.quote() wraps the string in single quotes
+        # when needed and leaves safe paths unchanged.
+        raise ConfigError(
+            f"{kind} {path} has unsafe permission {oct(mode)} "
+            f"(accessible by group/others). Secrets may be exposed or "
+            f"tampered with.\n"
+            f"Fix with: chmod 600 {shlex.quote(str(path))}"
+        )
+
+
 def _read_checked_user_config(path: Path) -> bytes | None:
     """Open, permission-check, and read a user config file in one operation.
 
     User config may contain secrets (API tokens, personal credentials), so
-    it must be owner-only (mode ``0o600``). On Windows this check is skipped
-    because the Unix permission model does not apply.
+    no one but the file's owner may access it. Any group/other permission
+    bit -- read, write, or execute -- raises ConfigError. ``chmod 600`` is
+    the canonical remediation, but ``0o400`` or ``0o700`` also pass the
+    check; only group/other bits are forbidden. On Windows this check is
+    skipped because the Unix permission model does not apply.
 
     The entire open-check-read sequence uses a single file descriptor to
     avoid TOCTOU (time-of-check/time-of-use) races: we open first, then
@@ -142,8 +217,11 @@ def _read_checked_user_config(path: Path) -> bytes | None:
         or None if the file does not exist.
 
     Raises:
-        ConfigError: If the file exists and is readable by group or other
-            users (i.e., mode bits include S_IRGRP or S_IROTH).
+        ConfigError: If the file exists and has ANY group/other permission
+            bit set (read, write, or execute). See
+            ``_check_owner_only_permissions`` for the precise rule --
+            this helper delegates the check there, so when the rule
+            tightens the behaviour here tightens too.
     """
     # Open the file first, then stat the open fd (TOCTOU-safe).
     # FileNotFoundError is caught instead of a pre-check with path.is_file()
@@ -158,21 +236,212 @@ def _read_checked_user_config(path: Path) -> bytes | None:
     # short reads internally -- os.read() can return fewer bytes than
     # requested. closefd=True means the file object owns the fd.
     with os.fdopen(fd, "rb") as f:
-        # Skip permission check on Windows where Unix permission bits
-        # are not meaningful.
-        if sys.platform != "win32":
-            st = os.fstat(fd)
-            mode = stat.S_IMODE(st.st_mode)
-            # S_IRGRP = group-read bit, S_IROTH = other-read bit.
-            # Either being set means the file is too permissive for secrets.
-            if mode & (stat.S_IRGRP | stat.S_IROTH):
-                raise ConfigError(
-                    f"User config {path} has unsafe permission {oct(mode)} "
-                    f"(readable by group/others). Secrets may be exposed.\n"
-                    f"Fix with: chmod 600 {path}"
-                )
-
+        # Delegate the permission check to the shared helper so the
+        # dotenv loader and any future secrets-bearing reader can reuse
+        # exactly the same logic (including the Windows carve-out).
+        _check_owner_only_permissions(fd, path, kind="User config")
         return f.read()
+
+
+def load_env_file(path: Path) -> dict[str, str]:
+    """Parse a dotenv-style file into a plain dict of string key/value pairs.
+
+    This is a *standalone* helper -- it is **not** integrated into
+    ``load_config()``. The TOML pipeline handles structured config; this
+    helper covers the separate case where a command needs to source
+    credentials or environment variables from a ``.env`` file and pass
+    them to a subprocess (``ctx.run(env=...)``) or inject them into
+    ``os.environ``.
+
+    Supported syntax (deliberately tiny):
+
+        KEY=value              # simple assignment
+        export KEY=value       # optional shell-style 'export' prefix, stripped
+        KEY="value with ws"    # double-quoted value (quotes stripped)
+        KEY='value with ws'    # single-quoted value (quotes stripped)
+        # full-line comment    # skipped
+        <blank line>           # skipped
+
+    Explicitly **NOT supported** (by design -- do not add these):
+
+        * Variable substitution. ``K=$OTHER`` stores the literal string
+          ``"$OTHER"``; nothing is resolved from ``os.environ`` or from
+          earlier entries in the file. If you need shell semantics, use
+          ``sh -c 'set -a; source .env; env'`` and capture stdout.
+        * Backticks / command substitution (e.g. ``K=$(date)`` or the
+          backtick form).
+        * Heredocs and multi-line values.
+        * Inline trailing comments (``K=val # comment`` is parsed as
+          ``K`` -> ``"val # comment"`` because the literal '#' is part of
+          the value, not a comment marker).
+
+    These omissions are intentional. A tiny grammar is a feature: it means
+    you can look at a ``.env`` file and know exactly what each line does
+    without reading the parser.
+
+    Security: the file must be owner-only (``chmod 600``) on POSIX
+    platforms. Because ``.env`` files typically hold secrets, any
+    group or other permission bit (read, write, OR execute) raises
+    ConfigError -- not just group/other readability. A group-writable
+    file is a tampering risk even when not group-readable, so the
+    rejection matches what ``chmod 600`` actually enforces. On Windows
+    the check is skipped -- POSIX mode bits do not apply there, and
+    callers are expected to protect the file via NTFS ACLs instead.
+
+    Example usage::
+
+        from pathlib import Path
+        from clickwork.config import load_env_file
+
+        env = load_env_file(Path(".env"))
+        # env == {"API_TOKEN": "...", "REGION": "us-east-1"}
+
+        # Pass to a subprocess without mutating the parent environment.
+        # Note the list form: ctx.run (and the underlying subprocess
+        # helpers) reject string commands as a shell-injection guardrail,
+        # so every cmd must be an argv list.
+        ctx.run(["./deploy.sh"], env={**os.environ, **env})
+
+        # Or inject into the parent process:
+        os.environ.update(env)
+
+    Args:
+        path: Path to the dotenv file to parse. Must exist (unlike user
+            config, a missing .env is an error -- the caller asked for
+            this file by name).
+
+    Returns:
+        Dict mapping keys to their (possibly unquoted) string values.
+        Insertion order matches the order each key *first* appears in
+        the file. If the file contains the same key twice, the later
+        value overwrites the earlier one but the dict slot stays at
+        the first occurrence's position -- if caller cares about order,
+        they should ensure no duplicate keys in the file.
+
+    Raises:
+        FileNotFoundError: If ``path`` does not exist.
+        ConfigError: If the file has unsafe permissions (POSIX only), or
+            if any line is malformed -- missing ``=`` separator, or
+            producing an empty key (e.g. ``=value`` or ``export =v``).
+            Malformed-line errors include the 1-based line number so
+            the caller can locate the problem.
+    """
+    # Open then fstat -- same TOCTOU-safe pattern as _read_checked_user_config.
+    # We deliberately do not catch FileNotFoundError: a missing .env is a
+    # real error for this function (the caller explicitly asked for it),
+    # unlike user config which is optional.
+    fd = os.open(str(path), os.O_RDONLY)
+    # os.fdopen(..., "r") gives us text mode with universal newlines so
+    # Windows CRLF files parse correctly alongside Unix LF files.
+    with os.fdopen(fd, "r", encoding="utf-8") as f:
+        # Reuse the exact permission check (including the Windows carve-out)
+        # used by user config. See _check_owner_only_permissions for details.
+        #
+        # The shared helper already formats errors as
+        # "{kind} {path} ..." so we only need to pass a generic
+        # category label here; the path itself is interpolated by
+        # the helper. Keeping kind short avoids double-labelling like
+        # "dotenv file '.env' /tmp/.../.env ...".
+        _check_owner_only_permissions(fd, path, kind="dotenv file")
+        text = f.read()
+
+    result: dict[str, str] = {}
+    # enumerate(..., start=1) gives 1-based line numbers for human-friendly
+    # error messages -- line 1 in the error should match line 1 in the file.
+    for lineno, raw_line in enumerate(text.splitlines(), start=1):
+        # Strip surrounding whitespace once; we'll work with the trimmed
+        # form from here on. (Python text mode with default newline=None
+        # already normalizes "\r\n" and bare "\r" to "\n" via universal
+        # newlines, so we don't need to worry about stray carriage
+        # returns; .strip() is purely for leading/trailing spaces and
+        # tabs from hand-edited files.)
+        line = raw_line.strip()
+
+        # Skip blank lines and full-line comments. These two branches are
+        # the only lines that do not produce a key/value pair.
+        if not line or line.startswith("#"):
+            continue
+
+        # Strip the optional shell-style 'export ' prefix so the same file
+        # can be consumed by both load_env_file() and 'source .env'.
+        # We match 'export ' with a trailing space to avoid eating the
+        # 'export' portion of a legitimate key like 'exportKEY=v'.
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+
+        # Split on the *first* '=' only. Values may legitimately contain
+        # '=' (e.g., base64-encoded tokens), so str.partition is safer than
+        # str.split('=', 1) because it returns a 3-tuple even when '=' is
+        # absent, which we check for below.
+        key, sep, value = line.partition("=")
+        if not sep:
+            # No '=' in the line -- we can't tell what the caller meant.
+            # Refuse rather than silently dropping or misinterpreting.
+            #
+            # WHY we don't echo raw_line in the error: .env files are the
+            # canonical home for secrets (that's the whole point of this
+            # parser). If a malformed line contained a partial secret
+            # assignment, echoing raw_line would leak it into logs/CI
+            # output. Just the line number is enough for the caller to
+            # open the file and find the bad line.
+            raise ConfigError(
+                f"{path}: line {lineno}: malformed entry (no '=' separator)"
+            )
+
+        # Keys are trimmed; values are *not* trimmed beyond outer whitespace.
+        # We already stripped the whole line above, so key.strip() on top of
+        # that is cheap and defensive against 'KEY =value' style spacing.
+        key = key.strip()
+
+        # Empty-key guard: '=value' or 'export =value' would otherwise
+        # produce {"": "value"}, which is never a valid environment
+        # variable name and will blow up later when passed to
+        # subprocess/os.environ. Fail early with a clear line number.
+        # (Same no-raw-line policy as the separator error above -- don't
+        # echo the bad line because it may contain secrets.)
+        if not key:
+            raise ConfigError(
+                f"{path}: line {lineno}: empty key (missing name before '=')"
+            )
+
+        # Strip leading whitespace from the value before looking for
+        # quotes. Common dotenv forms like ``KEY = value`` or
+        # ``KEY= "value"`` would otherwise produce values like ``" value"``
+        # (with a real leading space) or leave the surrounding quotes
+        # intact (because value[0] is a space, not a quote). ``lstrip()``
+        # removes ALL leading whitespace characters (spaces, tabs, etc.)
+        # not just one -- but that's correct here: there is no legitimate
+        # dotenv form where "two spaces before the value" means anything
+        # different from "one space before the value", and quoted values
+        # still preserve their own internal whitespace. Matches what
+        # python-dotenv / direnv / shell-source do in
+        # practice, while still letting QUOTED values preserve their own
+        # leading whitespace:
+        #   KEY = "  value"   -> value becomes "  value" (inside quotes)
+        #   KEY =   value     -> value becomes "value"   (bare, space stripped)
+        # Trailing whitespace of the BARE (unquoted) value is already
+        # gone because raw_line.strip() at the top of the loop stripped
+        # both ends of the whole line. That's fine: .env files don't
+        # conventionally carry trailing whitespace in values; anyone
+        # who needs a trailing space can preserve it inside quotes
+        # (the quote-unwrap below runs AFTER the quote characters are
+        # still intact, so "KEY = 'value '" yields "value " with the
+        # intended trailing space).
+        value = value.lstrip()
+
+        # Unwrap matching surrounding quotes. We only strip quotes when the
+        # entire value is wrapped -- a value like 'foo"bar' stays literal.
+        # This matches the behaviour users expect from a minimal dotenv
+        # parser, without pulling in the full shell-quoting rules.
+        if len(value) >= 2 and (
+            (value[0] == '"' and value[-1] == '"')
+            or (value[0] == "'" and value[-1] == "'")
+        ):
+            value = value[1:-1]
+
+        result[key] = value
+
+    return result
 
 
 def load_config(
