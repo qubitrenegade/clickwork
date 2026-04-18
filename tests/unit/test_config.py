@@ -469,6 +469,41 @@ class TestUserConfigPermissions:
         )
         assert config["region"] == "us-east-1"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="POSIX file-mode semantics don't apply on Windows",
+    )
+    def test_group_writable_config_is_refused(self, tmp_path: Path):
+        """User config with ANY group/other bit (e.g. 0o620) must fail.
+
+        WHY this regression test exists: the permission check was
+        extracted into _check_owner_only_permissions and tightened from
+        "group/other READ only" to "ANY group/other bit" so group-
+        writable secrets files (a tampering risk even when not readable)
+        are also rejected. The old test covered 0o644; this one pins
+        the group-WRITE-only case so a future reader can't relax the
+        check back to read-only without a loud test failure.
+        """
+        import os
+        from clickwork.config import load_config, ConfigError
+
+        user_config = tmp_path / "config.toml"
+        user_config.write_text('token = "secret"\n')
+        # 0o620 = owner rw, group w, other ---. Not group-readable,
+        # so a pre-tightening check (S_IRGRP | S_IROTH) would let this
+        # through. The current S_IRWXG | S_IRWXO check catches it.
+        os.chmod(user_config, 0o620)
+
+        repo_config = tmp_path / ".test-cli.toml"
+        repo_config.write_text("[default]\n")
+
+        with pytest.raises(ConfigError, match="permission"):
+            load_config(
+                project_name="test-cli",
+                repo_config_path=repo_config,
+                user_config_path=user_config,
+            )
+
 
 class TestLoadEnvFile:
     """load_env_file() reads dotenv-style files into a plain dict.
