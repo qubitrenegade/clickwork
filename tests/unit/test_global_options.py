@@ -6,7 +6,12 @@ the command line. The resolved value is merged into the Click root context's
 ``meta`` dict under the option's Python-identifier name.
 
 Resolution rules (exercised below):
-    - Flags (``is_flag=True``) OR across levels: truthy at ANY level wins.
+    - Plain flags (single ``--foo`` with ``is_flag=True``) OR across levels:
+      truthy at ANY level wins.
+    - Slash-flags (``--foo/--no-foo`` with ``is_flag=True``) are an
+      exception -- they use innermost-wins so an inner ``--no-foo`` can
+      override an outer ``--foo`` (OR would never let False win, rendering
+      the off-form useless at inner levels).
     - Value options (string, int, etc.) use innermost-wins semantics.
     - Not passed anywhere => Click-resolved default (typically False for
       flags and None for value options, but the caller can override either

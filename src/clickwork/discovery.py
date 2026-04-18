@@ -183,19 +183,42 @@ class LazyEntryPointCommand(click.Command):
         # nested commands it contains. Group membership check uses the
         # public isinstance on click.Group; Groups always expose their
         # subcommands via ``.commands``.
+        #
+        # WHY we track the REGISTERED name (the dict key in Group.commands)
+        # rather than ``cmd.name``: a plugin can register a command under
+        # an alias with ``Group.add_command(cmd, name="alias")``, in which
+        # case ``cmd.name`` differs from the name the user actually types
+        # on the command line. The error message needs the invocation
+        # path, so we thread the dict key down through the recursion
+        # instead of relying on ``cmd.name``. For the top-level call we
+        # use ``self.name`` -- the proxy IS registered under that name
+        # at the CLI root, so starting the walk with just that name
+        # (and NOT appending ``loaded.name`` again) avoids the
+        # "plugin plugin" duplication an earlier draft produced.
         collisions: list[tuple[str, str]] = []
 
-        def _walk(cmd: click.Command, prefix: str) -> None:
-            path = f"{prefix} {cmd.name}".strip()
+        def _walk(cmd: click.Command, path: str) -> None:
+            # path is the FULL qualified path (registered names, space-
+            # separated) for ``cmd`` as the user would type it. Every
+            # param declared directly on ``cmd`` that collides with a
+            # proxy flag gets appended with this path.
             for p in cmd.params:
                 cmd_flags = set(getattr(p, "opts", ()))
                 cmd_flags.update(getattr(p, "secondary_opts", ()))
                 for flag in cmd_flags & proxy_flag_strings:
                     collisions.append((path, flag))
             if isinstance(cmd, click.Group):
-                for sub in cmd.commands.values():
-                    _walk(sub, path)
+                # Iterate .items() so we get the REGISTERED name (dict
+                # key), not the underlying cmd.name attribute -- these
+                # can differ when a plugin aliased the command.
+                for registered_name, sub in cmd.commands.items():
+                    sub_path = f"{path} {registered_name}".strip()
+                    _walk(sub, sub_path)
 
+        # Start with the proxy's own registered name. We do NOT append
+        # loaded.name to this: the proxy IS the loaded command's entry
+        # point, and Click parses from the proxy's registered name, so
+        # "self.name" alone is the correct root of the path.
         _walk(loaded, self.name or "")
 
         if collisions:

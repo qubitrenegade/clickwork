@@ -84,9 +84,20 @@ def add_global_option(
         is_json = root_meta["json"]
 
     Merge semantics:
-        * Flags (``is_flag=True``) use **OR across levels**: a truthy value
-          at ANY level wins, so ``meta[name]`` is ``True`` if the user passed
-          the flag at root OR group OR subcommand (or any combination).
+        * Plain flags (``is_flag=True`` with a single ``--foo`` declaration)
+          use **OR across levels**: a truthy value at ANY level wins, so
+          ``meta[name]`` is ``True`` if the user passed the flag at root
+          OR group OR subcommand (or any combination). OR is the only
+          sensible rule for plain flags: the user has no way to say "off"
+          at an inner level, so treating truthy-anywhere as wins is what
+          matches intuition.
+        * Slash-flags (``is_flag=True`` with a ``--foo/--no-foo``
+          declaration) are an **exception** to the OR rule. Because the
+          user CAN say "off" at an inner level via ``--no-foo``, we
+          switch to **innermost-wins** so an inner ``--no-foo`` can
+          override an outer ``--foo`` (and vice versa). If we OR'd these,
+          False would never win and the ``--no-foo`` form would be
+          useless at inner levels.
         * Value options (strings, ints, enums, ...) use **innermost-wins**:
           the deepest level that *explicitly* supplied the option provides
           the final value. "Explicit" here means any Click
