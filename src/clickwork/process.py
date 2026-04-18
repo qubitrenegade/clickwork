@@ -549,18 +549,32 @@ def _format_env_redacted(
     env: dict[str, str] | None,
     secret_keys: set[str],
 ) -> str:
-    """Render an env dict for logging, redacting secret-sourced values.
+    """Render an env dict for logging with ALL values redacted.
 
-    Keys that came from ``secrets={}`` are rendered as ``NAME=<redacted>``;
-    all other keys keep their value. Env-var NAMES stay visible so
-    operators debugging a subprocess launch can confirm what the child
-    sees (missing keys, typos). Only values are hidden.
+    Keys that came from ``secrets={}`` are tagged ``<redacted>``; keys
+    that came from the caller's own ``env`` dict are tagged ``<set>``.
+    Either way, no value content reaches the log.
+
+    WHY we redact non-secret values too (tightened after Copilot review
+    on PR #28): even env vars the caller didn't explicitly wrap in
+    ``Secret`` may be sensitive -- a caller might forget to wrap an
+    ``API_TOKEN`` before dropping it into ``env=``, and printing that
+    to a log would compound the mistake. ``run_with_secrets`` is by
+    definition the "secrets in play" path; treating every env var on
+    that codepath as potentially-sensitive is the safer default.
+    Operators who need to see non-secret env values for debugging can
+    use ``ctx.run`` directly, which doesn't log env at all.
+
+    Names stay visible so operators can confirm WHICH env was set
+    (detect missing / mistyped keys) without seeing the values.
 
     Args:
         env: The full env dict that will be passed to the subprocess,
             or ``None`` if no extra env was built.
-        secret_keys: The set of keys whose values came from ``secrets``
-            and therefore must be redacted.
+        secret_keys: The set of keys whose values came from ``secrets``.
+            Used to tag those keys as ``<redacted>`` vs ``<set>`` for
+            caller-supplied env, so the log clearly shows which keys
+            were secret-sourced.
 
     Returns:
         A single-line string representation suitable for a log message.
@@ -568,11 +582,13 @@ def _format_env_redacted(
     if env is None:
         return "{}"
     parts: list[str] = []
-    for name, value in env.items():
+    for name in env:
         if name in secret_keys:
             parts.append(f"{name}=<redacted>")
         else:
-            parts.append(f"{name}={value}")
+            # Still hide the value (see WHY above) but tag it so the
+            # log distinguishes "secret-sourced" from "caller env".
+            parts.append(f"{name}=<set>")
     return "{" + ", ".join(parts) + "}"
 
 

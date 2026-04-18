@@ -524,6 +524,49 @@ class TestRunWithSecrets:
             f"Secret value leaked into log: {all_log_text!r}"
         )
 
+    def test_run_with_secrets_does_not_leak_non_secret_env_values(self, caplog):
+        """Non-secret env values ALSO redacted (tightened after Copilot PR #28).
+
+        WHY: a caller can pass ``env={"REGION": "us-east-1", "API_KEY":
+        "accidentally-not-wrapped"}`` -- we can't tell which of those
+        the caller considers sensitive. The helper's contract is "this
+        invocation carries secrets", so treating the whole env as
+        potentially-sensitive is the safer default. Non-secret values
+        render as ``<set>`` so the log still shows which keys were set
+        (useful for debugging missing/mistyped keys) without exposing
+        the values.
+
+        This test pins the behaviour: pass a non-secret env value that
+        would be embarrassing to leak, assert it NEVER appears in the
+        log output.
+        """
+        import logging
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        accidental_plaintext = "ghp_totallyNotWrappedInSecret_12345"
+
+        with caplog.at_level(logging.INFO, logger="clickwork"):
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"REAL_TOKEN": Secret("also-hidden")},
+                env={"BAD_TOKEN": accidental_plaintext, "REGION": "us-east-1"},
+            )
+
+        all_log_text = "\n".join(rec.getMessage() for rec in caplog.records)
+        assert accidental_plaintext not in all_log_text, (
+            f"Non-secret env value leaked into log: {all_log_text!r}"
+        )
+        # Non-secret VALUES also hidden: "us-east-1" must not appear either.
+        assert "us-east-1" not in all_log_text
+        # But the NAMES must still be visible so operators can see shape.
+        assert "BAD_TOKEN" in all_log_text
+        assert "REGION" in all_log_text
+        assert "REAL_TOKEN" in all_log_text
+        # And the tags differ so the operator can tell WHICH were secret-sourced.
+        assert "REAL_TOKEN=<redacted>" in all_log_text
+        assert "BAD_TOKEN=<set>" in all_log_text
+
     def test_run_with_secrets_stdin_secret_must_be_in_secrets_dict(self):
         """stdin_secret must name a key that exists in secrets={}.
 
