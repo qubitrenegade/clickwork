@@ -18,6 +18,7 @@ is refused (not just warned) to prevent secret leakage.
 from __future__ import annotations
 
 import os
+import shlex
 import stat
 import sys
 from pathlib import Path
@@ -162,10 +163,14 @@ def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
     # S_IRGRP = group-read bit, S_IROTH = other-read bit. Either being set
     # means the file is too permissive for secrets.
     if mode & (stat.S_IRGRP | stat.S_IROTH):
+        # Shell-quote the path in the remediation hint so paths with
+        # spaces or leading '-' characters remain safe to copy/paste into
+        # a terminal. shlex.quote() wraps the string in single quotes
+        # when needed and leaves safe paths unchanged.
         raise ConfigError(
             f"{kind} {path} has unsafe permission {oct(mode)} "
             f"(readable by group/others). Secrets may be exposed.\n"
-            f"Fix with: chmod 600 {path}"
+            f"Fix with: chmod 600 {shlex.quote(str(path))}"
         )
 
 
@@ -275,14 +280,19 @@ def load_env_file(path: Path) -> dict[str, str]:
 
     Returns:
         Dict mapping keys to their (possibly unquoted) string values.
-        Insertion order matches the order keys appear in the file.
+        Insertion order matches the order each key *first* appears in
+        the file. If the file contains the same key twice, the later
+        value overwrites the earlier one but the dict slot stays at
+        the first occurrence's position -- if caller cares about order,
+        they should ensure no duplicate keys in the file.
 
     Raises:
         FileNotFoundError: If ``path`` does not exist.
         ConfigError: If the file has unsafe permissions (POSIX only), or
-            if any line is malformed (missing ``=`` separator). Malformed-
-            line errors include the 1-based line number so the caller
-            can locate the problem.
+            if any line is malformed -- missing ``=`` separator, or
+            producing an empty key (e.g. ``=value`` or ``export =v``).
+            Malformed-line errors include the 1-based line number so
+            the caller can locate the problem.
     """
     # Open then fstat -- same TOCTOU-safe pattern as _read_checked_user_config.
     # We deliberately do not catch FileNotFoundError: a missing .env is a
@@ -302,9 +312,11 @@ def load_env_file(path: Path) -> dict[str, str]:
     # error messages -- line 1 in the error should match line 1 in the file.
     for lineno, raw_line in enumerate(text.splitlines(), start=1):
         # Strip surrounding whitespace once; we'll work with the trimmed
-        # form from here on. This also normalizes trailing "\r" from
-        # CRLF files (universal-newline mode strips the "\n" but leaves "\r"
-        # when the file mixes line endings).
+        # form from here on. (Python text mode with default newline=None
+        # already normalizes "\r\n" and bare "\r" to "\n" via universal
+        # newlines, so we don't need to worry about stray carriage
+        # returns; .strip() is purely for leading/trailing spaces and
+        # tabs from hand-edited files.)
         line = raw_line.strip()
 
         # Skip blank lines and full-line comments. These two branches are
@@ -335,6 +347,15 @@ def load_env_file(path: Path) -> dict[str, str]:
         # We already stripped the whole line above, so key.strip() on top of
         # that is cheap and defensive against 'KEY =value' style spacing.
         key = key.strip()
+
+        # Empty-key guard: '=value' or 'export =value' would otherwise
+        # produce {"": "value"}, which is never a valid environment
+        # variable name and will blow up later when passed to
+        # subprocess/os.environ. Fail early with a clear line number.
+        if not key:
+            raise ConfigError(
+                f"line {lineno}: empty key (missing name before '='): {raw_line!r}"
+            )
 
         # Unwrap matching surrounding quotes. We only strip quotes when the
         # entire value is wrapped -- a value like 'foo"bar' stays literal.

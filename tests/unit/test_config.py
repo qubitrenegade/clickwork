@@ -610,6 +610,41 @@ class TestLoadEnvFile:
         with pytest.raises(ConfigError, match="line 2"):
             load_env_file(env_file)
 
+    def test_load_env_file_raises_on_empty_key(self, tmp_path: Path):
+        """'=value' (or 'export =value') has no variable name.
+
+        Without a guard, the parser would return {"": "value"}, which is
+        never a valid environment variable name and blows up later when
+        passed to subprocess or os.environ. Fail fast with a line number
+        so the caller can fix the bad line immediately.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        # Line 1: valid. Line 2: empty key. Line 3: valid.
+        env_file.write_text("A=1\n=orphaned\nC=3\n")
+        os.chmod(env_file, 0o600)
+
+        with pytest.raises(ConfigError, match="line 2"):
+            load_env_file(env_file)
+
+    def test_load_env_file_raises_on_empty_key_after_export(self, tmp_path: Path):
+        """'export =value' is the same bug, just with the export prefix.
+
+        Ensures the empty-key guard runs AFTER the export strip so we
+        don't miss the bad case.
+        """
+        import os
+        from clickwork.config import load_env_file, ConfigError
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("export =value\n")
+        os.chmod(env_file, 0o600)
+
+        with pytest.raises(ConfigError, match="line 1"):
+            load_env_file(env_file)
+
     def test_load_env_file_does_not_expand_variables(self, tmp_path: Path):
         """Variable substitution (K=$OTHER) is deliberately unsupported.
 
