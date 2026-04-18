@@ -468,7 +468,9 @@ class TestMixedDiscovery:
 
         self._stub_entry_points(monkeypatch, "shared", installed_shared)
 
-        # Plant a local commands/shared.py that exports a Click command
+        # Plant a local file at <tmp_path>/shared.py (we pass
+        # commands_dir=tmp_path below; the test's "commands directory"
+        # IS tmp_path, flat-file-discovery-style) that exports a Click command
         # with the SAME NAME ("shared"). The discovery code keys on the
         # Click command's ``.name`` attribute, so the module filename
         # alone isn't enough to collide -- the exported cli object's
