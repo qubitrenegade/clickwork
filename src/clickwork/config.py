@@ -152,11 +152,13 @@ def _check_owner_only_permissions(fd: int, path: Path, kind: str) -> None:
     Raises:
         ConfigError: If ANY group or other permission bits are set on the
             file (read, write, OR execute). A group-writable file is a
-            tampering risk even when not group-readable, so the rejection
-            matches the "chmod 600" remediation -- owner rwx only, every
-            other bit off. The check looks at
-            ``stat.S_IRWXG | stat.S_IRWXO`` rather than just the read
-            bits for this reason.
+            tampering risk even when not group-readable, so the check
+            covers all three bit classes for group/other rather than
+            just read bits. Owner bits are NOT constrained -- the helper
+            only cares that no one *else* can access the file; owner
+            execute (or setuid, etc.) is the caller's problem. This
+            matches the standard "chmod 600" remediation, which clears
+            every bit except owner read/write.
     """
     # Skip the check entirely on Windows -- POSIX mode bits are meaningless
     # there, and fstat() on Windows typically returns 0o666 for any file.
@@ -206,8 +208,11 @@ def _read_checked_user_config(path: Path) -> bytes | None:
         or None if the file does not exist.
 
     Raises:
-        ConfigError: If the file exists and is readable by group or other
-            users (i.e., mode bits include S_IRGRP or S_IROTH).
+        ConfigError: If the file exists and has ANY group/other permission
+            bit set (read, write, or execute). See
+            ``_check_owner_only_permissions`` for the precise rule --
+            this helper delegates the check there, so when the rule
+            tightens the behaviour here tightens too.
     """
     # Open the file first, then stat the open fd (TOCTOU-safe).
     # FileNotFoundError is caught instead of a pre-check with path.is_file()

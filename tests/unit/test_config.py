@@ -535,9 +535,11 @@ class TestLoadEnvFile:
         assert load_env_file(env_file) == {"K": "v"}
 
     def test_load_env_file_skips_comments(self, tmp_path: Path):
-        """Full-line comments (# ...) are skipped; only full-line comments
-        are supported (inline trailing comments are NOT -- see the
-        does_not_expand_variables test for the anti-feature list)."""
+        """Full-line comments (# ...) are skipped; inline trailing comments
+        are NOT supported -- the `#` in ``K=val # comment`` is treated as
+        part of the value. See the load_env_file() docstring's "Not
+        supported" section for the full anti-feature list (variable
+        substitution, inline comments, heredocs, etc.)."""
         import os
         from clickwork.config import load_env_file
 
