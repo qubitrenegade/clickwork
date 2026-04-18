@@ -8,7 +8,9 @@ the command line. The resolved value is merged into the Click root context's
 Resolution rules (exercised below):
     - Flags (``is_flag=True``) OR across levels: truthy at ANY level wins.
     - Value options (string, int, etc.) use innermost-wins semantics.
-    - Not passed anywhere => False for flags, None (or Click default) for values.
+    - Not passed anywhere => Click-resolved default (typically False for
+      flags and None for value options, but the caller can override either
+      via ``default=...`` in the option_kwargs).
 
 These tests build minimal inline Click CLIs to keep each test focused on the
 parsing/merge behaviour of add_global_option itself. A single end-of-file
@@ -387,7 +389,10 @@ class TestAddGlobalOptionEntryPointPropagation:
     loaded plugin command; without parent= wiring, the plugin's
     ctx.find_root() would return a detached root and miss values that
     add_global_option wrote to the true root's meta. This test pins the
-    parent=ctx forwarding we added in discovery.py.
+    parent=ctx.parent forwarding we added in discovery.py (it has to be
+    ctx.parent, not ctx itself, to avoid Click double-counting the
+    plugin-cmd segment in the loaded command's command_path -- the proxy
+    ctx already represents that level in the chain).
     """
 
     def test_global_option_value_reaches_entry_point_plugin(self, monkeypatch) -> None:
@@ -440,7 +445,7 @@ class TestAddGlobalOptionEntryPointPropagation:
         assert captured.get("json") is True, (
             "Global option value did not propagate into the entry-point "
             f"plugin command; got captured={captured!r}. Check that "
-            "LazyEntryPointCommand.invoke forwards parent=ctx to loaded.main()."
+            "LazyEntryPointCommand.invoke forwards parent=ctx.parent to loaded.main()."
         )
 
 

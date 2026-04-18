@@ -79,8 +79,13 @@ def add_global_option(
           ``default_map``-sourced values also count as explicit and can
           override outer levels. Levels that parsed only the Click
           default do NOT overwrite an already-set value.
-        * Not passed anywhere: ``meta[name]`` is ``False`` for flags and the
-          Click-resolved default (usually ``None``) for value options.
+        * Not passed anywhere: ``meta[name]`` is the Click-resolved
+          default -- typically ``False`` for flags and ``None`` for
+          value options, but callers can change either with
+          ``default=...`` in ``option_kwargs``. If the caller declared
+          a flag with ``default=True``, ``meta[name]`` is ``True`` when
+          the user didn't pass the flag; the OR-merge semantics still
+          apply on top of whatever default Click resolves at each level.
 
     Snapshot behaviour:
         Registration is a **call-time snapshot** of ``cli``'s command tree.
