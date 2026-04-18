@@ -748,6 +748,31 @@ def run_with_secrets(
                 "Secret(...) before passing them into run_with_secrets."
             )
 
+    # 4b. Same discipline for caller-supplied ``env``: if it contains a
+    # non-str key or non-str value, subprocess.Popen raises TypeError
+    # AFTER we'd already unwrapped every Secret into memory -- a wasted
+    # .get() that contradicts the "minimal touch" / safe-failure promise
+    # this function makes elsewhere. Validate env types now so a bad
+    # env dict never triggers a Secret unwrap. Error names the offending
+    # key/type but never any value (a caller's env might itself contain
+    # something sensitive they forgot to wrap; same policy as the
+    # run_with_secrets log redaction).
+    if env is not None:
+        for ekey, eval_ in env.items():
+            if not isinstance(ekey, str):
+                raise TypeError(
+                    f"env keys must be str; got key of type "
+                    f"{type(ekey).__name__}. Every entry in the env "
+                    "dict maps an env-var NAME (str) to its string value."
+                )
+            if not isinstance(eval_, str):
+                raise TypeError(
+                    f"env[{ekey!r}] must be str; got "
+                    f"{type(eval_).__name__}. subprocess.Popen rejects "
+                    "non-str env values -- convert ints/paths with "
+                    "str(...) before passing."
+                )
+
     # 5. stdin_secret must be a str (or None) before we use it in a
     # dict-membership test. Without this check a caller who passes
     # a list/dict (common typo: ``stdin_secret=["TOKEN"]`` when they

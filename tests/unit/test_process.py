@@ -686,6 +686,59 @@ class TestRunWithSecrets:
         # Mention the type so the fix (str(path)) is obvious.
         assert "PosixPath" in str(exc_info.value) or "WindowsPath" in str(exc_info.value) or "Path" in str(exc_info.value)
 
+    def test_run_with_secrets_rejects_non_str_env_value_before_unwrap(self):
+        """Non-str env values must raise BEFORE any Secret.get() runs.
+
+        WHY: if caller's ``env={"X": 1}`` or ``env={1: "x"}`` reaches
+        subprocess.Popen, it raises TypeError -- but by that point
+        every Secret in ``secrets`` has already been unwrapped into
+        memory. Validating env types up front keeps the "minimal
+        touch" promise: no Secret ever gets unwrapped on a call that
+        was doomed anyway. The Spy-Secret counter pins that.
+        """
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        unwrap_count = {"count": 0}
+
+        class _SpySecret(Secret):
+            def get(self) -> str:
+                unwrap_count["count"] += 1
+                return super().get()
+
+        with pytest.raises(TypeError) as exc_info:
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"TOKEN": _SpySecret("must-not-leak")},
+                env={"REGION": 42},  # type: ignore[dict-item]
+            )
+
+        assert "REGION" in str(exc_info.value)
+        assert "int" in str(exc_info.value)
+        # Most important assertion: no Secret.get() happened. Earlier
+        # flow would have unwrapped TOKEN into full_env, then crashed
+        # on Popen's env validation. We want to catch this before any
+        # secret material leaves the wrapper.
+        assert unwrap_count["count"] == 0, (
+            f"Expected zero Secret.get() calls before the env validation "
+            f"fires; got {unwrap_count['count']}. A regression here would "
+            "mean env-type failures unwrap secrets unnecessarily."
+        )
+        # Secret value must also not appear in the error text.
+        assert "must-not-leak" not in str(exc_info.value)
+
+    def test_run_with_secrets_rejects_non_str_env_key(self):
+        """Non-str env keys also rejected up front (same rationale)."""
+        from clickwork.process import run_with_secrets
+        from clickwork._types import Secret
+
+        with pytest.raises(TypeError, match="env keys must be str"):
+            run_with_secrets(
+                [sys.executable, "-c", "pass"],
+                secrets={"TOKEN": Secret("v")},
+                env={42: "value"},  # type: ignore[dict-item]
+            )
+
     def test_run_with_secrets_rejects_non_str_key_in_secrets_dict(self):
         """secrets keys must be str (env-var names), not int / tuple / etc.
 
