@@ -238,8 +238,14 @@ def _sanitize_url_for_log(url: str) -> str:
     Edge cases:
       - A URL we can't parse falls back to returning ``"<unparseable URL>"``
         rather than leaking the raw string.
-      - A URL with no userinfo and no query is returned unchanged
-        (common case, no extra allocations beyond the urlparse).
+      - Even for URLs with no userinfo / query / fragment, the output is
+        re-built via ``urlunparse`` (so the result may differ from the
+        input in incidental ways -- e.g. host casing is preserved from
+        ``hostname`` which is normalized to lowercase, IPv6 addresses
+        get re-bracketed). This is deliberate: one canonical shape
+        through the sanitizer is easier to reason about than an
+        early-return fast path that sometimes preserves quirks of the
+        input formatting.
 
     Args:
         url: The URL that was passed to the public ``get``/``post``/etc.

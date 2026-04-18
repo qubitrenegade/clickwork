@@ -486,7 +486,7 @@ class TestAllowedHosts:
 
 
 # ---------------------------------------------------------------------------
-# Timeout forwarding
+# Empty / malformed body handling
 # ---------------------------------------------------------------------------
 
 class TestEmptyBodyHandling:
