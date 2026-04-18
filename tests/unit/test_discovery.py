@@ -656,6 +656,67 @@ class TestStrictDiscovery:
             "wrong_type.py": "invalid_cli",
         }
 
+    def test_strict_aggregates_across_dir_and_entrypoints(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """discover_commands(strict=True) aggregates failures from BOTH mechanisms.
+
+        The scan runs directory discovery AND entry-point discovery,
+        each of which can raise ``ClickworkDiscoveryError``. Previously
+        it was ambiguous whether strict mode short-circuits on the
+        first mechanism's error or continues into the second and
+        combines. This test pins the "combine" semantics: both scans
+        run, all failures aggregate, a single error carries the full
+        list so release engineers don't have to fix-run-fix.
+        """
+        from clickwork import ClickworkDiscoveryError
+        from clickwork.discovery import discover_commands
+
+        # Directory-side failure: broken import.
+        (tmp_path / "broken.py").write_text("import nonexistent_xyz_q1\n")
+
+        # Entry-point-side failure: stub entry_points() to return two
+        # EPs with the same ``name``. That trips the duplicate_command
+        # detection added in the entry-point scan, so the second EP
+        # aggregates a ``duplicate_command`` failure -- a different
+        # category than the directory-side ``import_error`` above, so
+        # the test proves failures from BOTH mechanisms reach the
+        # aggregated exception.
+        class _FakeEP:
+            def __init__(self, name: str, value: str) -> None:
+                self.name = name
+                self.value = value
+                self.group = "clickwork.commands"
+
+            def load(self):  # pragma: no cover -- never reached
+                raise AssertionError("lazy EP should not load during discovery")
+
+        fakes = [
+            _FakeEP("conflicting", "plugin_a:cli"),
+            _FakeEP("conflicting", "plugin_b:cli"),
+        ]
+        monkeypatch.setattr(
+            "clickwork.discovery.importlib.metadata.entry_points",
+            lambda group=None: fakes,
+        )
+
+        with pytest.raises(ClickworkDiscoveryError) as excinfo:
+            discover_commands(
+                commands_dir=tmp_path,
+                discovery_mode="auto",
+                strict=True,
+            )
+
+        # Aggregated error must carry failures from BOTH mechanisms.
+        categories = {f.category for f in excinfo.value.failures}
+        assert "import_error" in categories, (
+            f"expected dir-scan failure in aggregated error; got: {categories}"
+        )
+        assert "duplicate_command" in categories, (
+            f"expected entry-point-scan duplicate failure in aggregated "
+            f"error; got: {categories}"
+        )
+
     def test_strict_propagates_through_create_cli(self, tmp_path: Path):
         """create_cli(strict=True) raises when discovery fails.
 
