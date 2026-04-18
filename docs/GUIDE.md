@@ -664,9 +664,11 @@ can skip it.
 
 Release notes for clickwork itself are produced by GitHub's built-in
 auto-generated release notes feature, configured via
-[`.github/release.yml`](../.github/release.yml). When a maintainer creates a
-release via the GitHub UI or `gh release create`, GitHub groups merged PRs
-by their labels into the sections defined in that config file.
+[`.github/release.yml`](../.github/release.yml). The config is only
+consulted when auto-generated notes are explicitly requested — clicking
+"Generate release notes" in the GitHub UI's Release form, or passing
+`--generate-notes` to `gh release create`. A bare `gh release create`
+uses the body you provide directly.
 
 To make sure a PR lands in the right section, apply one of these labels
 before merging:
