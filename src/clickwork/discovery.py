@@ -137,23 +137,34 @@ class LazyEntryPointCommand(click.Command):
         # Pass obj=ctx.obj so the new context created by loaded.main() carries
         # the CliContext forward.  Click forwards **extra kwargs through
         # make_context() -> Context(), and Context accepts obj as a keyword arg.
-        # parent=ctx wires the loaded command's context into this proxy's
-        # context chain -- see the docstring above for why that matters.
         #
-        # WHY prog_name=ctx.info_name (not ctx.command_path): Click computes
-        # a context's command_path as ``parent.command_path + " " + info_name``
-        # by walking the parent chain. With parent=ctx set, passing the full
-        # command_path as prog_name would double-count -- the loaded command's
-        # command_path would end up like "myapp plugin-cmd myapp plugin-cmd"
-        # and show up duplicated in Usage / help / error messages. Passing
-        # just the info_name lets Click reconstruct the full path from the
-        # chain, giving the correct "myapp plugin-cmd" output.
+        # WHY parent=ctx.parent (NOT parent=ctx): Click builds
+        # ``command_path`` as ``parent.command_path + " " + info_name`` by
+        # walking the parent chain. The proxy ctx ALREADY represents the
+        # plugin-cmd level in the chain. If we passed parent=ctx the loaded
+        # command would become a *child* of the proxy and its command_path
+        # would be "myapp plugin-cmd" (proxy's path) + " " + "plugin-cmd"
+        # (loaded's info_name) = "myapp plugin-cmd plugin-cmd" -- duplicated
+        # in Usage / help / error messages.
+        #
+        # Passing parent=ctx.parent instead makes the loaded command's
+        # context a *sibling* of the proxy in the tree: it replaces the
+        # proxy in the chain rather than appending to it. That gives
+        # command_path = "myapp" + " " + "plugin-cmd" = "myapp plugin-cmd"
+        # (correct) while keeping ctx.find_root() reachable from the loaded
+        # ctx -- the whole reason we wire the chain at all, so
+        # clickwork.add_global_option values live on a shared root.meta.
+        #
+        # WHY prog_name=ctx.info_name: once parent is ctx.parent, info_name
+        # needs to be just the command's own name (e.g. "plugin-cmd"),
+        # not the full command path -- Click rebuilds the path from the
+        # chain.
         return loaded.main(
             args=list(ctx.args),
             prog_name=ctx.info_name,
             standalone_mode=False,
             obj=ctx.obj,
-            parent=ctx,
+            parent=ctx.parent,
         )
 
     def get_short_help_str(self, limit: int = 45) -> str:
