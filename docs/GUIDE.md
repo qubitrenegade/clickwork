@@ -339,10 +339,15 @@ convert the string `"8080"` into the integer `8080` before the
 command code uses it.
 
 clickwork pins that conversion at the **schema layer**. When the
-loader resolves a config value from an environment variable and the
-schema declares a non-`str` `type`, the loader coerces the string
-into the declared type before returning it in `ctx.config`. The
-caller never has to write `int(os.environ["PORT"])` by hand.
+loader finishes merging all layers and the schema declares a non-
+`str` `type`, the loader coerces any string value in the merged
+config dict to the declared type before returning it in
+`ctx.config`. The rule is uniform across sources: the coercion
+applies to env vars, TOML string literals (`port = "8080"`), and
+user-supplied overrides alike -- whichever source produced the
+string, the same coercion fires. The caller never has to write
+`int(os.environ["PORT"])` by hand, and a TOML author who quoted the
+value by mistake still gets a usable int.
 
 Pinning coercion at the schema layer (rather than the caller or the
 env-var reader) means:
@@ -350,18 +355,23 @@ env-var reader) means:
 - Env vars and TOML values behave the same at the call site.
   `ctx.config["port"]` is an int whether it came from
   `port = 8080` in TOML or `TEST_CLI_PORT=8080` in the shell.
+- String literals in TOML coerce too. A `.test-cli.toml` that
+  contains `port = "8080"` under `type: int` produces the int
+  `8080` in `ctx.config["port"]`, matching what an env var would
+  have delivered.
 - Conversion errors surface at CLI startup (during `load_config`)
   rather than halfway through a deploy when a command does
   arithmetic on a string. You get a `ConfigError` naming the key
-  and the offending value.
+  and the offending value (redacted to `<redacted>` if the schema
+  marks the key as `secret: True`).
 - The coercion table is small, stdlib-only, and deliberately
   explicit about bools so Python's classic `bool("false") == True`
   foot-cannon never bites you.
 
-The supported `type` values and their env-var coercion rules:
+The supported `type` values and their string-source coercion rules:
 
-| Schema `type` | Env-var string | Result | Failure mode |
-|---------------|----------------|--------|--------------|
+| Schema `type` | String input | Result | Failure mode |
+|---------------|--------------|--------|--------------|
 | `str` | `"hello"` | `"hello"` (unchanged) | Never fails -- strings are strings. |
 | `int` | `"8080"` | `8080` (base 10) | `ConfigError` on non-integer text (`"3.14"`, `"abc"`). |
 | `float` | `"3.14"` | `3.14` | `ConfigError` on non-numeric text. |
@@ -374,12 +384,19 @@ Boolean parsing is **case-insensitive** (`"TRUE"`, `"True"`, and
 silently defaulting either way. If you need looser parsing, do it
 in your command code before feeding the value to clickwork.
 
-Values sourced from TOML already carry their native type
-(`port = 8080` parses as `int`), so coercion is a no-op for them --
-the schema `type` check still runs, but an already-correct value
-passes through unchanged.
+Values that already carry the declared type pass through unchanged.
+TOML's native typing means `port = 8080` parses as `int` and skips
+coercion entirely -- the schema `type` check still runs, but
+there's nothing to convert. Only *string* values in the merged
+config dict take the coercion path.
 
-Without a schema, env-var values stay as strings in `ctx.config`.
+Worked TOML-string example: given the schema
+`{"port": {"type": int}}` and a repo config containing
+`port = "8080"` (quoted string literal), the loader coerces the
+string and `ctx.config["port"]` is the int `8080` -- identical to
+what `port = 8080` (unquoted int) would have produced.
+
+Without a schema, string values stay as strings in `ctx.config`.
 The schema's `type` declaration is the explicit opt-in for
 coercion; there is no heuristic "looks like a number, must be a
 number" detection.
@@ -391,7 +408,7 @@ CONFIG_SCHEMA = {
     "port": {
         "type": int,
         "default": 8080,
-        "description": "HTTP listener port; honours TEST_CLI_PORT.",
+        "description": "HTTP listener port; honours MY_TOOL_PORT.",
     },
     "debug": {
         "type": bool,

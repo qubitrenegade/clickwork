@@ -652,6 +652,124 @@ class TestEnvVarTypes:
         assert config["port"] == 8080
         assert isinstance(config["port"], int)
 
+    def test_toml_string_value_coerced_by_schema(self, tmp_path: Path):
+        """A TOML string literal (``port = "8080"``) is coerced to ``int``.
+
+        The coercion rule is uniform across string sources: env vars,
+        TOML string literals, and user-supplied overrides all funnel
+        through the same ``_coerce_value`` call. Pinning this case
+        prevents a future refactor from narrowing coercion to env-only
+        (the original intent of the change in #41) without catching
+        the broader behavior the implementation actually ships.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        # Note the QUOTES: TOML parses this as a string, not an int.
+        config_file.write_text('[default]\nport = "8080"\n')
+
+        schema = {
+            "port": {"type": int},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["port"] == 8080
+        assert isinstance(config["port"], int)
+
+    def test_toml_string_value_coerced_to_bool(self, tmp_path: Path):
+        """Sibling of the int case: a quoted TOML string coerces to bool.
+
+        Pins that the bool allowlist (_TRUTHY_STRINGS / _FALSY_STRINGS)
+        applies to TOML-sourced strings the same way it applies to env
+        vars. A user who wrote ``debug = "true"`` in TOML (instead of
+        the native ``debug = true``) should still get ``True`` under
+        ``type: bool`` rather than a type-mismatch ConfigError.
+        """
+        from clickwork.config import load_config
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text('[default]\ndebug = "true"\n')
+
+        schema = {
+            "debug": {"type": bool},
+        }
+        config = load_config(
+            project_name="test-cli",
+            repo_config_path=config_file,
+            schema=schema,
+        )
+        assert config["debug"] is True
+
+    def test_secret_coercion_error_redacts_value(self, tmp_path: Path, monkeypatch):
+        """A failing coercion on a ``secret: True`` key redacts the value.
+
+        Without this redaction, a misconfigured secret env var (e.g.
+        ``CLI_TOKEN=not-a-number`` against ``type: int``) would
+        surface the raw token in the ConfigError message and leak
+        into logs / stderr / CI output. Pinned so a future edit to
+        the error path can't reintroduce the leak.
+        """
+        from clickwork.config import load_config, ConfigError
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        # Use an obviously-unique sentinel so the assertion below is
+        # decisive -- if this token ever shows up in the exception
+        # message, the redaction is broken.
+        secret_token = "not-a-number-SENTINEL-d41d8cd9"
+        monkeypatch.setenv("TEST_CLI_TOKEN", secret_token)
+
+        schema = {
+            "token": {"type": int, "secret": True},
+        }
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                schema=schema,
+            )
+        msg = str(excinfo.value)
+        # The redaction marker MUST appear (positive confirmation
+        # the branch fired), and the raw token MUST NOT appear
+        # (negative confirmation nothing leaked).
+        assert "<redacted>" in msg
+        assert secret_token not in msg
+        # The key name should still appear so the operator knows
+        # which env var to fix.
+        assert "token" in msg
+
+    def test_non_secret_coercion_error_still_echoes_value(self, tmp_path: Path, monkeypatch):
+        """Redaction is scoped to secret keys -- non-secret errors keep the value.
+
+        The operator debugging a non-secret misconfiguration needs to
+        see the bad value to fix it. Pinning this path prevents an
+        over-eager redaction from swallowing useful diagnostics for
+        regular keys.
+        """
+        from clickwork.config import load_config, ConfigError
+
+        config_file = tmp_path / ".test-cli.toml"
+        config_file.write_text("[default]\n")
+
+        monkeypatch.setenv("TEST_CLI_PORT", "not-a-port")
+
+        schema = {
+            "port": {"type": int},
+        }
+        with pytest.raises(ConfigError) as excinfo:
+            load_config(
+                project_name="test-cli",
+                repo_config_path=config_file,
+                schema=schema,
+            )
+        msg = str(excinfo.value)
+        assert "not-a-port" in msg
+        assert "<redacted>" not in msg
+
     def test_explicit_env_mapping_coerced_same_as_auto_prefix(self, tmp_path: Path, monkeypatch):
         """Coercion applies regardless of which env-var mechanism sourced the value.
 
