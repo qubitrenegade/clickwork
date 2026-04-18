@@ -543,21 +543,34 @@ class TestStrictDiscovery:
             "cli = second\n"
         )
 
-        # strict=False: still WARNS about the duplicate (a new warning
-        # added in #42) but keeps the legacy last-write-wins merge. The
-        # warning is a strict-mode-preview signal without breaking
-        # existing consumers.
+        # strict=False: still WARNS about the duplicate and KEEPS THE
+        # FIRST-LOADED command (keep-first policy matches
+        # discover_commands_from_entrypoints's behaviour; deterministic
+        # across filesystems since iteration order is sorted()).
         with caplog.at_level("WARNING", logger="clickwork"):
             commands = discover_commands_from_dir(tmp_path, strict=False)
         assert "shared" in commands
-        # Last-write-wins: alphabetically later b_second.py wins.
-        assert "shared" in caplog.text or "Duplicate" in caplog.text
+        # Keep-first: a_first.py loads first (alphabetical), so its
+        # command object wins. Invoke it to confirm.
+        runner = CliRunner()
+        result = runner.invoke(commands["shared"], [])
+        assert result.exit_code == 0
+        assert result.output.strip() == "first"
+        # Warning must explicitly name the duplicate and the dropped file
+        # so the operator can act on it -- a stray "Duplicate" somewhere
+        # in caplog.text wasn't a strong enough assertion.
+        assert "Duplicate command name 'shared'" in caplog.text
+        assert "b_second.py" in caplog.text
 
-        # strict=True: raises with a duplicate_command failure.
+        # strict=True: raises with a duplicate_command failure whose
+        # cause_path points at b_second.py (the one that got dropped).
         with pytest.raises(ClickworkDiscoveryError) as excinfo:
             discover_commands_from_dir(tmp_path, strict=True)
-        categories = [f.category for f in excinfo.value.failures]
-        assert "duplicate_command" in categories
+        dup_failures = [
+            f for f in excinfo.value.failures if f.category == "duplicate_command"
+        ]
+        assert len(dup_failures) == 1
+        assert dup_failures[0].cause_path.name == "b_second.py"
 
     def test_strict_raises_on_duplicate_entrypoint_command(self, monkeypatch, caplog):
         """Two entry-point plugins registering the same command name.

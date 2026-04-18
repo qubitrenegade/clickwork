@@ -604,17 +604,21 @@ def discover_commands_from_dir(
 
         # Duplicate-name guard: two files registering the same command name
         # used to silently overwrite each other (last-write-wins via dict
-        # assignment). In strict mode that's a bug -- the CLI author
-        # intended one of them and the silent drop means whichever loads
-        # second wins, which is alphabetical-order-dependent and brittle.
-        # In permissive mode we still warn so stale files don't hide the
-        # intended command silently.
+        # assignment). In strict mode that's a release-engineering bug.
+        # In permissive mode we now warn AND keep the first-loaded
+        # command rather than the last -- matching
+        # ``discover_commands_from_entrypoints()``'s keep-first policy
+        # so both discovery mechanisms handle duplicates consistently.
+        # Keep-first is also deterministic across filesystems (dir
+        # iteration order is consistently sorted above), whereas
+        # last-write-wins made behaviour depend on which file happened
+        # to sort alphabetically later.
         if cmd_name in commands:
             logger.warning(
-                "Duplicate command name %r discovered in %s; it will "
-                "shadow the previously-loaded command of the same name. "
-                "Rename one of the files or the Click command name to "
-                "resolve the conflict.",
+                "Duplicate command name %r discovered in %s; keeping the "
+                "first-loaded command and dropping this one. Rename one "
+                "of the files or the Click command name to resolve the "
+                "conflict.",
                 cmd_name,
                 py_file.name,
             )
@@ -623,15 +627,16 @@ def discover_commands_from_dir(
                     category="duplicate_command",
                     message=(
                         f"Duplicate command name {cmd_name!r} discovered "
-                        f"in {py_file.name}; shadows previously-loaded "
+                        f"in {py_file.name}; keeping the first-loaded "
                         "command with the same name."
                     ),
                     cause_path=py_file,
                 )
             )
-            # Fall through: the old behaviour was last-write-wins. Keep
-            # that so strict=False is a pure superset of the current
-            # (pre-#42) semantics plus a new warning.
+            # Keep the first; skip assignment for this (duplicate) entry.
+            # Strict mode raises after the loop so all duplicates surface
+            # in one error, not a fix-run-fix cycle.
+            continue
 
         commands[cmd_name] = cli_attr
 
