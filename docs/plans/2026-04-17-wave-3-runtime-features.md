@@ -23,7 +23,7 @@
 |----------|--------|
 | Module location | New module `clickwork.http` — stateless helpers. Import as `from clickwork import http` then `http.get(...)`. Keeps it usable from non-CLI contexts too. |
 | Allowlist enforcement | Per-call keyword-only `allowed_hosts: list[str] \| None` on each method. `None` = disabled (explicit opt-out for ops who know what they're doing). Populated list = URL host must match one of the entries or **`ValueError`** is raised before any network request. *(We raise `ValueError`, not `HttpError`, for pre-flight rejections because there is no HTTP `status_code` at that point -- the request never left the process. `HttpError` is reserved for actual HTTP non-2xx responses.)* |
-| Auth | Both dedicated kwargs AND generic `headers=` escape hatch: `bearer_token: str \| Secret \| None` and `basic_auth: tuple[str, str] \| None` for the 90% case; `headers: dict[str, str] \| None` for everything else. If the caller sets `headers["Authorization"]` explicitly, that wins over `bearer_token` / `basic_auth` (so "escape hatch" really escapes). |
+| Auth | Both dedicated kwargs AND generic `headers=` escape hatch: `bearer_token: str \| Secret \| None` and `basic_auth: tuple[str, str \| Secret] \| None` for the 90% case; `headers: dict[str, str] \| None` for everything else. The password half of `basic_auth` accepts `Secret` for parity with `bearer_token` — passwords are secret-bearing, and forcing callers to unwrap before passing would defeat the point of the `Secret` type. Tests must cover `basic_auth=(user, Secret("pw"))` end-to-end: the header is base64-encoded correctly, the secret value never appears in log output, and `Secret.get()` is called once internally. If the caller sets `headers["Authorization"]` explicitly, that wins over `bearer_token` / `basic_auth` (so "escape hatch" really escapes). |
 | JSON parsing | Auto-parse only when the response `Content-Type` is `application/json` (or starts with it, to handle `application/json; charset=utf-8`). Non-JSON responses return raw bytes. `parse_json: bool = True` kwarg lets the caller force raw even for `application/json` (e.g. to avoid double-parsing if they use a custom decoder). Follow-up: investigate auto-parsing other `application/*` types (ndjson, x-yaml, etc.) — out of scope for 0.2.0. |
 | Error model | Custom `HttpError(Exception)` raised on non-2xx. Attributes: `status_code: int`, `response_body: JSONValue \| bytes`, `headers: dict[str, str]`, `url: str`. Message includes status + first line of body for quick triage. `JSONValue` is a recursive type alias covering every value `json.loads()` can produce (`dict[str, JSONValue] \| list[JSONValue] \| str \| int \| float \| bool \| None`); `bytes` is the fallback for non-JSON response bodies. Matches the existing `CliProcessError` / `PrerequisiteError` pattern — structured exception attrs so callers can `except HttpError as e: if e.status_code == 404: ...`. |
 | Return type | `get/post/put/delete` return `JSONValue \| bytes` — `JSONValue` when Content-Type matches `application/json` and `parse_json=True`, `bytes` otherwise. Narrow to the concrete type at the call site with an `isinstance` or a `cast`. |
@@ -113,7 +113,7 @@
 def get(url: str, *,
         allowed_hosts: list[str] | None = None,
         bearer_token: str | Secret | None = None,
-        basic_auth: tuple[str, str] | None = None,
+        basic_auth: tuple[str, str | Secret] | None = None,
         headers: dict[str, str] | None = None,
         parse_json: bool = True,
         timeout: float = 30.0) -> JSONValue | bytes: ...
@@ -151,7 +151,8 @@ Use `pytest-mock` (already in dev deps) or monkeypatch `urllib.request.urlopen` 
    - `test_get_returns_bytes_for_non_json` — `Content-Type: text/html`; assert bytes returned.
    - `test_get_parse_json_false_forces_raw` — even with `application/json` header, `parse_json=False` returns bytes.
    - `test_get_bearer_token_sets_authorization_header` — mock captures headers; assert `Authorization: Bearer <token>`.
-   - `test_get_basic_auth_sets_authorization_header` — assert `Authorization: Basic <base64>`.
+   - `test_get_basic_auth_sets_authorization_header` — `basic_auth=("user", "pw")`, assert `Authorization: Basic <base64("user:pw")>`.
+   - `test_get_basic_auth_accepts_Secret_password` — `basic_auth=("user", Secret("hunter2"))`, assert the header is the same base64 you'd get from the plain-string form AND assert the `Secret` value does not appear unredacted anywhere in captured log output. Pins the Secret-safety contract end-to-end so nobody accidentally ships a basic-auth path that can't safely carry a secret password.
    - `test_explicit_headers_authorization_overrides_bearer_token` — both set; caller's headers win.
    - `test_bearer_token_accepts_Secret_instance` — pass `bearer_token=Secret("tok")`; assert header value is the unwrapped string (but also assert that log output redacts it — see next test).
    - `test_http_logs_redact_bearer_token` — patch the http logger; assert log contains `<redacted>` and not the token value.
