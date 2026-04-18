@@ -21,7 +21,7 @@ import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import click
 
@@ -117,7 +117,7 @@ def _select_impl(
     return None, None, sys.platform
 
 
-def _raise_unsupported(custom_message: str | None, platform_name: str) -> None:
+def _raise_unsupported(custom_message: str | None, platform_name: str) -> NoReturn:
     """Raise click.UsageError with a custom or default 'not supported' message.
 
     Extracted so decorator and functional forms share the exact same wording

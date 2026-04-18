@@ -26,6 +26,7 @@ import logging
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any, NoReturn
 
 import click
 
@@ -94,7 +95,7 @@ class LazyEntryPointCommand(click.Command):
             self._loaded = obj
         return self._loaded
 
-    def _invoke_loaded(self, *args, **kwargs):
+    def _invoke_loaded(self, *args: Any, **kwargs: Any) -> NoReturn:
         """Stub callback that should never be reached.
 
         invoke() delegates to the real command before Click reaches the
@@ -106,7 +107,7 @@ class LazyEntryPointCommand(click.Command):
         """
         raise RuntimeError("LazyEntryPointCommand callback should not be called directly")
 
-    def invoke(self, ctx: click.Context):
+    def invoke(self, ctx: click.Context) -> Any:
         """Load the real command and delegate execution to it.
 
         The proxy deliberately does not pre-parse the real command's options.
@@ -343,13 +344,13 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
     package = sys.modules.get(package_name)
     if package is None:
         package = ModuleType(package_name)
-        package.__path__ = [dir_path]  # type: ignore[attr-defined]
+        package.__path__ = [dir_path]
         sys.modules[package_name] = package
     else:
         package_path = list(getattr(package, "__path__", []))
         if dir_path not in package_path:
             package_path.append(dir_path)
-            package.__path__ = package_path  # type: ignore[attr-defined]
+            package.__path__ = package_path
 
     for py_file in sorted(commands_dir.glob("*.py")):
         # Skip __init__.py, __main__.py, and any other dunder files.
@@ -371,7 +372,7 @@ def discover_commands_from_dir(commands_dir: Path) -> dict[str, click.Command]:
         # relative imports can resolve sibling helper modules.
         sys.modules[module_name] = module
         try:
-            spec.loader.exec_module(module)  # type: ignore[union-attr]
+            spec.loader.exec_module(module)
         except Exception as e:
             # Covers ImportError, SyntaxError, and any runtime error at
             # module-top-level. Keep going so other commands still load.

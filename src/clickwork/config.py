@@ -26,6 +26,7 @@ import sys
 # tomllib is stdlib in Python 3.11+. No external dependency needed.
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from clickwork._types import Secret, normalize_prefix
 
@@ -54,7 +55,7 @@ def _key_to_env_suffix(key: str) -> str:
     return key.replace(".", "_").replace("-", "_").upper()
 
 
-def _flatten_mapping(data: dict, prefix: str = "") -> dict[str, object]:
+def _flatten_mapping(data: dict[str, Any], prefix: str = "") -> dict[str, object]:
     """Flatten nested TOML dicts into a single-level dotted-key mapping.
 
     TOML dotted keys such as ``cloudflare.account_id = "abc"`` parse as
@@ -83,7 +84,7 @@ def _flatten_mapping(data: dict, prefix: str = "") -> dict[str, object]:
     return flat
 
 
-def _load_toml(path: Path) -> dict:
+def _load_toml(path: Path) -> dict[str, Any]:
     """Load a TOML file, returning an empty dict if the file does not exist.
 
     Returning an empty dict instead of raising means callers can safely
@@ -103,7 +104,7 @@ def _load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
-def _load_toml_from_bytes(data: bytes) -> dict:
+def _load_toml_from_bytes(data: bytes) -> dict[str, Any]:
     """Parse TOML from an in-memory bytes buffer.
 
     Used when the caller has already read the file bytes (e.g., from an
@@ -446,8 +447,8 @@ def load_config(
     repo_config_path: Path | None = None,
     user_config_path: Path | None = None,
     env: str | None = None,
-    schema: dict | None = None,
-) -> dict:
+    schema: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Load and merge config from all sources.
 
     Args:
@@ -519,7 +520,7 @@ def load_config(
     # [env.production], [env.staging], etc. overlay [default] -- keys present
     # in the env section override [default], but keys absent from the env
     # section still fall through to [default].
-    repo_env: dict = {}
+    repo_env: dict[str, Any] = {}
     if env and "env" in repo_data and env in repo_data["env"]:
         repo_env = _flatten_mapping(repo_data["env"][env])
 
@@ -528,7 +529,7 @@ def load_config(
     # -------------------------------------------------------------------------
     # dict.update() means the last write wins, so we apply layers in order
     # from lowest to highest priority.
-    config: dict = {}
+    config: dict[str, Any] = {}
     config.update(user_config)  # Layer 4: lowest priority
     config.update(repo_default)  # Layer 3: overrides user
     config.update(repo_env)  # Layer 2: overrides default

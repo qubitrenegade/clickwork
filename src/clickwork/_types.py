@@ -16,6 +16,7 @@ import logging
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any, NoReturn
 
 # ---------------------------------------------------------------------------
 # Secret
@@ -123,7 +124,7 @@ class Secret:
 
     # --- serialisation block ---
 
-    def __reduce__(self):
+    def __reduce__(self) -> NoReturn:
         """Block pickling to prevent accidental serialisation of secrets.
 
         pickle calls __reduce__ to determine how to serialise an object.
@@ -151,7 +152,7 @@ class Secret:
         """
         return Secret(self._value)
 
-    def __deepcopy__(self, memo: dict) -> Secret:
+    def __deepcopy__(self, memo: dict[int, Any]) -> Secret:
         """Return a new Secret wrapping the same value (deep copy is shallow here).
 
         copy.deepcopy() follows __deepcopy__. Strings are immutable, so a
@@ -309,7 +310,7 @@ class CliContext:
 
     # --- core configuration ---
 
-    config: dict = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     """Merged config from layered TOML files, keyed by string."""
 
     env: str | None = None
@@ -339,7 +340,7 @@ class CliContext:
     # without wiring up a full subprocess harness.  The CLI harness injects
     # concrete implementations before dispatching to command handlers.
 
-    run: Callable[..., subprocess.CompletedProcess | None] | None = field(
+    run: Callable[..., subprocess.CompletedProcess[Any] | None] | None = field(
         default=None,
         repr=False,
         compare=False,
@@ -383,14 +384,14 @@ class CliContext:
     )
     """Like confirm, but adds extra warnings for irreversible operations."""
 
-    run_with_confirm: Callable[..., subprocess.CompletedProcess | None] | None = field(
+    run_with_confirm: Callable[..., subprocess.CompletedProcess[Any] | None] | None = field(
         default=None,
         repr=False,
         compare=False,
     )
     """Confirm then run: wraps confirm() + run() in a single call."""
 
-    run_with_secrets: Callable[..., subprocess.CompletedProcess | None] | None = field(
+    run_with_secrets: Callable[..., subprocess.CompletedProcess[Any] | None] | None = field(
         default=None,
         repr=False,
         compare=False,

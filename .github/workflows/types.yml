@@ -1,0 +1,58 @@
+name: Type check
+
+# WHY a dedicated workflow (separate from test.yml / lint.yml):
+# - test.yml is the correctness gate (pytest, OS matrix from #39) and
+#   failures there mean runtime behaviour is wrong -- a different
+#   signal than "the types drifted".
+# - lint.yml (issue #38 proper) is the style/format gate using ruff; the
+#   mypy toolchain and review concerns are distinct enough from ruff
+#   that a split PR keeps each review focused (roadmap Wave 2b note).
+# - This workflow owns the *static type* gate and runs `mypy --strict`
+#   on `src/clickwork` so public types stay sound across every change.
+#   Since we ship py.typed (issue #37) downstream consumers inherit our
+#   annotations; a typed library with unchecked internals would flow
+#   Any into every caller, silently defeating that promise.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  mypy:
+    name: mypy --strict
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # WHY astral-sh/setup-uv + uv python install: matches the existing
+      # publish.yml / test.yml pattern so the CI toolchain stays uniform.
+      # uv's resolver is noticeably faster than pip in cold CI and avoids
+      # accidentally picking up system-level Python packages on the runner.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      # WHY Python 3.13: mypy itself runs under 3.13 (newest stable CPython)
+      # for the fastest type-checking; the [tool.mypy] python_version =
+      # "3.11" setting in pyproject.toml tells mypy to check against the
+      # 3.11 floor so we still catch 3.12-only-syntax regressions.
+      - name: Set up Python
+        run: uv python install 3.13
+
+      # WHY --extra dev: mypy itself is declared in
+      # [project.optional-dependencies].dev so it travels with the rest
+      # of the dev toolchain (pytest, pytest-mock). Running `uv sync`
+      # with the dev extra installs clickwork's runtime dependencies
+      # (click) plus mypy in one step; mypy needs click importable to
+      # resolve the framework's own `import click` without a
+      # missing-stubs cascade.
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # WHY src/clickwork (not tests/): tests commonly rely on looser
+      # typing (untyped fixtures, duck-typed mocks) and gating them on
+      # strict mode produces more noise than signal. This workflow
+      # enforces strict typing on the *shipped* surface only.
+      - name: Run mypy
+        run: uv run mypy --strict src/clickwork
