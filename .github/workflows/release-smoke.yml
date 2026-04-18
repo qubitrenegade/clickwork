@@ -140,7 +140,14 @@ jobs:
           fi
           WHEEL="${wheels[0]}"
           uv venv --python 3.13 /tmp/wheel-smoke
-          /tmp/wheel-smoke/bin/pip install "$WHEEL" pytest pytest-mock
+          # Pin pytest/pytest-mock to the SAME versions uv.lock
+          # records for the editable test.yml run. Without pins, the
+          # smoke-test venv would pick up whatever PyPI has at job
+          # start -- a new pytest release could land here before
+          # test.yml sees it, causing this job to flap on upstream
+          # changes rather than code changes. Bumping these pins
+          # should track uv.lock bumps.
+          /tmp/wheel-smoke/bin/pip install "$WHEEL" 'pytest==9.0.2' 'pytest-mock==3.15.1'
           cp -r tests /tmp/wheel-smoke-tests
           cat > /tmp/wheel-smoke-tests/pytest.ini <<'INI'
           [pytest]
@@ -182,7 +189,7 @@ jobs:
           fi
           SDIST="${sdists[0]}"
           uv venv --python 3.13 /tmp/sdist-smoke
-          /tmp/sdist-smoke/bin/pip install "$SDIST" pytest pytest-mock
+          /tmp/sdist-smoke/bin/pip install "$SDIST" 'pytest==9.0.2' 'pytest-mock==3.15.1'
           cp -r tests /tmp/sdist-smoke-tests
           cat > /tmp/sdist-smoke-tests/pytest.ini <<'INI'
           [pytest]
