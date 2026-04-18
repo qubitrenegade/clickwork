@@ -14,7 +14,7 @@
 | Surface | Standalone helper `ctx.run_with_secrets(cmd, secrets={...}, stdin_secret="KEY")` — does NOT modify existing `ctx.run`. Makes the "secrets-in-play" contract explicit at every call site. |
 | Argv rejection | Only reject **explicit `Secret` instances** appearing in `cmd`. No deep scan for string values that match `Secret.get()`. Simpler, fewer false positives; the explicit-Secret rejection catches the common footgun ("I put my Secret in argv by mistake"). |
 | Secret delivery | For each entry in `secrets={name: Secret(value)}`: pass via `env=` to the underlying subprocess. Additionally, if `stdin_secret="NAME"` is provided, route that same secret's `.get()` value through `stdin_text=` (using Wave 1's #10 helper). Keep the dual-channel explicit — this matches the real-world patterns (`wrangler secret put --env-stdin`, `docker login --password-stdin`). |
-| Log redaction | When `ctx.run_with_secrets` logs the command, replace every `Secret` value with `<redacted>`. Redact both in any argv display AND in env-var-value display (only values, env-var NAMES stay visible so operators can see what environment the subprocess sees). |
+| Log redaction | After the Secret-in-argv check, argv is guaranteed to be plain strings (any Secret got rejected, not substituted). So log the argv as-is and focus redaction on the **env-var values**: log lines show `NAME=<redacted>` for secret-sourced keys. Env-var *names* stay visible so operators can see what environment the subprocess sees; only the values are hidden. |
 | Follow-up (out of scope) | A `--log-insecure-secrets` global flag / env var for opt-in unredacted logging during local debugging. File as a separate issue; not blocking 0.2.0. |
 
 ### #13 — `clickwork.http` client
@@ -25,7 +25,8 @@
 | Allowlist enforcement | Per-call keyword-only `allowed_hosts: list[str] \| None` on each method. `None` = disabled (explicit opt-out for ops who know what they're doing). Populated list = URL host must match one of the entries or **`ValueError`** is raised before any network request. *(We raise `ValueError`, not `HttpError`, for pre-flight rejections because there is no HTTP `status_code` at that point -- the request never left the process. `HttpError` is reserved for actual HTTP non-2xx responses.)* |
 | Auth | Both dedicated kwargs AND generic `headers=` escape hatch: `bearer_token: str \| Secret \| None` and `basic_auth: tuple[str, str] \| None` for the 90% case; `headers: dict[str, str] \| None` for everything else. If the caller sets `headers["Authorization"]` explicitly, that wins over `bearer_token` / `basic_auth` (so "escape hatch" really escapes). |
 | JSON parsing | Auto-parse only when the response `Content-Type` is `application/json` (or starts with it, to handle `application/json; charset=utf-8`). Non-JSON responses return raw bytes. `parse_json: bool = True` kwarg lets the caller force raw even for `application/json` (e.g. to avoid double-parsing if they use a custom decoder). Follow-up: investigate auto-parsing other `application/*` types (ndjson, x-yaml, etc.) — out of scope for 0.2.0. |
-| Error model | Custom `HttpError(Exception)` raised on non-2xx. Attributes: `status_code: int`, `response_body: bytes \| str \| dict`, `headers: dict[str, str]`, `url: str`. Message includes status + first line of body for quick triage. Matches the existing `CliProcessError` / `PrerequisiteError` pattern — structured exception attrs so callers can `except HttpError as e: if e.status_code == 404: ...`. |
+| Error model | Custom `HttpError(Exception)` raised on non-2xx. Attributes: `status_code: int`, `response_body: JSONValue \| bytes`, `headers: dict[str, str]`, `url: str`. Message includes status + first line of body for quick triage. `JSONValue` is a recursive type alias covering every value `json.loads()` can produce (`dict[str, JSONValue] \| list[JSONValue] \| str \| int \| float \| bool \| None`); `bytes` is the fallback for non-JSON response bodies. Matches the existing `CliProcessError` / `PrerequisiteError` pattern — structured exception attrs so callers can `except HttpError as e: if e.status_code == 404: ...`. |
+| Return type | `get/post/put/delete` return `JSONValue \| bytes` — `JSONValue` when Content-Type matches `application/json` and `parse_json=True`, `bytes` otherwise. Narrow to the concrete type at the call site with an `isinstance` or a `cast`. |
 | HTTP methods | `get`, `post`, `put`, `delete` — all four ship in this PR. `paginate()` deferred to a follow-up PR (roadmap-level scope cut). |
 | Implementation | stdlib `urllib.request` only. No `requests` dependency. |
 
@@ -41,6 +42,8 @@
 ## Per-issue tasks
 
 ### #11 — `ctx.run_with_secrets(cmd, secrets={...}, stdin_secret=...)`
+
+**Signature:** `cmd` is typed as `Sequence[str | Secret]` (not just `list[str]`) at the function signature so the runtime Secret-in-argv check can accept a `Secret` without forcing callers to `# type: ignore`. After validation, argv is guaranteed to be plain strings.
 
 **Files:** `src/clickwork/process.py` (add `run_with_secrets` alongside existing `run` / `run_with_confirm`), `src/clickwork/cli.py` (bind a forwarding method onto `CliContext`), `tests/unit/test_process.py` and `tests/unit/test_cli.py` (ctx-level forwarding tests).
 
@@ -71,7 +74,19 @@
        #    Else: delegate to run(cmd, env=..., dry_run=dry_run)
        # 5. Log the command BEFORE delegation, with argv untouched (already checked no Secrets in it) and env vars displayed as "NAME=<redacted>" for secret-sourced keys.
    ```
-   Bind `cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None: _run_with_secrets(cmd, secrets=secrets, stdin_secret=stdin_secret, dry_run=cli_ctx.dry_run, env=cli_ctx._env_...)` — forward the dry_run / env context just like `cli_ctx.run` already does.
+   Bind it on `cli_ctx` the same way the existing helpers do in `src/clickwork/cli.py` — a forwarding lambda that captures `cli_ctx.dry_run` and takes `env=None` as a passthrough kwarg:
+
+   ```python
+   cli_ctx.run_with_secrets = lambda cmd, *, secrets, stdin_secret=None, env=None: _run_with_secrets(
+       cmd,
+       secrets=secrets,
+       stdin_secret=stdin_secret,
+       dry_run=cli_ctx.dry_run,
+       env=env,
+   )
+   ```
+
+   This mirrors the existing `cli_ctx.run` / `cli_ctx.run_with_confirm` bindings. `CliContext` does not currently hold an `env` dict itself; env is always passed per-call.
 
 3. **Refactor.** Docstring on `run_with_secrets` covering:
    - The explicit-Secret-rejection contract (and why we don't deep-scan).
