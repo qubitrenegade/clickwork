@@ -9,9 +9,10 @@ name: Type check
 #   that a split PR keeps each review focused (roadmap Wave 2b note).
 # - This workflow owns the *static type* gate and runs `mypy --strict`
 #   on `src/clickwork` so public types stay sound across every change.
-#   Since we ship py.typed (issue #37) downstream consumers inherit our
-#   annotations; a typed library with unchecked internals would flow
-#   Any into every caller, silently defeating that promise.
+#   Since we ship `py.typed` + the `Typing :: Typed` classifier, downstream
+#   consumers inherit our annotations; a typed library with unchecked
+#   internals would flow Any into every caller, silently defeating that
+#   promise.
 
 on:
   push:
