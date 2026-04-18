@@ -75,7 +75,7 @@ that converted the value manually; the fallback branch now stops
 running because the happy path succeeds with the coerced value.
 
 **How to migrate.** Remove the `ConfigError` assertion. If you
-work-around-coerced the value with `type: str` plus a manual
+worked around the coercion by using `type: str` plus a manual
 `int(ctx.config["port"])`, the workaround keeps working unchanged;
 switching to native `type: int` in the schema is optional cleanup.
 
@@ -252,7 +252,7 @@ cli = create_cli(name="my-tool", commands_dir=..., version="2.3.1")
 
 Precedence: `version=` wins if both are passed. If `package_name=`
 cannot be resolved via `importlib.metadata`, `create_cli()` raises
-`ValueError` at construction time so typos fail loud instead of
+`ValueError` at construction time so typos fail loudly instead of
 silently disappearing until `--version` runs in production. When
 neither kwarg is set, no `--version` flag is installed, so existing
 CLIs see no change.
