@@ -126,10 +126,13 @@ unchanged, so construction-site code needs no edits.
 ### 3. `click>=8.2` is required
 
 **What changed.** clickwork 0.2.0 already raised the `click` floor to
-`>=8.2`, and 1.0 keeps it there with no upper bound. If you are coming
-from a very early 0.2.x release where you pinned `click<8.2` in your
-own project to avoid the `mix_stderr` removal, you need to drop that
-pin now.
+`>=8.2`, and 1.0 keeps it there with no upper bound. Most consumers
+will see no effect here -- you were already on Click 8.2 because
+0.2.0 required it. This note exists for projects whose own
+`pyproject.toml` or lockfile independently pinned `click<8.2` (for
+example, a CI dependency pin that pre-dated the 0.2.0 upgrade and
+never got lifted): that pin must come off now so the resolver can
+pick up a Click version compatible with clickwork 1.0.
 
 Before:
 
