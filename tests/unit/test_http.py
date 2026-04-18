@@ -9,9 +9,12 @@ The key design decisions pinned by these tests:
 3. Auth precedence -- explicit ``headers["Authorization"]`` wins over
    ``bearer_token`` or ``basic_auth``. bearer_token/basic_auth accept a
    ``Secret`` and unwrap only at header-build time.
-4. JSON auto-parse -- response Content-Type must match ``application/json``
-   (prefix match so ``application/json; charset=utf-8`` parses). ``parse_json=False``
-   forces raw bytes even on JSON content-type.
+4. JSON auto-parse -- response Content-Type must have the
+   ``application/json`` media type (case-insensitive); parameters such
+   as ``; charset=utf-8`` are allowed after it. Non-matching media
+   types like ``application/jsonx`` are explicitly NOT treated as
+   JSON. ``parse_json=False`` forces raw bytes even on a JSON
+   content-type.
 5. Error model -- non-2xx responses arrive via ``urllib.error.HTTPError`` and
    are re-raised as ``HttpError`` with all four attrs populated (status_code,
    headers, url, response_body). Transport errors (timeout, DNS, ECONNREFUSED)
@@ -166,6 +169,28 @@ class TestGetResponseParsing:
             result = http.get("https://example.com/api", parse_json=False)
 
         assert result == b'{"ok": true}'
+
+    def test_get_does_not_parse_application_jsonx(self):
+        """``application/jsonx`` is NOT treated as JSON -- strict media-type match.
+
+        WHY this test exists: an early draft used
+        ``startswith("application/json")`` which would have matched
+        ``application/jsonx`` (and any other ``application/json`` prefix)
+        as JSON, shipping a silent parse for a type the caller never
+        asked for. The current check splits on ``;`` and compares the
+        media type exactly; this regression test pins that contract so
+        a refactor back to a prefix match would fail loudly.
+        """
+        from clickwork import http
+
+        resp = _make_response(
+            body=b'not really json', content_type="application/jsonx",
+        )
+        with patch("clickwork.http._dispatch_request", return_value=resp):
+            result = http.get("https://example.com/api")
+
+        # Raw bytes -- no json.loads attempt.
+        assert result == b"not really json"
 
 
 # ---------------------------------------------------------------------------

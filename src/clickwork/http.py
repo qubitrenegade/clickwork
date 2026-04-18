@@ -28,8 +28,9 @@ produces ``Authorization: Bearer <token>`` and ``basic_auth`` produces
 :class:`~clickwork._types.Secret`; unwrapping happens **only** at the moment
 the header value is built, and the unwrapped value is never logged.
 
-**JSON auto-parse.** Responses whose ``Content-Type`` starts with
-``application/json`` (so ``application/json; charset=utf-8`` also parses)
+**JSON auto-parse.** Responses whose ``Content-Type`` media type is
+``application/json`` (case-insensitive; parameters like
+``; charset=utf-8`` are allowed after the media type)
 are ``json.loads``-decoded when ``parse_json=True`` (the default). Any other
 Content-Type -- or ``parse_json=False`` -- yields raw ``bytes``. The return
 type is therefore the union ``JSONValue | bytes``; narrow at the call site
@@ -705,14 +706,25 @@ def _send(
         # Non-2xx responses arrive here. We read the body, parse per
         # Content-Type, and re-raise as HttpError with the full context
         # so callers can branch on status_code / response_body.
-        err_body_raw = err.read() if err.fp is not None else b""
-        err_content_type = (
-            err.headers.get("Content-Type") if err.headers is not None else None
-        )
-        err_response_body = _parse_response_body(
-            err_body_raw, err_content_type, parse_json,
-        )
-        err_headers = _headers_to_dict(err.headers)
+        #
+        # WHY a try/finally around the read: ``urllib.error.HTTPError``
+        # carries a still-open response fp (the success path uses a
+        # context manager that closes it; the error path has to do it
+        # explicitly). Without the close, repeated non-2xx responses
+        # would leak file descriptors / socket handles. ``err.close()``
+        # is the documented way to release both the underlying socket
+        # and any buffering on err.fp.
+        try:
+            err_body_raw = err.read() if err.fp is not None else b""
+            err_content_type = (
+                err.headers.get("Content-Type") if err.headers is not None else None
+            )
+            err_response_body = _parse_response_body(
+                err_body_raw, err_content_type, parse_json,
+            )
+            err_headers = _headers_to_dict(err.headers)
+        finally:
+            err.close()
 
         # Include a short preview in the message without dumping the full
         # payload: bytes are truncated to 200 bytes and decoded as UTF-8
