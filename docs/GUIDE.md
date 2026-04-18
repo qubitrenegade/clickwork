@@ -532,8 +532,10 @@ assert "normal line" in result.stderr         # NO -- would fail
 > interleaved form. clickwork declares `click>=8.2` so this guidance
 > always applies: snippets in older tutorials that use
 > `CliRunner(mix_stderr=False)` will raise `TypeError`, and the
-> `result.stderr` advice above cannot fall back to Click 8.1 where
-> it would have raised `ValueError: stderr not separately captured`.
+> `result.stderr` advice above cannot fall back to Click 8.1 where,
+> under the default `CliRunner()` configuration (streams mixed unless
+> `mix_stderr=False` was passed), it would have raised
+> `ValueError: stderr not separately captured`.
 
 ### Unit Testing with CliRunner
 

@@ -76,9 +76,10 @@ clickwork declares ``click>=8.2`` precisely so this guidance always
 applies -- snippets in older tutorials that use
 ``CliRunner(mix_stderr=False)`` will raise ``TypeError`` against the
 supported Click range, and on 8.1 and earlier ``result.stderr`` would
-have raised ``ValueError: stderr not separately captured`` which is
-why we floor the dependency at 8.2 rather than documenting a
-conditional behaviour.
+have raised ``ValueError: stderr not separately captured`` under the
+default ``CliRunner()`` configuration (where streams were mixed unless
+``mix_stderr=False`` was passed explicitly). Flooring at 8.2 gets us
+out of documenting that conditional behaviour.
 """
 from __future__ import annotations
 
