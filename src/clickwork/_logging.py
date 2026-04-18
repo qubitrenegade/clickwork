@@ -122,11 +122,31 @@ def setup_logging(
             ``"orbit-admin"``). clickwork also mirrors the level onto
             the shared ``"clickwork"`` logger so framework-internal
             modules (``clickwork.http``, ``clickwork.discovery``, ...)
-            honor the same verbosity.
+            honor the same verbosity. MUST be a non-empty string --
+            ``""`` resolves to the root logger via
+            ``logging.getLogger("")`` and configuring root would
+            violate the host-preserving contract.
 
     Returns:
         The ``logging.Logger`` instance for ``name``.
+
+    Raises:
+        ValueError: If ``name`` is an empty string. Callers must pass
+            a non-empty project name (e.g. ``"orbit-admin"``).
     """
+    # Reject empty name up front so the rest of the function can
+    # assume it's configuring a named, non-root logger. Without this
+    # guard, ``setup_logging(name="")`` would silently start mutating
+    # the root logger's handlers/level/propagate -- exactly the
+    # embedding-host-owned state we've pledged not to touch.
+    if not name:
+        raise ValueError(
+            "setup_logging(name=...) must be a non-empty string; "
+            "logging.getLogger('') resolves to the root logger and "
+            "configuring root would violate clickwork's "
+            "host-preserving contract. Pass your project name "
+            "(e.g. 'orbit-admin') instead."
+        )
     # --quiet always wins over --verbose (they're mutually exclusive at
     # the CLI level, but handle it defensively here too).
     if quiet:
@@ -224,6 +244,15 @@ def setup_logging(
             # via a robust identity check that survives sys.stderr swaps.
             stream_handler._clickwork_owned = True  # type: ignore[attr-defined]
             logger.addHandler(stream_handler)
+        else:
+            # Reusing an existing clickwork-owned handler: re-bind its
+            # stream to the CURRENT sys.stderr. Pytest capture, uvicorn,
+            # and similar tools swap sys.stderr between invocations --
+            # the old stream reference inside the handler becomes stale
+            # and subsequent records go to a detached stream the test
+            # harness isn't watching. Rebinding here keeps the handler
+            # writing to whatever "current stderr" means right now.
+            stream_handler.stream = sys.stderr
 
         stream_handler.setLevel(level)
         stream_handler.setFormatter(formatter)

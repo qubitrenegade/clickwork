@@ -29,10 +29,15 @@ def reset_logging():
     Python's logging module is global -- handlers installed in one test
     persist into the next unless we actively clean up. This fixture
     captures handlers / level / propagate for the loggers we touch, and
-    restores them after the test runs regardless of pass/fail. It's
-    opt-in (tests request it explicitly) because the pre-existing
-    ``TestSetupLogging`` cases don't need it; they only check return-
-    value attributes.
+    restores them after the test runs regardless of pass/fail. Every
+    test in this file requests it explicitly, including the pre-existing
+    ``TestSetupLogging`` cases that originally didn't need it -- once
+    ``TestHostPreservingBehavior`` started mutating root, all tests need
+    the snapshot-and-restore to stay order-independent. We keep the
+    fixture explicit (not ``autouse=True``) so new tests in this file
+    declare the dependency clearly; adding a test that forgets
+    ``reset_logging`` should break obviously instead of inheriting
+    cleanup silently.
     """
     logger_names = [
         "clickwork",
@@ -297,8 +302,12 @@ class TestHostPreservingBehavior:
         )
 
         # Emit a record and confirm the installed handler actually
-        # prints it. pytest's capsys captures fd-level stderr so this
-        # works even with the _clickwork_owned marker-based seam.
+        # prints it. pytest's capsys captures SYS-LEVEL stderr (writes
+        # via sys.stderr) rather than fd-level -- that's exactly what we
+        # want here because setup_logging's StreamHandler is bound to
+        # sys.stderr (it doesn't write to fd 2 directly). If we needed
+        # fd-level capture instead we'd use capfd, but that's not the
+        # contract this test is pinning.
         logger.warning("standalone warn record")
         captured = capsys.readouterr()
         assert "standalone warn record" in captured.err
