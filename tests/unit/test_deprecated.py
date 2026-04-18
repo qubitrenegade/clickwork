@@ -93,31 +93,31 @@ def test_cache_key_is_module_qualified():
     """
     from clickwork._deprecated import deprecated
 
-    # Two decorated functions that share a qualname but live in
-    # different (synthetic) modules. ``__module__`` is what the
-    # decorator reads for the cache key, so overriding it here is the
-    # minimal way to stage the collision scenario without having to
-    # build two throwaway .py files on disk.
-    @deprecated(since="1.1", removed_in="1.2", reason="gone")
+    # _cache_key is computed at DECORATION TIME from the function's
+    # attributes as they are THEN. Mutating ``__module__`` on the
+    # resulting wrapper after decoration wouldn't change what cache key
+    # the decorator stored. To stage the collision scenario correctly,
+    # we mutate ``__module__`` BEFORE passing the function through the
+    # decorator factory. Two freshly-defined functions in this test
+    # share the Python ``__qualname__`` (both are
+    # ``test_cache_key_is_module_qualified.<locals>.collide``), so if
+    # the cache key were qualname-only they'd collide.
     def collide() -> int:
         return 1
-
-    @deprecated(since="1.1", removed_in="1.2", reason="gone")
-    def collide_b() -> int:  # different python-level name, same qualname below
-        return 2
-
-    # Force both to look like ``def collide()`` in separate modules.
-    # We set ``__module__`` BEFORE the first call so the cache key is
-    # computed against the faked module names. (The decorator reads
-    # ``__module__`` each call, so the override has to be in place at
-    # warn-time, not just at decoration time.)
     collide.__module__ = "pkg_a.sub"
-    collide_b.__module__ = "pkg_b.sub"
-    collide_b.__qualname__ = collide.__qualname__  # same short name
+    decorated_a = deprecated(since="1.1", removed_in="1.2", reason="gone")(collide)
+
+    # Redefining ``collide`` in the same scope reuses the ``__qualname__``;
+    # the point of the test is to prove that two same-qualname functions
+    # in DIFFERENT modules don't share a dedup entry.
+    def collide() -> int:  # noqa: F811 -- intentional name reuse
+        return 2
+    collide.__module__ = "pkg_b.sub"
+    decorated_b = deprecated(since="1.1", removed_in="1.2", reason="gone")(collide)
 
     # First call of module A's ``collide`` warns.
     with pytest.warns(DeprecationWarning) as record_a:
-        assert collide() == 1
+        assert decorated_a() == 1
     assert len(record_a) == 1
 
     # First call of module B's ``collide`` must ALSO warn -- a single
@@ -126,7 +126,7 @@ def test_cache_key_is_module_qualified():
     # already filled the slot and this block would raise
     # ``Failed: DID NOT WARN``.
     with pytest.warns(DeprecationWarning) as record_b:
-        assert collide_b() == 2
+        assert decorated_b() == 2
     assert len(record_b) == 1
 
 
