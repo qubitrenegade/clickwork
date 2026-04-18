@@ -23,7 +23,7 @@ import importlib.metadata
 import importlib.util
 import logging
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
@@ -61,7 +61,7 @@ ENTRY_POINT_GROUP = "clickwork.commands"
 # downstream code needs to branch on the category, the current values are
 # documented here and stable across minor versions.
 #
-# The four known categories map 1:1 to the silent-drop branches that strict
+# The five known categories map 1:1 to the silent-drop branches that strict
 # mode promotes to raises:
 #   - "import_error":  module failed to import (ImportError, SyntaxError,
 #                      anything that bubbles out of exec_module).
@@ -692,6 +692,42 @@ def discover_commands_from_entrypoints(
 
     for ep in eps:
         try:
+            # Detect duplicate entry-point command names BEFORE overwriting
+            # the dict slot. Two installed plugins can register the same
+            # command name -- previously this was a silent last-write-wins
+            # via dict assignment. Mirror the directory-scan duplicate
+            # detection so strict mode catches entry-point collisions too,
+            # and non-strict mode at least logs a warning so the drop isn't
+            # invisible.
+            if ep.name in commands:
+                prior = commands[ep.name]
+                # LazyEntryPointCommand carries its origin in `.name` /
+                # metadata; surface both entry points in the message so the
+                # release engineer can tell which packages conflicted.
+                prior_origin = getattr(prior, "_entry_point", None)
+                prior_name = (
+                    f"{prior_origin.value}" if prior_origin is not None else "(unknown)"
+                )
+                current_name = ep.value
+                msg = (
+                    f"Duplicate entry-point command name {ep.name!r}: "
+                    f"both {prior_name!r} and {current_name!r} register it. "
+                    f"Keeping the first; last-write-wins semantics otherwise "
+                    f"would silently drop one of the plugins."
+                )
+                logger.warning(msg)
+                failures.append(
+                    DiscoveryFailure(
+                        category="duplicate_command",
+                        message=msg,
+                        cause_path=None,
+                        exception=None,
+                    )
+                )
+                # Keep the first-loaded entry point to be deterministic
+                # (matches directory-scan behaviour). Strict mode raises
+                # after the full scan so all duplicates surface at once.
+                continue
             # Wrap in a lazy proxy -- don't actually import the plugin yet.
             commands[ep.name] = LazyEntryPointCommand(ep)
         except Exception as e:

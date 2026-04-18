@@ -511,15 +511,16 @@ class TestStrictDiscovery:
         assert excinfo.value.failures[0].category == "invalid_cli"
         assert excinfo.value.failures[0].cause_path == bad
 
-    def test_strict_raises_on_flag_collision(self, tmp_path: Path, caplog):
+    def test_strict_raises_on_duplicate_command(self, tmp_path: Path, caplog):
         """Two command files registering the same command name raise under strict.
 
-        "Flag collision between commands at the same level" for discovery
-        purposes means two .py files in the SAME commands/ directory both
-        exporting a Click command with the same registered name. Pre-#42
-        this was a silent last-write-wins via dict assignment; under
-        strict=True it's a ClickworkDiscoveryError so the release engineer
-        is told which files collide.
+        A duplicate command for discovery purposes means two .py files in
+        the SAME commands/ directory both exporting a Click command with
+        the same registered name. Pre-#42 this was a silent last-write-
+        wins via dict assignment; under strict=True it's a
+        ``ClickworkDiscoveryError`` (category ``duplicate_command``) so the
+        release engineer is told which files conflict. Test name uses the
+        ``DiscoveryFailure.category`` tag for grep-ability.
         """
         from clickwork import ClickworkDiscoveryError
         from clickwork.discovery import discover_commands_from_dir
@@ -555,6 +556,58 @@ class TestStrictDiscovery:
         # strict=True: raises with a duplicate_command failure.
         with pytest.raises(ClickworkDiscoveryError) as excinfo:
             discover_commands_from_dir(tmp_path, strict=True)
+        categories = [f.category for f in excinfo.value.failures]
+        assert "duplicate_command" in categories
+
+    def test_strict_raises_on_duplicate_entrypoint_command(self, monkeypatch, caplog):
+        """Two entry-point plugins registering the same command name.
+
+        This mirrors ``test_strict_raises_on_duplicate_command`` for the
+        entry-point discovery mechanism. Without detection here, two
+        installed plugins claiming ``name = "deploy"`` would silently
+        drop one via last-write-wins on the commands dict. The fix is to
+        warn in non-strict and add a ``duplicate_command`` failure (+
+        raise under strict).
+        """
+        from clickwork import ClickworkDiscoveryError
+        from clickwork.discovery import discover_commands_from_entrypoints
+
+        # Fake two entry points with the same name but distinct origins
+        # (``value`` = "pkg:attr"). We don't actually install plugins --
+        # we stub ``importlib.metadata.entry_points`` so the test stays
+        # fast and hermetic. The LazyEntryPointCommand wrapper is cheap
+        # to construct (it doesn't import the target), so a plain stub
+        # EP object is enough.
+        class _FakeEP:
+            def __init__(self, name: str, value: str) -> None:
+                self.name = name
+                self.value = value
+                self.group = "clickwork.commands"
+
+            def load(self):  # pragma: no cover -- not reached in this test
+                raise AssertionError("lazy EP should not load during discovery")
+
+        fakes = [
+            _FakeEP("deploy", "plugin_a.deploy:cli"),
+            _FakeEP("deploy", "plugin_b.deploy:cli"),
+        ]
+        monkeypatch.setattr(
+            "clickwork.discovery.importlib.metadata.entry_points",
+            lambda group=None: fakes,
+        )
+
+        # strict=False: returns (keeping the first) but WARNS about the
+        # duplicate and records a duplicate_command failure internally
+        # (the failure list is only surfaced as an exception in strict
+        # mode). The warning is the user-visible signal.
+        with caplog.at_level("WARNING", logger="clickwork"):
+            commands = discover_commands_from_entrypoints(strict=False)
+        assert "deploy" in commands
+        assert "Duplicate entry-point command name 'deploy'" in caplog.text
+
+        # strict=True: raises with a duplicate_command failure surfaced.
+        with pytest.raises(ClickworkDiscoveryError) as excinfo:
+            discover_commands_from_entrypoints(strict=True)
         categories = [f.category for f in excinfo.value.failures]
         assert "duplicate_command" in categories
 
