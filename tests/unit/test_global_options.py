@@ -591,8 +591,15 @@ class TestAddGlobalOptionEntryPointPropagation:
 class TestOverrideSemantics:
     """A plugin subcommand can override a global option within its own scope.
 
-    The pattern: call ``add_global_option(cli, "--env", ...)`` FIRST, THEN
-    attach a subcommand that itself declares ``@click.option("--env", ...)``.
+    The pattern (matches ``docs/GUIDE.md`` "Overriding a global option in a
+    subcommand"):
+
+      1. Attach every subcommand that SHOULD inherit the global (or
+         simply doesn't care about the flag).
+      2. Call ``add_global_option(cli, "--env", ...)``.
+      3. Attach the overriding subcommand, whose own
+         ``@click.option("--env", ...)`` will own the flag inside its
+         scope because it wasn't in the snapshot.
 
     This works naturally because ``add_global_option`` takes a CALL-TIME
     SNAPSHOT of the command tree (see the module docstring in
@@ -672,15 +679,21 @@ class TestOverrideSemantics:
         # Primary assertion: subcommand's own kwarg received the value the
         # user typed AFTER the subcommand name. The global didn't swallow it.
         assert captured["own_env"] == "foo"
-        # Negative assertion: the global's meta slot must NOT contain the
-        # subcommand's inner ``--env`` value. If the global had intercepted
-        # the inner flag, meta_env would be "foo"; the correct behaviour
-        # leaves meta at the root-level resolution (here: the Click default
-        # ``None``, because no ``--env`` was passed BEFORE the subcommand).
-        assert captured["meta_env"] != "foo", (
-            "Global --env callback intercepted the subcommand's inner "
-            f"--env=foo; got ctx.meta['env']={captured['meta_env']!r}. The "
-            "subcommand's own option should own --env inside its scope."
+        # Positive assertion on the root meta slot: the global's meta slot
+        # must equal the root-level default (``None`` here, because no
+        # ``--env`` was passed BEFORE the subcommand). Asserting on the
+        # exact value (rather than a weaker ``!= "foo"``) catches the
+        # subtle regression where the global's callback runs and writes
+        # something OTHER than ``"foo"`` (e.g. a merged or empty value) --
+        # either would indicate the global leaked into the subcommand's
+        # scope.
+        assert captured["meta_env"] is None, (
+            "Global --env meta slot should still be None at the root "
+            f"(no --env passed before the subcommand); got "
+            f"ctx.meta['env']={captured['meta_env']!r}. Any non-None "
+            "value means the global's callback ran on the subcommand "
+            "parse, which would be a regression of the override "
+            "contract."
         )
         # ParameterSource check: the subcommand's own option saw the value
         # from the command line (COMMANDLINE), not from its fallback
