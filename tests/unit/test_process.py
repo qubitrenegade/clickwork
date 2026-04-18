@@ -876,8 +876,12 @@ class TestRealSignalForwarding:
     Every test in this class spawns an actual ``python -c "..."`` child so the
     signal handler inside the child runs for real, the parent's KeyboardInterrupt
     path runs for real, and the OS-level wait/kill transitions run for real.
-    No ``subprocess.Popen`` mocking -- these tests exist precisely to cover
-    what the mock-based tests can't.
+    No ``MagicMock``-based substitution of the subprocess itself (the way the
+    earlier ``TestRun.test_forwards_sigint_to_child_and_waits`` does). The
+    escalation test DOES monkeypatch ``subprocess.Popen`` with a snooping
+    wrapper so we can inspect ``proc.returncode`` after ``KeyboardInterrupt``
+    unwinds ``run()`` -- that wrapper calls the real ``Popen`` and captures
+    its instance, it doesn't replace subprocess behavior with a mock.
     """
 
     # The child-side Python program installs a SIGINT handler that writes a
@@ -1015,7 +1019,11 @@ class TestRealSignalForwarding:
         thread.start()
         return thread
 
-    def test_run_forwards_sigint_to_child(self, tmp_path: Path) -> None:
+    def test_run_forwards_sigint_to_child(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """SIGINT received by the parent is forwarded to the child process.
 
         Pins two properties of the production forwarding path:
@@ -1025,9 +1033,18 @@ class TestRealSignalForwarding:
               without running user code.
           (b) The child exits within the forward-timeout window so SIGKILL
               escalation is never reached -- proved by the elapsed time
-              being well under SIGINT_TIMEOUT_SECONDS.
+              being well under the patched timeout.
         """
+        import clickwork.process
         from clickwork.process import run
+
+        # Patch the forward timeout to 1s (default is 10s). If signal
+        # forwarding ever regresses, the test fails in ~1s instead of
+        # ~10s, which keeps CI debug turnaround fast. The graceful path
+        # should never hit this timeout anyway -- the child exits on its
+        # SIGINT handler in milliseconds -- so the patch is transparent
+        # when the production code is correct.
+        monkeypatch.setattr(clickwork.process, "SIGINT_TIMEOUT_SECONDS", 1.0)
 
         # Separate paths for the two independent pieces of state keeps the
         # poll logic trivial: existence alone is a meaningful signal.
@@ -1036,35 +1053,42 @@ class TestRealSignalForwarding:
 
         sender = self._send_sigint_after_ready(ready_path)
 
-        start = time.monotonic()
-        with pytest.raises(KeyboardInterrupt):
-            # run() always re-raises KeyboardInterrupt after forwarding --
-            # that's the semantic we're testing. The child's exit code (0)
-            # is observed internally but never surfaced as a return value
-            # on this codepath; the raised KI is how the caller knows.
-            run(
-                [
-                    sys.executable,
-                    "-c",
-                    self._GRACEFUL_CHILD_SCRIPT,
-                    str(received_path),
-                    str(ready_path),
-                ]
-            )
-        elapsed = time.monotonic() - start
-
-        sender.join(timeout=1.0)
-        assert not sender.is_alive(), "signal-sender thread did not exit cleanly"
+        try:
+            start = time.monotonic()
+            with pytest.raises(KeyboardInterrupt):
+                # run() always re-raises KeyboardInterrupt after forwarding --
+                # that's the semantic we're testing. The child's exit code (0)
+                # is observed internally but never surfaced as a return value
+                # on this codepath; the raised KI is how the caller knows.
+                run(
+                    [
+                        sys.executable,
+                        "-c",
+                        self._GRACEFUL_CHILD_SCRIPT,
+                        str(received_path),
+                        str(ready_path),
+                    ]
+                )
+            elapsed = time.monotonic() - start
+        finally:
+            # Always wait for the sender thread to exit -- even if the
+            # pytest.raises expectation wasn't met. Without the try/finally,
+            # an unexpected success path would leave the daemon thread
+            # alive and its os.kill(SIGINT) could land on a later test,
+            # causing cascading spurious failures.
+            sender.join(timeout=1.0)
+            assert not sender.is_alive(), "signal-sender thread did not exit cleanly"
 
         # (a) The child observably received and handled SIGINT.
         assert received_path.exists(), "child never wrote its received-marker file"
         assert received_path.read_text() == "received-sigint"
 
-        # (b) Graceful path -- well below the 10s forward timeout. The 5s
-        # bound is a generous ceiling for "the child exited on its own
-        # SIGINT handler without any SIGKILL escalation being needed".
-        assert elapsed < 5.0, (
-            f"child exit took {elapsed:.2f}s; expected <5s on the graceful path"
+        # (b) Graceful path -- well below the patched 1s forward timeout.
+        # The 0.5s bound is generous: the child's SIGINT handler exits
+        # immediately, so this should complete in well under 100ms in
+        # practice.
+        assert elapsed < 0.9, (
+            f"child exit took {elapsed:.2f}s; expected <0.9s on the graceful path"
         )
 
     def test_run_sigkill_escalation_on_timeout(
@@ -1114,21 +1138,26 @@ class TestRealSignalForwarding:
 
         sender = self._send_sigint_after_ready(ready_path)
 
-        start = time.monotonic()
-        with pytest.raises(KeyboardInterrupt):
-            run(
-                [
-                    sys.executable,
-                    "-c",
-                    self._WEDGED_CHILD_SCRIPT,
-                    str(received_path),
-                    str(ready_path),
-                ]
-            )
-        elapsed = time.monotonic() - start
-
-        sender.join(timeout=1.0)
-        assert not sender.is_alive(), "signal-sender thread did not exit cleanly"
+        try:
+            start = time.monotonic()
+            with pytest.raises(KeyboardInterrupt):
+                run(
+                    [
+                        sys.executable,
+                        "-c",
+                        self._WEDGED_CHILD_SCRIPT,
+                        str(received_path),
+                        str(ready_path),
+                    ]
+                )
+            elapsed = time.monotonic() - start
+        finally:
+            # Always join the sender thread, even if pytest.raises didn't
+            # fire -- otherwise an unexpected success path leaves the
+            # daemon alive and its os.kill(SIGINT) could land on a later
+            # test, cascading spurious failures.
+            sender.join(timeout=1.0)
+            assert not sender.is_alive(), "signal-sender thread did not exit cleanly"
 
         # (a) SIGINT was delivered and the child's handler ran before the
         # escalation kicked in -- otherwise we haven't actually exercised
