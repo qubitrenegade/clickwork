@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-04-18
 
-A broad expansion of the framework, closing 12 issues (#4-#17). Major
-new modules: `clickwork.http`, `clickwork.platform`, `clickwork.testing`.
+A broad expansion of the framework closing 12 issues (#4-#17), plus one
+PR-only follow-up (#33) that raised the `click` dependency floor during
+release prep. Numbers in parens on each entry below are **issue
+numbers**, except where explicitly noted as `(PR #NN)`. Major new
+modules: `clickwork.http`, `clickwork.platform`, `clickwork.testing`.
 New helpers on `CliContext`: `run_with_secrets`, stdin forwarding. New
 public API for docs-level CLIs: `add_global_option`. New dotenv helper:
 `clickwork.config.load_env_file`. Plus docs: LLM_REFERENCE "Common
@@ -64,14 +67,14 @@ Footguns" section and GUIDE "Testing commands" subsection.
   `result.stderr` directly") crashes on 8.1 with the default runner.
   Flooring at 8.2 -- where `mix_stderr` was removed and the three
   stream attributes are populated independently -- makes the
-  canonical guidance always applicable. (#33)
+  canonical guidance always applicable. (PR #33)
 - `ctx.require` is now patchable via
   `patch("clickwork.prereqs.require")` — the internal
   `clickwork.cli._require` alias was removed, so tests that targeted
   it must update the patch path. (#8)
-- `CliException` subclasses now re-raise correctly instead of being
-  swallowed, so user errors exit with the intended non-zero code.
-  (#5)
+- `click.exceptions.ClickException` subclasses now re-raise correctly
+  instead of being swallowed, so user errors exit with the intended
+  non-zero code. (#5)
 
 ### Fixed
 
@@ -89,7 +92,8 @@ Footguns" section and GUIDE "Testing commands" subsection.
   `HttpError.url` / message by stripping userinfo, query, and
   fragment. URLs with malformed ports or missing hostnames are
   rejected with clean `ValueError` messages that never echo the raw
-  URL back into an exception. (#13, #29)
+  URL back into an exception. (#13; security hardening landed in PR
+  #29 during the Copilot review loop.)
 - `load_env_file` rejects any file not owner-only via a TOCTOU-safe
   `os.fstat` check on the already-opened file descriptor. (#9)
 - `run_with_secrets` refuses to place `Secret` objects in argv, and
