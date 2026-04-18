@@ -73,12 +73,11 @@ Historical note: Click 8.2 removed the ``mix_stderr`` kwarg that
 attributes on ``Result`` are populated separately (``output`` is the
 interleaved form; ``stdout`` and ``stderr`` are kept independent).
 clickwork declares ``click>=8.1`` so in principle a consumer could be
-running on 8.1 where ``mix_stderr`` still exists -- the pinned
-environment (see ``uv.lock``) tracks an 8.2+ release. If you are
-looking at an older snippet that uses ``CliRunner(mix_stderr=False)``,
-check the Click version in your test environment rather than
-assuming the 8.2+ API: 8.2+ will raise ``TypeError``, older releases
-still accept the kwarg.
+running on 8.1 where ``mix_stderr`` still exists. If you are looking
+at an older snippet that uses ``CliRunner(mix_stderr=False)``, check
+the Click version in your test environment rather than assuming the
+8.2+ API: 8.2+ will raise ``TypeError``; older releases still accept
+the kwarg.
 """
 from __future__ import annotations
 
@@ -95,14 +94,24 @@ if TYPE_CHECKING:
     # runtime import cost stays opt-in: a project that imports
     # ``clickwork.testing`` for ``make_test_cli`` but never calls
     # ``run_cli`` never loads click.testing's ~dozen-KB module graph.
-    from click.testing import Result
+    from click.testing import Result as _ClickResult
+else:
+    # At runtime the alias resolves to ``Any`` so ``typing.get_type_hints``
+    # (used by IDEs, FastAPI, pydantic, etc.) can still introspect the
+    # signature without ``Result`` actually existing in module globals.
+    # Without this fallback ``get_type_hints(run_cli)`` would raise
+    # ``NameError: name '_ClickResult' is not defined`` -- the forward-
+    # reference string ``-> _ClickResult`` can't resolve because
+    # TYPE_CHECKING is False at runtime. The real type is still visible
+    # to type-checkers thanks to the TYPE_CHECKING branch above.
+    _ClickResult = Any
 
 
 def run_cli(
     cli: click.BaseCommand,
     args: str | Sequence[str] | None = None,
     **kwargs: Any,
-) -> Result:
+) -> _ClickResult:
     """Invoke a Click CLI under CliRunner with test-friendly defaults.
 
     Equivalent to ``click.testing.CliRunner().invoke(cli, args, **kwargs)``

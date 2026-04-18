@@ -530,11 +530,10 @@ assert "normal line" in result.stderr         # NO -- would fail
 > into `output`. Post-removal, `result.stdout` / `result.stderr` are
 > populated independently and `result.output` keeps providing the
 > interleaved form. clickwork declares `click>=8.1`, so in principle
-> a consumer could be on 8.1 where the kwarg still works -- the
-> pinned environment (`uv.lock`) tracks 8.2+. If you are reading an
-> older snippet that uses `CliRunner(mix_stderr=False)`, check the
-> Click version in your test environment: 8.2+ will raise
-> `TypeError`, older releases still accept it.
+> a consumer could still be on 8.1 where the kwarg works. If you
+> are reading an older snippet that uses `CliRunner(mix_stderr=False)`,
+> check the Click version in your test environment: 8.2+ will raise
+> `TypeError`; older releases still accept it.
 
 ### Unit Testing with CliRunner
 
