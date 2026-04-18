@@ -208,21 +208,29 @@ def deprecated(
             message = _build_message(display)
 
             @functools.wraps(original_init)
-            def new_init(self: Any, *args: Any, **kwargs: Any) -> None:
-                # Lock the check-and-add so two threads racing on a
-                # first call don't both observe ``not in _warned`` and
-                # emit duplicate warnings. ``should_warn`` latches the
-                # winner inside the lock; the losing thread sees
-                # ``False`` and silently proceeds.
-                with _warned_lock:
-                    should_warn = cache_key not in _warned
+            def new_init(self: Any, *args: Any, **kwargs: Any) -> Any:
+                # Fast-path: membership in a set is O(1), atomic for a
+                # single-expression read, and doesn't acquire the lock.
+                # Once a symbol has warned, every subsequent call skips
+                # the lock entirely -- a deprecated function in a hot
+                # loop pays nothing extra. The lock only guards the
+                # check-and-add on the first-warn window so two threads
+                # racing on the first call don't both emit a warning.
+                if cache_key not in _warned:
+                    with _warned_lock:
+                        should_warn = cache_key not in _warned
+                        if should_warn:
+                            _warned.add(cache_key)
                     if should_warn:
-                        _warned.add(cache_key)
-                if should_warn:
-                    # stacklevel=2 -> blame the caller doing ``OldWidget(...)``,
-                    # not this wrapper.
-                    warnings.warn(message, DeprecationWarning, stacklevel=2)
-                original_init(self, *args, **kwargs)
+                        # stacklevel=2 -> blame the caller doing
+                        # ``OldWidget(...)`` not this wrapper.
+                        warnings.warn(message, DeprecationWarning, stacklevel=2)
+                # Return ``original_init``'s result so a buggy
+                # ``__init__`` that returns non-None still trips
+                # Python's ``type.__call__`` TypeError (which my
+                # wrapper would otherwise silently mask by discarding
+                # the return).
+                return original_init(self, *args, **kwargs)
 
             cls.__init__ = new_init  # type: ignore[method-assign]
             return cls  # type: ignore[return-value]
@@ -235,15 +243,16 @@ def deprecated(
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            # Same lock-protected check-and-add as the class path above.
-            # Keeping both paths identical makes the "warn once per
-            # process" contract uniform under concurrency.
-            with _warned_lock:
-                should_warn = cache_key not in _warned
+            # Same fast-path + lock-on-first-warn discipline as the
+            # class path above. Once a symbol has warned, subsequent
+            # calls skip the lock entirely via the membership check.
+            if cache_key not in _warned:
+                with _warned_lock:
+                    should_warn = cache_key not in _warned
+                    if should_warn:
+                        _warned.add(cache_key)
                 if should_warn:
-                    _warned.add(cache_key)
-            if should_warn:
-                warnings.warn(message, DeprecationWarning, stacklevel=2)
+                    warnings.warn(message, DeprecationWarning, stacklevel=2)
             return func(*args, **kwargs)
 
         return wrapper  # type: ignore[return-value]

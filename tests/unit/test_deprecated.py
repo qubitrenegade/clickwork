@@ -88,8 +88,11 @@ def test_cache_key_is_module_qualified():
     reuse short names across modules (very common for ``main``,
     ``run``, ``helper``, etc.).
 
-    We simulate two separate modules by flipping ``__module__`` on two
-    freshly-decorated functions with the same ``__qualname__``.
+    We simulate two separate modules by setting ``__module__`` on two
+    functions **before** decorating them (_cache_key is computed at
+    decoration time, so pre-decoration mutation is what the test needs
+    to stage the collision correctly). Both resulting wrappers share
+    the same ``__qualname__`` and differ only in ``__module__``.
     """
     from clickwork._deprecated import deprecated
 
