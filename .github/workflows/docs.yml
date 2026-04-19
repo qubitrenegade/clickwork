@@ -75,6 +75,12 @@ jobs:
 
       - name: Vale (advisory)
         uses: errata-ai/vale-action@v2
+        continue-on-error: true  # belt-and-suspenders: the action's
+          # fail_on_error: false only affects Vale's own classification;
+          # the underlying reviewdog wrapper still exits non-zero when
+          # it posts findings, which bubbles up as a step failure.
+          # continue-on-error makes the whole step always succeed so
+          # Vale stays truly advisory.
         with:
           fail_on_error: false
           version: 3.9.1
