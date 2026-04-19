@@ -49,7 +49,7 @@ Reference        (information-oriented)
 **Home** — `docs/index.md`. Landing page mirroring the README: one-paragraph "what is it," install snippet, a "New here? → Tutorials" / "Looking for a specific task? → How-To" / "Need to look something up? → Reference" triage block, feature highlights, links to GitHub.
 
 **Tutorials** — learning-oriented, linear, opinionated.
-- `tutorials/quickstart.md` — install to first working command, target ~5 minute read. One happy path, no branching.
+- `tutorials/quickstart.md` — install to first working command, target ~5-minute read. One happy path, no branching.
 - `tutorials/walkthrough/index.md` — multi-page practical walkthrough (30–60 min). Builds a realistic small project. Pages:
   - `01-your-first-command.md` — set up project layout, register a command, run it.
   - `02-adding-a-plugin.md` — split a command out into an entry-point plugin, install it, verify discovery.
