@@ -47,13 +47,15 @@ Tag signing today: maintainer runs `git tag -s vX.Y.Z` locally, which requires `
 
 ## Scope of this plan
 
-Three pieces, each with one or more open design questions the maintainer needs to answer before implementation:
+Three implementation pieces, aligned with the locked decisions above:
 
-1. **Sigstore signing of wheel + sdist** (build-job or create-release-job?)
-2. **Workflow-driven tag signing** (cosign keyless vs workflow GPG key?)
-3. **Verification docs** (inline expansion of SECURITY.md vs new dedicated file?)
+1. **Sigstore signing of wheel + sdist** — Q1=A, Q2=A, Q3=B: run `sigstore/gh-action-sigstore-python` inside the existing `build` job, publish bundles as both Release assets and PyPI attestations.
+2. **Workflow-driven tag signing** — Q4=B (Path 1): dedicated workflow-only GPG key in the `pypi` environment, public half on the maintainer's GitHub account.
+3. **Verification docs** — Q5=C: short summary in `docs/SECURITY.md` + detailed `docs/VERIFYING.md`.
 
-## Design questions
+## Design questions (resolved — kept for historical context)
+
+The A/B/C alternatives below were the options considered; each has a **Decision:** line pointing at the locked choice from the table above. Left in the doc so future readers can see what was weighed and why.
 
 ### Q1. Which Sigstore action?
 
@@ -61,9 +63,7 @@ Three pieces, each with one or more open design questions the maintainer needs t
 - **B) `pypa/gh-action-pypi-publish` with `attestations: true`** — pip-installable packages only; publishes attestations to PyPI's attestation endpoint rather than sideloading bundles. Simpler surface, coupled to PyPI.
 - **C) `slsa-framework/slsa-github-generator`** — different tool focused on SLSA provenance rather than Sigstore-bundle sign-everything. Out of scope per non-goals above but worth naming for rejection.
 
-**Recommendation:** A. Gives us standalone `.sigstore` bundles that verify without a PyPI round-trip and works the same for wheel, sdist, or any future artifact (e.g., Docker images if we ever ship one). B is narrower and couples us to PyPI's attestation story.
-
-**Open question for maintainer:** confirm A, or if B's simplicity wins.
+**Decision: A.** Gives us standalone `.sigstore` bundles that verify without a PyPI round-trip and works the same for wheel, sdist, or any future artifact (e.g., Docker images if we ever ship one). B is narrower and couples us to PyPI's attestation story. (B's PyPI-attestation benefit is still captured — see Q3.)
 
 ### Q2. Where in the workflow does Sigstore run?
 
@@ -71,9 +71,7 @@ Three pieces, each with one or more open design questions the maintainer needs t
 - **B) Inside a new dedicated `sign` job** — between `build` and `create-release`. `build` produces dist, `sign` downloads+signs+uploads a new artifact including bundles, `create-release` and `publish` both download the new artifact.
 - **C) Inside `create-release`** — sign just before uploading to the Release.
 
-**Recommendation:** A. One artifact, one OIDC exchange, fewer job boundaries. B adds a deployment stage for no security win (the OIDC token is scoped the same way). C couples signing to release creation which makes it harder to sign a sdist for PyPI that we don't surface on the Release (edge case but still).
-
-**Open question for maintainer:** confirm A, or prefer B's job-level separation.
+**Decision: A.** One artifact, one OIDC exchange, fewer job boundaries. B adds a deployment stage for no security win (the OIDC token is scoped the same way). C couples signing to release creation which makes it harder to sign a sdist for PyPI that we don't surface on the Release (edge case but still).
 
 ### Q3. How are `.sigstore` bundles published?
 
@@ -81,9 +79,7 @@ Three pieces, each with one or more open design questions the maintainer needs t
 - **B) PyPI attestations + Release assets** — same as A, PLUS publish to PyPI's attestation endpoint via `pypa/gh-action-pypi-publish` `attestations: true`. Verification command (PyPI side) is manual today via `pypi-attestations verify` or `sigstore-python`; pip/uv auto-verify of PyPI attestations is not GA yet (tracked upstream; once it ships, B upgrades to "automatic on install" for free).
 - **C) Release assets + Sigstore transparency log only** — rely on Rekor transparency log + artifact hash for verification, skip bundle files on the Release.
 
-**Recommendation:** B. PyPI attestations give every `pip install clickwork` consumer a future-proof path to automatic verification (the moment pip lands auto-verify, B starts working with zero action from us), while the Release-side bundles cover anyone installing from a tarball or a git tag today. A alone leaves PyPI consumers with no attestation story at all. C alone makes manual verification harder and depends entirely on Rekor uptime.
-
-**Open question for maintainer:** confirm B (bundle + PyPI attestation both).
+**Decision: B.** PyPI attestations give every `pip install clickwork` consumer a future-proof path to automatic verification (the moment pip lands auto-verify, B starts working with zero action from us), while the Release-side bundles cover anyone installing from a tarball or a git tag today. A alone leaves PyPI consumers with no attestation story at all. C alone makes manual verification harder and depends entirely on Rekor uptime.
 
 ### Q4. Tag signing mechanism?
 
@@ -91,13 +87,9 @@ Three pieces, each with one or more open design questions the maintainer needs t
 - **B) Workflow-managed GPG key stored as an encrypted secret in the `pypi` environment** — workflow imports the key, runs `git tag -s` inside the workflow. Produces a real GPG-signed git tag that `git verify-tag` checks natively. Long-lived key needs rotation policy, but the tag signature form is the one GitHub's "Verified" badge understands.
 - **C) Status quo** — maintainer signs locally with their own GPG key; the workflow stays agnostic. Lose workflow-driven signing as a 1.0.x goal; defer indefinitely.
 
-**Recommendation:** B. GitHub's "Verified" badge on the tag page is what most downstream consumers actually look at. Cosign keyless is a good complement (sign the release artifacts with it per Q1) but isn't recognised as a git tag signature. Managing one long-lived GPG key in the `pypi` environment secret is a known-acceptable operational cost.
+**Decision: B (Path 1).** GitHub's "Verified" badge on the tag page is what most downstream consumers actually look at. Cosign keyless is a good complement (sign the release artifacts with it per Q1) but isn't recognised as a git tag signature. Managing one dedicated **workflow-only** GPG key — generated specifically for release signing, uploaded to the maintainer's GitHub account for the Verified badge, stored passwordless in the `pypi` environment secret — is a known-acceptable operational cost. The key is NOT the maintainer's personal identity key; it's revocable if it ever leaks without touching the maintainer's personal key.
 
-**Open concern with B:** the private key material ends up in secrets, which is a step back from the "no long-lived keys" principle that Sigstore is built around. Rotating the key should be part of the runbook.
-
-**Alt: hybrid A+B** — use cosign keyless to produce a Rekor entry referencing the tag SHA (proves the workflow signed something) AND the maintainer continues to `git tag -s` locally. Preserves the "Verified" badge on GitHub, adds a workflow-level artifact. Belt-and-suspenders.
-
-**Open question for maintainer:** B, A, or hybrid A+B? This is the biggest design call in the plan.
+**Acknowledged tradeoff:** dedicated release-signing key material ends up in secrets, which is a step back from the "no long-lived keys" principle that Sigstore is built around. Rotation cadence (yearly or on suspected exposure) is part of the runbook in Wave 2 below.
 
 ### Q5. Verification docs placement?
 
@@ -105,9 +97,7 @@ Three pieces, each with one or more open design questions the maintainer needs t
 - **B) New `docs/VERIFYING.md`** — dedicated page that SECURITY.md links to. Keeps SECURITY.md focused on threat model.
 - **C) Both — brief 3-4-line summary in SECURITY.md, detailed commands in `docs/VERIFYING.md`** — progressive disclosure.
 
-**Recommendation:** C. SECURITY.md readers want the high-level "yes there's a verify path and here's one command," while someone actively verifying wants a dedicated reference. Matches the skill's own progressive-disclosure convention (SKILL.md + references).
-
-**Open question for maintainer:** A, B, or C?
+**Decision: C.** SECURITY.md readers want the high-level "yes there's a verify path and here's one command," while someone actively verifying wants a dedicated reference. Matches the skill's own progressive-disclosure convention (SKILL.md + references).
 
 ### Q6. Backward compat / retroactive signing?
 
@@ -115,13 +105,11 @@ Three pieces, each with one or more open design questions the maintainer needs t
 - **B) Retroactively sign 1.0.0 from the tag** — rerun the signing step against the existing `v1.0.0` tag, upload bundles as a second Release asset batch. Viable because `cosign sign-blob` + Sigstore bundles work against any artifact SHA, regardless of when it was built.
 - **C) Retroactively sign 0.2.0 too** — same mechanism, older release.
 
-**Recommendation:** A. Keeping a clean "from this version onward, signed" cutline is easier to document and reduces the change surface. B+C open us up to "does the sdist on PyPI for 1.0.0 need to be re-published or just gain a Release-side bundle?" ambiguity.
-
-**Open question for maintainer:** confirm A, or push back for B.
+**Decision: A.** Keeping a clean "from this version onward, signed" cutline is easier to document and reduces the change surface. B+C open us up to "does the sdist on PyPI for 1.0.0 need to be re-published or just gain a Release-side bundle?" ambiguity.
 
 ## Proposed implementation waves
 
-Assuming maintainer picks **Q1=A, Q2=A, Q3=B, Q4=B (or hybrid A+B), Q5=C, Q6=A**, the implementation breaks into:
+Based on the locked decisions above — **Q1=A, Q2=A, Q3=B, Q4=B (Path 1), Q5=C, Q6=A** — the implementation breaks into:
 
 ### Wave 1 (PR #a): Sigstore bundle signing on release artifacts
 
@@ -151,7 +139,7 @@ Because the workflow is triggered by a tag push, it cannot re-tag the commit it 
 - **B.1 Pre-release workflow**: separate `.github/workflows/sign-release-tag.yml` fired via `workflow_dispatch` (or on release-PR merge) that signs a planned vX.Y.Z tag BEFORE the maintainer pushes it. Maintainer merges the release PR → workflow dispatch → workflow creates the signed tag → `publish.yml` fires on the tag push as usual. This keeps the existing `publish.yml` untouched.
 - **B.2 Force-resign in publish.yml**: riskier — delete and recreate the tag during the run. Generally discouraged because it re-triggers `publish.yml` in a loop unless carefully guarded.
 
-**Recommendation:** B.1. New workflow, clean boundary with `publish.yml`, no recursive-trigger risk.
+**Decision: B.1.** New workflow, clean boundary with `publish.yml`, no recursive-trigger risk.
 
 **Target diff size:** ~80 lines new workflow (`sign-release-tag.yml`) + ~30 lines secrets-setup documentation in `CONTRIBUTING.md` + ~20 lines rotation runbook.
 
@@ -174,12 +162,12 @@ Release-cut PR (version bump + CHANGELOG 1.0.1 entry). Maintainer tags+pushes, t
 ## Merge-order constraints
 
 - Wave 1 must land before Wave 4 (can't cut 1.0.1 unsigned with the unsigned publish flow).
-- Wave 2 can land in parallel with Wave 1 if hybrid-A.
+- Wave 2 can land in parallel with Wave 1 under the locked Q4 choice (**B / Path 1**) — both are pure additions to `.github/workflows/` with no file overlap.
 - Wave 3 can land in parallel with Waves 1+2 (docs). Arguably easier to write the verify docs AFTER we've seen the actual bundle shapes, so schedule Wave 3 last-or-parallel but not first.
 
 ## Success criteria
 
-- `publish.yml` on main ends with: PyPI upload attested, Release has `.sigstore` bundles as assets, tag verified (by whichever of A/B/hybrid we pick in Q4).
+- `publish.yml` on main ends with: PyPI upload attested, Release has `.sigstore` bundles as assets, tag verifiable via `git verify-tag vX.Y.Z` against the dedicated workflow-only GPG key (Q4=B, Path 1).
 - `docs/VERIFYING.md` documents three concrete verification paths: PyPI attestation, bundle-side, tag-side.
 - `pypi-attestations verify` (or equivalent client) against a PyPI-hosted clickwork 1.0.1 wheel returns success, using the workflow identity on Fulcio. `pip install` itself does not yet auto-verify PyPI attestations (pending upstream work); the success criterion here is "attestations are published and manually verifiable," not "pip blocks unverified installs."
 - A fresh consumer running `sigstore verify identity dist/clickwork-1.0.1-py3-none-any.whl --bundle dist/clickwork-1.0.1-py3-none-any.whl.sigstore --cert-identity <workflow-identity> --cert-oidc-issuer https://token.actions.githubusercontent.com` against the Release-attached bundle gets a pass.
