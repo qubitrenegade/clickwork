@@ -1,0 +1,47 @@
+# markdownlint-cli2 config for docs/.
+# Start permissive; tighten after PR 2 authors new content.
+
+# Mirror the mkdocs.yml `exclude_docs` list plus the redirect stubs
+# and the build-output dir, so lint runs only against content that
+# ships on the site.
+ignores:
+  - docs/plans/**
+  - docs/superpowers/**
+  - site/**
+  - docs/ARCHITECTURE.md
+  - docs/API_POLICY.md
+  - docs/GUIDE.md
+  - docs/PLUGINS.md
+  - docs/SECURITY.md
+  - docs/MIGRATING.md
+  - docs/LLM_REFERENCE.md
+
+default: true
+
+# PR 1 scaffolding goal: get the lint gate green on content that
+# existed pre-move. Stylistic rules that flag pre-existing patterns
+# are disabled here; the intention is to re-enable them in a
+# follow-up PR after the new tutorial/how-to content lands with a
+# stricter bar.
+
+# Allow raw HTML (admonition blocks, details/summary).
+MD033: false
+
+# Multiple top-level h1 is normal for mkdocs pages that use the
+# filename as the title.
+MD025:
+  front_matter_title: ""
+
+# Permit repeated headings under different parents (mkdocstrings-
+# generated "Parameters" sections across many pages would otherwise
+# trip this).
+MD024:
+  siblings_only: true
+
+# Disabled (scaffolding-era relaxations; re-enable per-rule after
+# content is authored):
+MD013: false   # line-length — LLM_REFERENCE has intentionally long single-line entries
+MD040: false   # fenced-code-block language tag
+MD046: false   # code-block style (indented vs fenced)
+MD050: false   # strong style (asterisk vs underscore)
+MD060: false   # table-column-style (pipe spacing)
