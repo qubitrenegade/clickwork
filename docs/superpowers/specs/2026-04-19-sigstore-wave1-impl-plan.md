@@ -61,7 +61,7 @@ The workflow only runs on `push: tags: v*`. We need verification it works before
 
 **Recommendation:** A with prerelease flag (so it doesn't advance the "latest" pointer). We already have `prerelease: ${{ contains(github.ref_name, '-') }}` in the workflow. A pre-release RC is a real end-to-end test without compromising 1.0.1 itself; if the RC fails we yank and try again without consumer-visible damage. B is tempting but adding a dry-run trigger is a new surface we'd have to maintain.
 
-**Open question for maintainer:** confirm A (ship an `v1.0.1-rc0` first), or D (skip the RC and fix forward)?
+**Open question for maintainer:** confirm A (ship a `v1.0.1-rc0` first), or D (skip the RC and fix forward)?
 
 ### Q3. PyPI attestation edge cases — wheel-only or wheel + sdist?
 
@@ -190,7 +190,7 @@ If anything fails, the RC is throwaway — yank on PyPI, delete the GitHub Relea
 - After this PR merges and an RC tag is pushed: a `pypi-attestations verify` (or equivalent) against the PyPI-hosted RC wheel and sdist returns success, using the workflow identity on Fulcio.
 - `sigstore verify identity --bundle …--cert-identity … --cert-oidc-issuer …` against the GitHub Release-attached `.sigstore` bundle returns success.
 - GitHub Actions for the RC tag shows all three jobs green end-to-end.
-- No regression: `publish.yml` continues to successfully upload unsigned consumers through the normal `pip install clickwork==<older version>` path (i.e., existing releases are unaffected).
+- No regression: `publish.yml` still publishes releases successfully with the added signing/attestation steps, and the normal `pip install clickwork==<older version>` flow for older unsigned releases remains unchanged.
 
 ## Risks / open
 
