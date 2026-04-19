@@ -35,7 +35,7 @@ Submit a `meta.yaml` recipe for clickwork to the [conda-forge/staged-recipes](ht
 
 ### Q1. When do we submit?
 
-- **A) Submit immediately after 1.0.0 is stable on PyPI (now)** — 1.0.0 has been live for ~1 day, no reported bugs yet but also no real in-the-wild usage yet.
+- **A) Submit immediately** — 1.0.0 went live on 2026-04-19 (same day as this plan). No reported bugs yet, but correspondingly no real in-the-wild usage yet either.
 - **B) Wait for 1.0.1** — give Sigstore work (#61) time to land first, so the conda-forge recipe references an already-verified PyPI release. conda-forge bot pulls the sdist from PyPI and verifies against its hash; Sigstore bundles are a separate layer conda-forge doesn't use directly, so there's no hard dependency.
 - **C) Wait 1-2 weeks of real PyPI usage first** — the #62 issue itself says "wait until 1.0 is stable on PyPI (a week or two) before submitting to staged-recipes so we aren't iterating on a moving target inside the conda-forge review process." This matches the issue author's original intent.
 
