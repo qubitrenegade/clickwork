@@ -36,7 +36,7 @@ Three concrete changes, one commit per logical change:
 2. **`create-release` job:** extend `files:` glob to include `dist/*.sigstore` so bundles appear as Release assets alongside wheel+sdist.
 3. **`publish` job:** add `attestations: true` to `pypa/gh-action-pypi-publish`.
 
-All three land in a single PR (small, cohesive diff ~30 lines net).
+All three land in a single PR (small, cohesive diff ~10 lines net — see "Target diff size" below).
 
 ## Design questions
 
@@ -159,17 +159,18 @@ No permission changes (`id-token: write` already present for Trusted Publishing)
 
 Assuming Q2=A (cut an RC):
 
-1. Merge this PR into `main`.
-2. Locally: `git tag v1.0.1-rc0 && git push origin v1.0.1-rc0` (signed with the maintainer's local GPG key per current runbook; Wave 2 will move this into the workflow).
-3. Watch Actions → verify:
-   - `build` job: Sigstore step completes, `dist/*.sigstore` exists in the uploaded artifact.
-   - `create-release` job: GitHub Release page shows `.whl`, `.tar.gz`, and `.sigstore` files as assets.
+1. Merge this PR's implementation into `main`.
+2. Bump the package version on `main` to the PEP 440 prerelease `1.0.1rc0` in `pyproject.toml`, commit, push that commit to `main` first. (`uv build` reads the version from `pyproject.toml`; tagging alone won't produce publishable `1.0.1rc0` artifacts — and PyPI rejects re-uploads of an existing version, so a tag without a version bump would upload-fail.)
+3. Locally: `git tag -s v1.0.1-rc0 -m "v1.0.1-rc0" && git push origin v1.0.1-rc0` (signed annotated tag per current `CONTRIBUTING.md` runbook; Wave 2 will move this into the workflow).
+4. Watch Actions → verify:
+   - `build` job: Sigstore step completes, `dist/*.sigstore` exists in the uploaded artifact, built filenames carry `1.0.1rc0`.
+   - `create-release` job: GitHub Release page shows `1.0.1rc0` `.whl`, `.tar.gz`, and `.sigstore` files as assets.
    - `publish` job: PyPI package page for `clickwork 1.0.1rc0` shows "Attestations" section with a `.sigstore` entry per artifact.
-4. Manual verify: `sigstore verify identity dist/clickwork-1.0.1rc0-py3-none-any.whl --bundle dist/clickwork-1.0.1rc0-py3-none-any.whl.sigstore --cert-identity https://github.com/qubitrenegade/clickwork/.github/workflows/publish.yml@refs/tags/v1.0.1-rc0 --cert-oidc-issuer https://token.actions.githubusercontent.com`
-5. Manual verify: `pypi-attestations verify pypi clickwork==1.0.1rc0`
-6. If all green: yank the RC from PyPI, move to Wave 2 without cutting 1.0.1 yet (Wave 2 is a prereq for Wave 4).
+5. Manual verify: `sigstore verify identity dist/clickwork-1.0.1rc0-py3-none-any.whl --bundle dist/clickwork-1.0.1rc0-py3-none-any.whl.sigstore --cert-identity https://github.com/qubitrenegade/clickwork/.github/workflows/publish.yml@refs/tags/v1.0.1-rc0 --cert-oidc-issuer https://token.actions.githubusercontent.com`
+6. Manual verify: `pypi-attestations verify pypi clickwork==1.0.1rc0`
+7. If all green: yank the RC from PyPI, bump `pyproject.toml` back to `1.0.1.dev0` (or similar non-release marker), move to Wave 2 without cutting 1.0.1 yet (Wave 2 is a prereq for Wave 4).
 
-If anything fails, the RC is throwaway — yank on PyPI, delete the GitHub Release + tag, fix, re-cut `rc1`.
+If anything fails, the RC is throwaway — yank on PyPI, delete the GitHub Release + tag, fix, bump `pyproject.toml` to `1.0.1rc1` before re-cutting `rc1` (new prerelease version to avoid PyPI's no-reupload rule).
 
 ## Target diff size
 
