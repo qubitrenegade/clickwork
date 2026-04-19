@@ -102,6 +102,14 @@ complete 0.2.x → 1.0 upgrade guide including before/after diffs.
   public API.** Invoking a command with an explicit flag value
   overrides the group-level option at invocation time; docs and
   tests pin the behavior so downstream CLIs can rely on it. (#60)
+- **`setup_logging()` re-invocation is a stable 1.0 contract.**
+  Calling `setup_logging()` a second (or Nth) time in the same
+  process is idempotent with respect to handler count -- the
+  framework never stacks a duplicate clickwork-owned handler -- and
+  always updates the logger's level live (so `verbose=0` then
+  `verbose=1` moves output from WARNING to INFO under both
+  standalone and host-configured roots). Long-running hosts and
+  test suites that re-enter the CLI can now rely on this. (#60)
 - **Logger propagation**. Clickwork loggers now rely on standard
   Python propagation to the host's root logger rather than attaching
   a duplicate stderr handler. Hosts configuring logging before
