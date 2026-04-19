@@ -132,7 +132,7 @@ If Q4=hybrid: just do A for the workflow (cosign blob signing) and keep the CONT
 
 Assuming Q5=C:
 
-- `docs/VERIFYING.md`: concrete commands for (1) verifying the PyPI install via `pip install --require-hashes` or the attestation endpoint, (2) verifying a downloaded wheel/sdist against its `.sigstore` bundle via `sigstore verify identity`, (3) verifying the tag via `git verify-tag` (if Q4=B) or Rekor (if Q4=A or hybrid).
+- `docs/VERIFYING.md`: concrete commands for (1) verifying PyPI attestations for a downloaded wheel/sdist — as of early 2026 this is a manual step via the `pypi-attestations` CLI or `sigstore-python`; pip's own auto-verification of PyPI attestations is not yet GA, so we document the manual flow until it is, (2) verifying a downloaded wheel/sdist against its Release-attached `.sigstore` bundle via `sigstore verify identity --cert-identity <workflow-identity> --cert-oidc-issuer https://token.actions.githubusercontent.com`, (3) verifying the tag via `git verify-tag` (if Q4=B) or the Rekor transparency-log entry (if Q4=A or hybrid).
 - Update `docs/SECURITY.md` "Verifying release artifacts" section to a short summary + link to `VERIFYING.md`.
 - Cross-link from `CONTRIBUTING.md`'s "Cutting a release" runbook.
 
@@ -154,8 +154,8 @@ Release-cut PR (version bump + CHANGELOG 1.0.1 entry). Maintainer tags+pushes, t
 
 - `publish.yml` on main ends with: PyPI upload attested, Release has `.sigstore` bundles as assets, tag verified (by whichever of A/B/hybrid we pick in Q4).
 - `docs/VERIFYING.md` documents three concrete verification paths: PyPI attestation, bundle-side, tag-side.
-- A fresh consumer running `pip install --require-hashes clickwork==1.0.1` gets automatic PyPI-attestation verification.
-- A fresh consumer running `sigstore verify identity dist/clickwork-1.0.1-py3-none-any.whl --bundle dist/clickwork-1.0.1-py3-none-any.whl.sigstore --cert-identity <workflow-identity> --cert-oidc-issuer https://token.actions.githubusercontent.com` gets a pass.
+- `pypi-attestations verify` (or equivalent client) against a PyPI-hosted clickwork 1.0.1 wheel returns success, using the workflow identity on Fulcio. `pip install` itself does not yet auto-verify PyPI attestations (pending upstream work); the success criterion here is "attestations are published and manually verifiable," not "pip blocks unverified installs."
+- A fresh consumer running `sigstore verify identity dist/clickwork-1.0.1-py3-none-any.whl --bundle dist/clickwork-1.0.1-py3-none-any.whl.sigstore --cert-identity <workflow-identity> --cert-oidc-issuer https://token.actions.githubusercontent.com` against the Release-attached bundle gets a pass.
 
 ## Out of scope for this plan
 
