@@ -7,22 +7,31 @@ build:
   os: ubuntu-24.04
   tools:
     python: "3.13"
+  jobs:
+    # Install uv so we can export the frozen lockfile's resolved
+    # versions into a pip-compatible requirements file. Without this,
+    # RTD's `pip install .[docs]` would re-resolve transitive deps
+    # from scratch, which means RTD builds can drift from CI over
+    # time as upstream mkdocs-material / mkdocstrings / etc. ship
+    # releases. Using the same pinned versions as CI keeps the two
+    # environments aligned.
+    post_create_environment:
+      - python -m pip install uv
+    pre_install:
+      - uv export --frozen --no-dev --extra docs --format requirements-txt --output-file /tmp/rtd-docs-requirements.txt
+      - python -m pip install --requirement /tmp/rtd-docs-requirements.txt
+      # Install clickwork itself (editable) so mkdocstrings can import
+      # the package to pull docstrings. --no-deps because the
+      # requirements file above already locked every transitive.
+      - python -m pip install --no-deps --editable .
 
 # mkdocs (not Sphinx) drives the build. Config lives at the repo root.
 mkdocs:
   configuration: mkdocs.yml
   fail_on_warning: true   # match the --strict behaviour used in CI
 
-# Install clickwork itself (editable) so mkdocstrings can import the
-# package to pull docstrings, plus the `docs` optional-dependencies
-# extra from pyproject.toml (mkdocs-material, mkdocstrings[python],
-# mkdocs-redirects).
-python:
-  install:
-    - method: pip
-      path: .
-      extra_requirements:
-        - docs
+# Dependencies installed via the jobs above from uv.lock, so skip the
+# python.install block that would otherwise do its own pip install.
 
 # Don't build PDFs or ePubs — mkdocs-material doesn't produce them,
 # and we publish only HTML.
