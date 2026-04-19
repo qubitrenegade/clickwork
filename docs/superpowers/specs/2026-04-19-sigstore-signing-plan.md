@@ -171,7 +171,7 @@ Release-cut PR (version bump + CHANGELOG 1.0.1 entry). Maintainer tags+pushes, t
 ## Merge-order constraints
 
 - Wave 1 must land before Wave 4 (can't cut 1.0.1 unsigned with the unsigned publish flow).
-- Wave 2 can land in parallel with Wave 1 under the locked Q4 choice (**B / Path 1**) — both are pure additions to `.github/workflows/` with no file overlap.
+- Wave 2 can land in parallel with Wave 1 under the locked Q4 choice (**B / Path 1**) — Wave 1 modifies the existing `.github/workflows/publish.yml`, while Wave 2 adds a new `.github/workflows/sign-release-tag.yml` and updates `CONTRIBUTING.md`, so expected overlap is low (no shared lines) even though these are not both pure additions.
 - Wave 3 can land in parallel with Waves 1+2 (docs). Arguably easier to write the verify docs AFTER we've seen the actual bundle shapes, so schedule Wave 3 last-or-parallel but not first.
 
 ## Success criteria
