@@ -32,14 +32,25 @@ When `create_cli()` runs, clickwork:
 **Caveat on visibility of these log messages.** Discovery runs
 during `create_cli()` — often at module import time, before the
 host application has configured logging. clickwork attaches a
-`NullHandler` on its own logger at import time, so discovery-time
-records don't produce "no handlers" complaints, but they may also
-not reach any handler the host installs later. For WARNING+
-records, Python's "last resort" stderr fallback usually kicks in;
-INFO records typically do not. If you need collisions / import
-errors surfaced reliably regardless of logging config, pass
-`strict=True` to `create_cli()` — discovery failures become a
-`ClickworkDiscoveryError` raised at CLI construction time.
+`NullHandler` on its own logger at import time, which suppresses
+the "no handlers" complaint AND also disables Python's
+`logging.lastResort` stderr fallback (because `callHandlers` walks
+the logger chain and counts the NullHandler as a handler). The
+practical effect: discovery-time records of any severity go to
+the NullHandler (a no-op) and propagate to root, where they reach
+whatever the host has installed — if anything has been installed
+yet. In default / not-yet-configured setups, they're effectively
+invisible.
+
+Reliable options, in order of preference:
+
+1. Pass `strict=True` to `create_cli()` — discovery failures
+   (duplicate names, broken imports, missing `cli` attr) become a
+   `ClickworkDiscoveryError` raised at CLI construction time,
+   completely independent of logging config.
+2. Configure logging before `create_cli()` — call `setup_logging()`
+   or attach a root handler at module import time, so records
+   emitted during discovery have somewhere to go.
 
 ## Why entry points
 
