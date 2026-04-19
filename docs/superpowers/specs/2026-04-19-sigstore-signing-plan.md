@@ -130,7 +130,8 @@ Q4 is decided (**B, Path 1** — workflow-only GPG key). Implementation:
 1. Generate a new GPG key specifically for workflow signing. Identity: something like `clickwork-release-bot <release@clickwork.example>` or similar — clearly NOT the maintainer's personal identity. Passwordless.
 2. Upload the public half to the maintainer's GitHub account (`Settings → SSH and GPG keys → New GPG key`) so signatures on tags show the Verified badge against the maintainer's account.
 3. Store the private half as an encrypted secret in the `pypi` environment (we already gate PyPI publish on that environment for approval). Suggest secret names: `RELEASE_GPG_PRIVATE_KEY` (armored private block), `RELEASE_GPG_KEY_ID` (long-form fingerprint for `git config user.signingkey`).
-4. Document the rotation cadence in `CONTRIBUTING.md` — suggested: rotate yearly or on any suspected exposure, with revocation publishing a new `.asc` to both GitHub and the secret.
+4. Generate a fine-scoped PAT (fine-grained PAT limited to this repo with `contents: write`, or a classic token with `repo` scope) for pushing the signed tag back to origin. Store as `RELEASE_TAG_PUSH_TOKEN` in the same `pypi` environment. See "Gotcha" below for why `GITHUB_TOKEN` alone isn't enough. (Rotate alongside the GPG key.)
+5. Document the rotation cadence in `CONTRIBUTING.md` — suggested: rotate yearly or on any suspected exposure. GPG key revocation publishes a new `.asc` to both GitHub and the secret; PAT rotation is a secret update plus revoking the old PAT in account settings.
 
 **Workflow changes:**
 
@@ -141,7 +142,15 @@ Because the workflow is triggered by a tag push, it cannot re-tag the commit it 
 
 **Decision: B.1.** New workflow, clean boundary with `publish.yml`, no recursive-trigger risk.
 
-**Target diff size:** ~80 lines new workflow (`sign-release-tag.yml`) + ~30 lines secrets-setup documentation in `CONTRIBUTING.md` + ~20 lines rotation runbook.
+**Gotcha: `GITHUB_TOKEN` pushes don't trigger other workflows.** By default, a tag pushed from inside a workflow authenticated with the standard `GITHUB_TOKEN` does NOT fire `on: push` listeners in sibling workflows — GitHub's explicit anti-recursion guard ([docs](https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication#using-the-github_token-in-a-workflow)). So naive B.1 (sign-release-tag.yml pushes the tag, publish.yml listens for the tag push) silently fails to release. Three mitigations, ranked:
+
+- **M1 (recommended): PAT-authenticated push.** Generate a fine-scoped Personal Access Token (fine-grained PAT or classic token with `contents: write`), store it as `RELEASE_TAG_PUSH_TOKEN` in the `pypi` environment, and configure `sign-release-tag.yml`'s push step to use it via `git push https://x-access-token:${TOKEN}@github.com/...`. The PAT-authored push triggers `publish.yml` normally. Rotation cadence pairs with the GPG key rotation (yearly).
+- **M2: `workflow_run` chaining.** Add `on: workflow_run: workflows: ["Sign Release Tag"]` to `publish.yml` (or a wrapper that invokes it via `workflow_dispatch` inputs). No PAT needed, but `publish.yml` now has two triggers (`push: tags` + `workflow_run`) and the two paths diverge enough to complicate the runbook.
+- **M3: GitHub App token.** Use a dedicated GitHub App installed on the repo, mint a token from it in the sign workflow, push with that token. Same trigger-firing behaviour as M1 but heavier setup (app creation, installation, private key as secret). Overkill for a single-repo maintainer.
+
+**Chosen mitigation: M1.** One more secret (`RELEASE_TAG_PUSH_TOKEN`), no change to `publish.yml`, minimum runbook surface. Rotation pairs with GPG key rotation. Rejected M2 because splitting `publish.yml`'s trigger surface invites subtle divergence between "maintainer pushes tag directly" and "workflow pushed tag" paths; rejected M3 because the GitHub App story is too much operational weight for a one-maintainer repo.
+
+**Target diff size:** ~80 lines new workflow (`sign-release-tag.yml`) + ~30 lines secrets-setup documentation in `CONTRIBUTING.md` (now covers `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_KEY_ID`, and `RELEASE_TAG_PUSH_TOKEN`) + ~20 lines rotation runbook.
 
 ### Wave 3 (PR #c): Verification docs
 
