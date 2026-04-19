@@ -249,7 +249,7 @@ Jobs:
 1. **`build`** (runs on PR and main):
    - `uv sync --frozen --extra docs` (`--frozen` matches `.github/workflows/bench.yml` and ensures CI fails on a stale lockfile rather than silently re-resolving; `--extra docs` matches how other clickwork workflows install optional dependency sets).
    - `uv run mkdocs build --strict` (broken internal links, missing nav entries, orphaned pages → fail).
-   - `markdownlint-cli2 'docs/**/*.md'` with a checked-in `.markdownlint.yaml` config. Blocking.
+   - Markdown lint via [`DavidAnson/markdownlint-cli2-action`](https://github.com/DavidAnson/markdownlint-cli2-action), pinned by SHA, running `markdownlint-cli2 'docs/**/*.md'` with a checked-in `.markdownlint.yaml` config. Using the action (rather than a bare `npm install -g markdownlint-cli2`) avoids having to set up Node separately; pinning by SHA makes the tool version reproducible. Blocking.
    - Vale via `errata-ai/vale-action@v2` with `fail_on_error: false`. Advisory annotations only.
 2. **`deploy`** (runs on main only, `needs: build`):
    - Declare `permissions: contents: write` at job scope. The default `GITHUB_TOKEN` is read-only in many repo configurations, and `mkdocs gh-deploy` pushes to the `gh-pages` branch — without explicit write permission the deploy will fail with a 403 on first run. Job scope (not workflow scope) so the build job retains its minimal default permissions.
