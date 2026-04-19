@@ -17,22 +17,26 @@ promise.
 
 ::: clickwork.http
     options:
+      show_root_heading: false
       show_source: false
 
 ## `clickwork.platform`
 
 ::: clickwork.platform
     options:
+      show_root_heading: false
       show_source: false
 
 ## `clickwork.testing`
 
 ::: clickwork.testing
     options:
+      show_root_heading: false
       show_source: false
 
 ## `clickwork.config`
 
 ::: clickwork.config
     options:
+      show_root_heading: false
       show_source: false
