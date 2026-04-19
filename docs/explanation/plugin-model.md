@@ -74,11 +74,19 @@ The practical consequences:
 - When authoring a plugin, choose command names that are unlikely to
   collide with other plugins or with local command-directory files
   in target CLIs.
-- If two plugins (or a plugin and a local file) register the same
-  command name, clickwork keeps the first-loaded one deterministically
-  (directory scan is sorted alphabetically, entry-point iteration
-  order is `importlib.metadata`'s) and emits a warning on the
-  others. Strict mode promotes the duplicate to a hard error.
+- **Within-mechanism duplicates** — two plugins both registering the
+  same entry-point name, or two directory files producing the same
+  Click command name — are a *bug*. clickwork keeps the first-loaded
+  one (directory scan sorted alphabetically; entry points in
+  `importlib.metadata` iteration order), emits a warning, and strict
+  mode promotes the duplicate to a hard error via
+  `ClickworkDiscoveryError`.
+- **Cross-mechanism "collisions"** — a local `commands/foo.py` with
+  the same name as an installed-plugin entry point — are the
+  *intentional* shadowing feature: the local command wins, clickwork
+  logs at INFO (not WARNING) so you can tell the shadowing happened,
+  and strict mode explicitly does NOT treat this as a failure. See
+  the "Why local wins on collision" section below.
 - If you're planning to ship an ecosystem of distinct CLIs in the
   same venv, be deliberate about namespacing command names at
   design time (`projectctl-deploy`, `dataops-deploy`, not just

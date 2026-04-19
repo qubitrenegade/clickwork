@@ -129,9 +129,14 @@ directory.
 
 ## Tips
 
-- Naming: `commands/foo_bar.py` → `projectctl foo-bar`. Use
-  `@click.command(name="...")` only if you need to override the
-  default filename-based name.
+- Naming: set it explicitly with `@click.command(name="foo-bar")`
+  on every command. clickwork keys commands off the Click command's
+  `.name` (with filename fallback only when `.name` is unset), and
+  `@click.command()` without an explicit name derives the name from
+  the decorated function — so the common `def cli(...)` pattern
+  registers as the command `cli` unless you override it. Pick kebab-
+  case names (`foo-bar`, not `foo_bar`) to match standard CLI
+  conventions.
 - Shared helpers go in `src/<project>/_lib.py` (or similar); commands
   import from there. Don't put helper modules in `commands/` — they
   get treated as commands and clickwork will complain.

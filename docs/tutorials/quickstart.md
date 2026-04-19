@@ -28,12 +28,16 @@ You should see `1.0.0` (or whatever the latest is).
 
 ## Step 2 — create the project layout
 
+Work from a parent directory containing a `greet/` subdirectory:
+
 ```bash
 mkdir -p greet/commands
-cd greet
+# Stay in the PARENT directory — don't cd into greet/. The entry-
+# point command below runs the CLI from the parent so Python can
+# import the `greet` package without extra PYTHONPATH juggling.
 ```
 
-Then create the entry point `greet/cli.py`:
+Create the entry point `greet/cli.py`:
 
 ```python
 from pathlib import Path
@@ -52,8 +56,7 @@ if __name__ == "__main__":
 `commands_dir` is typed as `pathlib.Path`, not `str` — clickwork's
 discovery calls `.is_dir()` and `.glob()` on it directly. Using
 `Path(__file__).parent / "commands"` makes the path resolve relative
-to the `cli.py` file, so `python -m greet.cli` works from any working
-directory.
+to the `cli.py` file, so the CLI works from any working directory.
 
 And your first command `greet/commands/hello.py`:
 
@@ -78,10 +81,11 @@ same). Setting `name=` explicitly is the safest pattern.
 
 ## Step 3 — run it
 
-From the `greet/` directory:
+From the parent directory of `greet/` (the dir you've been working
+in — don't `cd greet/`):
 
 ```bash
-python -m greet.cli hello --name "clickwork"
+python greet/cli.py hello --name "clickwork"
 ```
 
 Expected:
