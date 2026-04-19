@@ -201,6 +201,9 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
+      - '.markdownlint.yaml'
+      - '.vale.ini'
+      - '.vale/**'
       - 'pyproject.toml'
       - 'uv.lock'
   pull_request:
@@ -208,6 +211,9 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - '.github/workflows/docs.yml'
+      - '.markdownlint.yaml'
+      - '.vale.ini'
+      - '.vale/**'
       - 'pyproject.toml'
       - 'uv.lock'
 ```
@@ -215,6 +221,7 @@ on:
 - `pyproject.toml` is included because changing the `docs` dependency group affects the build.
 - `uv.lock` is included so a lockfile change re-runs CI.
 - `.github/workflows/docs.yml` is included so edits to CI config itself re-trigger the job.
+- `.markdownlint.yaml`, `.vale.ini`, and `.vale/**` are included so rule changes re-run lint output on the existing corpus.
 
 Jobs:
 
@@ -224,6 +231,7 @@ Jobs:
    - `markdownlint-cli2 'docs/**/*.md'` with a checked-in `.markdownlint.yaml` config. Blocking.
    - Vale via `errata-ai/vale-action@v2` with `fail_on_error: false`. Advisory annotations only.
 2. **`deploy`** (runs on main only, `needs: build`):
+   - Declare `permissions: contents: write` at job scope. The default `GITHUB_TOKEN` is read-only in many repo configurations, and `mkdocs gh-deploy` pushes to the `gh-pages` branch — without explicit write permission the deploy will fail with a 403 on first run. Job scope (not workflow scope) so the build job retains its minimal default permissions.
    - `uv run mkdocs gh-deploy --force` using the default `GITHUB_TOKEN`. Publishes to the `gh-pages` branch.
 
 `--force` is appropriate here because `gh-pages` is a deploy artifact rather than a source branch — no human edits it by hand, and each build replaces the prior contents wholesale.
@@ -249,13 +257,13 @@ One-time manual step in repo Settings → Pages → Source: `gh-pages` branch. T
 
 This spec requires the following new prose to be written in the implementation PRs:
 
-- `index.md` — landing page.
-- `tutorials/quickstart.md`.
-- `tutorials/walkthrough/index.md`, `01-your-first-command.md`, `02-adding-a-plugin.md`, `03-packaging.md`.
-- `how-to/index.md`, `tame-a-script-directory.md`, `add-a-command.md`, `write-a-plugin.md`, `migrate-from-argparse.md`.
-- `explanation/plugin-model.md`.
-- `llms.txt`.
-- A short "why we moved these" note in any existing file that is itself kept as a redirect stub.
+- `docs/index.md` — landing page.
+- `docs/tutorials/quickstart.md`.
+- `docs/tutorials/walkthrough/index.md`, `docs/tutorials/walkthrough/01-your-first-command.md`, `docs/tutorials/walkthrough/02-adding-a-plugin.md`, `docs/tutorials/walkthrough/03-packaging.md`.
+- `docs/how-to/index.md`, `docs/how-to/tame-a-script-directory.md`, `docs/how-to/add-a-command.md`, `docs/how-to/write-a-plugin.md`, `docs/how-to/migrate-from-argparse.md`.
+- `docs/explanation/plugin-model.md`.
+- `docs/llms.txt`.
+- A short "this page has moved" stub at each old path (`docs/GUIDE.md`, `docs/PLUGINS.md`, etc.), excluded from the build via `exclude_docs`.
 
 Every other file in the nav is an existing doc moved into its Diátaxis slot.
 
