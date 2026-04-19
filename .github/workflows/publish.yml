@@ -1,19 +1,42 @@
 name: Publish to PyPI
 
+# Trigger on pushing a version tag (e.g. v1.0.0, v1.1.0-rc1).
+#
+# This workflow is the single source of truth for cutting a release:
+#   1. Build wheel + sdist from the tagged commit.
+#   2. Create the GitHub Release (matches the orbit-widener pattern;
+#      softprops/action-gh-release handles both create + upload).
+#   3. Publish the built artifacts to PyPI via Trusted Publishing.
+#
+# Pushing the tag alone is enough to ship a release end-to-end.
+# A manual GitHub Release draft is NOT required, and is in fact
+# redundant -- the workflow creates it for you.
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - "v*"
 
-permissions:
-  id-token: write
+# Workflow-level deny-all. Each job re-grants only what it needs.
+# Principle of least privilege: a compromised step in one job cannot
+# inherit permissions another job was granted.
+permissions: {}
 
 jobs:
   build:
     name: Build distribution
     runs-on: ubuntu-latest
 
+    # Checkout reads the repo; nothing else is needed at this stage.
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The default checkout is a shallow fetch of the tag's commit,
+          # which is all `uv build` needs. Sdists don't embed git metadata
+          # so no fetch-depth tweaking is required.
+          fetch-depth: 1
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -30,11 +53,61 @@ jobs:
           name: dist
           path: dist/
 
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    # contents: write is the minimum required to create a release and
+    # attach assets. Do NOT widen.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      # softprops/action-gh-release creates the GitHub Release AND
+      # uploads the `files:` globs as release assets in one step.
+      # Using the same action (and pinned SHA) as orbit-widener's
+      # release.yml so the behaviour is consistent across both repos.
+      #
+      # generate_release_notes: true uses `.github/release.yml` to
+      # group merged PRs by label (Features / Bug fixes / Documentation
+      # / CI / Other). This replaces the old manual "draft release in
+      # the UI and click generate" flow.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "clickwork ${{ github.ref_name }}"
+          draft: false
+          # Anything with a hyphen in the tag (e.g. v1.0.0-rc1) is
+          # marked as a pre-release so the "latest release" pointer
+          # on PyPI / GitHub doesn't advance to it accidentally.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+
   publish:
     name: Publish to PyPI
     runs-on: ubuntu-latest
-    needs: build
+    # Only publish to PyPI after the GitHub Release exists, so a
+    # failed release-creation step doesn't leave PyPI artifacts
+    # orphaned from their GitHub counterpart. Order matters here.
+    needs: create-release
     environment: pypi
+
+    # id-token:write is required by PyPI's Trusted Publisher OIDC flow.
+    # contents are not needed at this stage -- we're pulling the already-
+    # uploaded artifact from the build job.
+    permissions:
+      id-token: write
 
     steps:
       - name: Download distribution artifacts
