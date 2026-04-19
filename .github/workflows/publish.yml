@@ -26,9 +26,14 @@ jobs:
     name: Build distribution
     runs-on: ubuntu-latest
 
-    # Checkout reads the repo; nothing else is needed at this stage.
+    # Checkout reads the repo; upload-artifact writes through the
+    # Actions API. Workflow-level ``permissions: {}`` gives GITHUB_TOKEN
+    # zero rights by default, so we must re-grant here or
+    # actions/upload-artifact@v4 will 403 and later jobs have nothing
+    # to download.
     permissions:
       contents: read
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
@@ -41,8 +46,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Set up Python
-        run: uv python install 3.13
+      - name: Set up Python 3.13
+        # Install + pin so subsequent `uv` commands deterministically
+        # use 3.13 rather than whatever `python` the runner defaults to
+        # (ubuntu-latest ships 3.12 at time of writing). Matches the
+        # install-then-pin pattern in release-smoke.yml.
+        run: |
+          uv python install 3.13
+          uv python pin 3.13
 
       - name: Build package
         run: uv build
@@ -59,9 +70,13 @@ jobs:
     needs: build
 
     # contents: write is the minimum required to create a release and
-    # attach assets. Do NOT widen.
+    # attach assets. actions: read is required because
+    # actions/download-artifact@v4 reads the artifact registry through
+    # the Actions API (workflow-level ``permissions: {}`` starts at
+    # zero). Do NOT widen beyond these two.
     permissions:
       contents: write
+      actions: read
 
     steps:
       - name: Download distribution artifacts
@@ -104,10 +119,14 @@ jobs:
     environment: pypi
 
     # id-token:write is required by PyPI's Trusted Publisher OIDC flow.
-    # contents are not needed at this stage -- we're pulling the already-
-    # uploaded artifact from the build job.
+    # actions:read is required because actions/download-artifact@v4
+    # reads the artifact registry through the Actions API and workflow-
+    # level ``permissions: {}`` gives it nothing by default.
+    # contents: not needed -- we're pulling the already-uploaded
+    # artifact from the build job, not checking out source.
     permissions:
       id-token: write
+      actions: read
 
     steps:
       - name: Download distribution artifacts
