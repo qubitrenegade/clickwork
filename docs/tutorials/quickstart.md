@@ -32,9 +32,10 @@ Work from a parent directory containing a `greet/` subdirectory:
 
 ```bash
 mkdir -p greet/commands
-# Stay in the PARENT directory — don't cd into greet/. The entry-
-# point command below runs the CLI from the parent so Python can
-# import the `greet` package without extra PYTHONPATH juggling.
+# Stay in the PARENT directory — don't cd into greet/. We'll keep
+# cwd fixed so the file paths below (greet/cli.py, greet/commands/
+# hello.py) and the run command in step 3 (python greet/cli.py ...)
+# all agree about where things live.
 ```
 
 Create the entry point `greet/cli.py`:
