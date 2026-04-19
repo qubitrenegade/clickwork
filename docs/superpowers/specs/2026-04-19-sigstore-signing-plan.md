@@ -7,6 +7,21 @@
 [docs/SECURITY.md](../../SECURITY.md) (current unsigned-release caveats + placeholder verify section),
 [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (current build → create-release → PyPI publish flow)
 
+## Decisions (locked 2026-04-19)
+
+After review on PR #97 the maintainer confirmed:
+
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Which Sigstore action? | **A** — `sigstore/gh-action-sigstore-python` |
+| Q2 | Where in the workflow? | **A** — inside `build`, immediately after `uv build` |
+| Q3 | How are bundles published? | **B** — Release assets + PyPI attestations |
+| Q4 | Tag signing? | **B** (Path 1) — dedicated **workflow-only** GPG key uploaded to the maintainer's GitHub account (for the Verified badge) and stored passwordless as a secret in the `pypi` environment. NOT the maintainer's personal key. Revocable if it ever leaks without touching the maintainer's identity key. |
+| Q5 | Verification docs placement? | **C** — short summary in `docs/SECURITY.md` + detailed `docs/VERIFYING.md` |
+| Q6 | Retroactive signing? | **A** — first signed release is 1.0.1, no retroactive signing of 1.0.0 or 0.2.x |
+
+Implementation waves below assume these decisions are final.
+
 ## Goal
 
 Add Sigstore keyless signing for clickwork's release artifacts (wheel + sdist), publish the resulting `.sigstore` bundles alongside the artifacts on the GitHub Release, move git-tag signing from the maintainer's local GPG key into the release workflow, and document verification commands in `docs/SECURITY.md` so downstream consumers can prove provenance of every 1.0.x release onward.
@@ -120,19 +135,31 @@ Assuming maintainer picks **Q1=A, Q2=A, Q3=B, Q4=B (or hybrid A+B), Q5=C, Q6=A**
 
 ### Wave 2 (PR #b): Workflow-driven tag signing
 
-If Q4=B: generate a GPG key, store public half on GitHub user account (for the Verified badge), store private half as secret in the `pypi` environment. Add a pre-build step that imports the key and re-tags the current ref with `git tag -s`. Subtle issue: the workflow sees the tag that fired it, not a mutable HEAD — retagging during the same workflow run is awkward. Alternative: a separate `tag-signing` workflow that runs on `workflow_dispatch`, signs a future tag in advance.
+Q4 is decided (**B, Path 1** — workflow-only GPG key). Implementation:
 
-If Q4=A: add `cosign-installer` action, `cosign sign-blob` against the tag SHA, upload result as a Rekor entry. Simpler, no secrets to manage, but no Verified badge.
+**Prerequisite (one-time, before wave runs):**
 
-If Q4=hybrid: just do A for the workflow (cosign blob signing) and keep the CONTRIBUTING runbook for the maintainer's local-GPG tag signing. Simplest landing for 1.0.1 while leaving the B path open for later.
+1. Generate a new GPG key specifically for workflow signing. Identity: something like `clickwork-release-bot <release@clickwork.example>` or similar — clearly NOT the maintainer's personal identity. Passwordless.
+2. Upload the public half to the maintainer's GitHub account (`Settings → SSH and GPG keys → New GPG key`) so signatures on tags show the Verified badge against the maintainer's account.
+3. Store the private half as an encrypted secret in the `pypi` environment (we already gate PyPI publish on that environment for approval). Suggest secret names: `RELEASE_GPG_PRIVATE_KEY` (armored private block), `RELEASE_GPG_KEY_ID` (long-form fingerprint for `git config user.signingkey`).
+4. Document the rotation cadence in `CONTRIBUTING.md` — suggested: rotate yearly or on any suspected exposure, with revocation publishing a new `.asc` to both GitHub and the secret.
 
-**Target diff size:** depends on Q4 — hybrid is ~15 lines, full B is ~60 lines + secrets-setup documentation.
+**Workflow changes:**
+
+Because the workflow is triggered by a tag push, it cannot re-tag the commit it already ran on. Two options:
+
+- **B.1 Pre-release workflow**: separate `.github/workflows/sign-release-tag.yml` fired via `workflow_dispatch` (or on release-PR merge) that signs a planned vX.Y.Z tag BEFORE the maintainer pushes it. Maintainer merges the release PR → workflow dispatch → workflow creates the signed tag → `publish.yml` fires on the tag push as usual. This keeps the existing `publish.yml` untouched.
+- **B.2 Force-resign in publish.yml**: riskier — delete and recreate the tag during the run. Generally discouraged because it re-triggers `publish.yml` in a loop unless carefully guarded.
+
+**Recommendation:** B.1. New workflow, clean boundary with `publish.yml`, no recursive-trigger risk.
+
+**Target diff size:** ~80 lines new workflow (`sign-release-tag.yml`) + ~30 lines secrets-setup documentation in `CONTRIBUTING.md` + ~20 lines rotation runbook.
 
 ### Wave 3 (PR #c): Verification docs
 
 Assuming Q5=C:
 
-- `docs/VERIFYING.md`: concrete commands for (1) verifying PyPI attestations for a downloaded wheel/sdist — as of early 2026 this is a manual step via the `pypi-attestations` CLI or `sigstore-python`; pip's own auto-verification of PyPI attestations is not yet GA, so we document the manual flow until it is, (2) verifying a downloaded wheel/sdist against its Release-attached `.sigstore` bundle via `sigstore verify identity --cert-identity <workflow-identity> --cert-oidc-issuer https://token.actions.githubusercontent.com`, (3) verifying the tag via `git verify-tag` (if Q4=B) or the Rekor transparency-log entry (if Q4=A or hybrid).
+- `docs/VERIFYING.md`: concrete commands for (1) verifying PyPI attestations for a downloaded wheel/sdist — as of early 2026 this is a manual step via the `pypi-attestations` CLI or `sigstore-python`; pip's own auto-verification of PyPI attestations is not yet GA, so we document the manual flow until it is, (2) verifying a downloaded wheel/sdist against its Release-attached `.sigstore` bundle via `sigstore verify identity --cert-identity <workflow-identity> --cert-oidc-issuer https://token.actions.githubusercontent.com`, (3) verifying the tag via `git verify-tag vX.Y.Z` (works because Q4=B produces a real GPG-signed tag from the dedicated release-signing key, with the public half on the maintainer's GitHub account).
 - Update `docs/SECURITY.md` "Verifying release artifacts" section to a short summary + link to `VERIFYING.md`.
 - Cross-link from `CONTRIBUTING.md`'s "Cutting a release" runbook.
 
