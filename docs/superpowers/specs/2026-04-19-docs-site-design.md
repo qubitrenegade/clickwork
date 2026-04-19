@@ -129,6 +129,11 @@ exclude_docs: |
   ARCHITECTURE.md
   API_POLICY.md
   LLM_REFERENCE.md
+  # Internal planning + spec artifacts — live under docs/ for proximity to
+  # the work they describe, not for publication. Without these excludes,
+  # `mkdocs build --strict` fails on them as orphan pages.
+  plans/**
+  superpowers/**
 
 theme:
   name: material
@@ -144,6 +149,20 @@ theme:
       scheme: default
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
 
 plugins:
   - search
@@ -206,6 +225,7 @@ on:
       - '.vale/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      - 'src/**'
   pull_request:
     paths:
       - 'docs/**'
@@ -222,6 +242,7 @@ on:
 - `uv.lock` is included so a lockfile change re-runs CI.
 - `.github/workflows/docs.yml` is included so edits to CI config itself re-trigger the job.
 - `.markdownlint.yaml`, `.vale.ini`, and `.vale/**` are included so rule changes re-run lint output on the existing corpus.
+- `src/**` is included **only in the `push` trigger (main-branch merges), not `pull_request`**. `reference/api.md` is auto-generated from `src/` via `mkdocstrings`, so a code-only merge to main must re-deploy the site to keep the API reference in sync. Leaving it out of the PR trigger preserves the "code-only PRs don't burn docs CI" intent; any docstring-rendering breakage surfaces on main immediately because the push trigger will rebuild.
 
 Jobs:
 
