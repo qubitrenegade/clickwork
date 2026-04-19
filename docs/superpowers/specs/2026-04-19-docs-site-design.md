@@ -107,9 +107,9 @@ docs = [
 ```
 
 Local authoring: `uv sync --group docs && uv run mkdocs serve`.
-CI: identical, followed by `uv run mkdocs build --strict`.
+CI: `uv sync --frozen --group docs`, then `uv run mkdocs build --strict` (see the CI section for why `--frozen` specifically).
 
-No parallel `requirements-docs.txt` — the dependency group is the single source of truth. CI pins via the existing `uv.lock`.
+No parallel `requirements-docs.txt` — the dependency group is the single source of truth. CI pins via the committed `uv.lock` and `--frozen` makes stale-lock a hard failure.
 
 ### `mkdocs.yml` structure (outline)
 
@@ -219,7 +219,7 @@ on:
 Jobs:
 
 1. **`build`** (runs on PR and main):
-   - `uv sync --group docs`
+   - `uv sync --frozen --group docs` (`--frozen` matches `.github/workflows/bench.yml` and ensures CI fails on a stale lockfile rather than silently re-resolving).
    - `uv run mkdocs build --strict` (broken internal links, missing nav entries, orphaned pages → fail).
    - `markdownlint-cli2 'docs/**/*.md'` with a checked-in `.markdownlint.yaml` config. Blocking.
    - Vale via `errata-ai/vale-action@v2` with `fail_on_error: false`. Advisory annotations only.
@@ -268,7 +268,7 @@ Every other file in the nav is an existing doc moved into its Diátaxis slot.
 - Redirect stubs exist for every moved file so inbound links from outside the repo still resolve.
 - `llms.txt` is reachable at `https://qubitrenegade.github.io/clickwork/llms.txt`.
 - Nav surfaces Home plus the four Diátaxis sections in the order Home → Tutorials → How-To → Explanation → Reference.
-- No code-only PR triggers the docs workflow; no docs-only PR triggers the code test matrix.
+- No code-only PR triggers the docs workflow. (Filtering the other direction — preventing docs-only PRs from triggering the existing `test.yml` / `lint.yml` / `types.yml` — is out of scope for this initiative; it would require editing those workflows and is a separate follow-up.)
 
 ## Open questions
 
