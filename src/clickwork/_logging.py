@@ -115,6 +115,35 @@ def setup_logging(
     The public signature is unchanged from 0.2, so 0.2-era call sites
     continue to work -- only the side effects differ.
 
+    On repeated invocation (issue #60 item 1): ``setup_logging()`` is
+    idempotent with respect to handler count and live with respect to
+    level. Calling it a second (or Nth) time in the same process --
+    which happens routinely in test suites that exercise a CLI via
+    ``CliRunner``, and in long-running hosts that import a clickwork CLI
+    module more than once -- will NEVER stack a duplicate
+    clickwork-owned handler. The exact behaviour depends on which of
+    the two branches is active:
+
+    - **No host handler configured (standalone CLI mode).** The function
+      finds any clickwork-owned ``StreamHandler`` it previously attached
+      (via the ``_clickwork_owned`` marker attribute) and reuses it in
+      place -- re-binding its stream to the current ``sys.stderr`` (for
+      pytest-capture-style stream swaps) and updating its level/format.
+    - **Host root handler configured.** The function actively
+      ``removeHandler()``-s any clickwork-owned ``StreamHandler`` left
+      over from an earlier standalone-mode call, so records propagate
+      up to the host's root handler only. This is the path that gets
+      hit when code does
+      ``setup_logging(); logging.basicConfig(); setup_logging()`` --
+      without the eviction that sequence would emit each record twice.
+
+    In both branches the level on the logger is always updated, so
+    ``setup_logging(verbose=0)`` followed by ``setup_logging(verbose=2)``
+    correctly switches output from WARNING to DEBUG regardless of which
+    mode is live. This combination (at-most-one clickwork-owned
+    handler, live level updates) is part of the 1.0 public contract;
+    see ``docs/API_POLICY.md`` for the SemVer implications.
+
     Args:
         verbose: How many -v flags were passed (0, 1, or 2+).
         quiet: Whether --quiet was passed. Overrides verbose.
