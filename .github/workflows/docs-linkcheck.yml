@@ -22,10 +22,38 @@ jobs:
           args: --verbose --no-progress 'docs/**/*.md' README.md
           fail: false
 
-      - name: Create issue on failure
+      - name: Look for an existing open link-check issue
+        # Dedup guard: if a prior week already filed an issue for
+        # persistently-broken links, don't open another one. The title is
+        # the exact dedup key. The matching issue (if any) is captured
+        # so the next step can comment on it instead of creating a new
+        # issue.
         if: steps.lychee.outputs.exit_code != 0
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          num=$(gh issue list \
+            --repo "${{ github.repository }}" \
+            --state open \
+            --label linkcheck \
+            --search 'in:title "Docs link-check found broken links"' \
+            --json number --jq '.[0].number // empty')
+          echo "issue_number=$num" >> "$GITHUB_OUTPUT"
+
+      - name: Create issue on failure (only if no open issue exists)
+        if: steps.lychee.outputs.exit_code != 0 && steps.existing.outputs.issue_number == ''
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: "Docs link-check found broken links"
           content-filepath: ./lychee/out.md
           labels: docs, linkcheck
+
+      - name: Comment on existing issue instead
+        if: steps.lychee.outputs.exit_code != 0 && steps.existing.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment "${{ steps.existing.outputs.issue_number }}" \
+            --repo "${{ github.repository }}" \
+            --body-file ./lychee/out.md
