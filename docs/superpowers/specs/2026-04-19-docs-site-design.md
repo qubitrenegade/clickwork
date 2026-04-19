@@ -82,9 +82,9 @@ Reference        (information-oriented)
 Moved files risk breaking two surfaces: the deployed site (for users landing on the old URL) and the GitHub-native markdown rendering (for users who have bookmarked a file path in the repo). These are handled separately.
 
 - **Deployed site.** The [`mkdocs-redirects`](https://github.com/mkdocs/mkdocs-redirects) plugin (a third-party plugin, not bundled with mkdocs-material) configures client-side redirects via its `redirect_maps` key in `mkdocs.yml`. Landing on `/GUIDE/` will auto-redirect to `/reference/guide/`.
-- **GitHub-native view.** At each old path we leave a one-line markdown stub — `> This page has moved to [reference/guide.md](reference/guide.md).` — so anyone hitting the file on github.com still gets a working link. These stubs live at the repo root-relative `docs/` paths (e.g. `docs/GUIDE.md`) and are excluded from the mkdocs nav so they don't show up on the deployed site.
+- **GitHub-native view.** At each old path we leave a one-line markdown stub — `> This page has moved to [reference/guide.md](reference/guide.md).` — so anyone hitting the file on github.com still gets a working link. These stubs live at the repo root-relative `docs/` paths (e.g. `docs/GUIDE.md`). They must be excluded from the mkdocs build via [`exclude_docs`](https://www.mkdocs.org/user-guide/configuration/#exclude_docs) in `mkdocs.yml`, because omitting a file from `nav` alone still publishes it as an orphan page — which would collide with the `mkdocs-redirects` entry pointing at the same URL.
 
-The pair of surfaces costs one plugin entry plus one stub file per moved doc.
+The pair of surfaces costs one plugin entry, one stub file per moved doc, and a single `exclude_docs` block listing every stub.
 
 ## Technical stack
 
@@ -119,6 +119,16 @@ site_url: https://qubitrenegade.github.io/clickwork/
 repo_url: https://github.com/qubitrenegade/clickwork
 repo_name: qubitrenegade/clickwork
 edit_uri: edit/main/docs/
+
+exclude_docs: |
+  # GitHub-native stubs for moved files — not published on the site.
+  GUIDE.md
+  PLUGINS.md
+  SECURITY.md
+  MIGRATING.md
+  ARCHITECTURE.md
+  API_POLICY.md
+  LLM_REFERENCE.md
 
 theme:
   name: material
@@ -257,7 +267,7 @@ Every other file in the nav is an existing doc moved into its Diátaxis slot.
 - All internal links in `docs/` resolve both on GitHub (the raw-markdown rendering) and on the deployed site.
 - Redirect stubs exist for every moved file so inbound links from outside the repo still resolve.
 - `llms.txt` is reachable at `https://qubitrenegade.github.io/clickwork/llms.txt`.
-- Nav surfaces all six Diátaxis sections in the order Home → Tutorials → How-To → Explanation → Reference.
+- Nav surfaces Home plus the four Diátaxis sections in the order Home → Tutorials → How-To → Explanation → Reference.
 - No code-only PR triggers the docs workflow; no docs-only PR triggers the code test matrix.
 
 ## Open questions
