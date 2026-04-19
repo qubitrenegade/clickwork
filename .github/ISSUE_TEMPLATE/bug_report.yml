@@ -46,7 +46,7 @@ body:
     attributes:
       label: clickwork version
       description: Output of `python -c "import clickwork; print(clickwork.__version__)"`
-      placeholder: "0.1.0"
+      placeholder: "1.0.0"
     validations:
       required: true
 
