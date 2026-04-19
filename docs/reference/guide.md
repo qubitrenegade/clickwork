@@ -368,7 +368,7 @@ declared type automatically. See
 [Environment Variable Types](#environment-variable-types) below for
 the coercion rules -- bool parsing in particular has a fixed
 allowlist that avoids the classic `bool("false") == True`
-foot-cannon.
+footgun.
 
 ### Config Schema
 
@@ -452,7 +452,7 @@ env-var reader) means:
   marks the key as `secret: True`).
 - The coercion table is small, stdlib-only, and deliberately
   explicit about bools so Python's classic `bool("false") == True`
-  foot-cannon never bites you.
+  footgun never bites you.
 
 The supported `type` values and their string-source coercion rules:
 

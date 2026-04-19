@@ -57,7 +57,7 @@ The coercion table (stdlib-only, no new dependencies):
   `True`; `false`, `0`, `no`, `off` become `False`. Anything else (for
   example `maybe`) raises `ConfigError`. The allowlist is deliberate:
   Python's built-in `bool("false")` returns `True`, which is a
-  well-known foot-cannon.
+  well-known footgun.
 - `str`: unchanged.
 
 There is also a related tightening worth knowing about even though it is
