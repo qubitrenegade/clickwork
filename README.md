@@ -1,21 +1,24 @@
 # clickwork
 
-[![PyPI](https://img.shields.io/pypi/v/clickwork.svg)](https://pypi.org/project/clickwork/) [![Python Versions](https://img.shields.io/pypi/pyversions/clickwork.svg)](https://pypi.org/project/clickwork/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/qubitrenegade/clickwork/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/clickwork.svg)](https://pypi.org/project/clickwork/) [![Python Versions](https://img.shields.io/pypi/pyversions/clickwork.svg)](https://pypi.org/project/clickwork/) [![Docs](https://img.shields.io/badge/docs-qubitrenegade.github.io%2Fclickwork-blue)](https://qubitrenegade.github.io/clickwork/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/qubitrenegade/clickwork/blob/main/LICENSE)
+
+**Docs:** <https://qubitrenegade.github.io/clickwork/> — full tutorials, how-to recipes, API reference, and LLM-oriented reference.
 
 Reusable CLI framework for project automation. Build project-specific CLIs
 with plugin discovery, layered config, subprocess helpers, and common
 utilities -- so your commands focus on business logic, not boilerplate.
 
-> **Status:** 1.0 stable. The public API is documented in
-> [docs/API_POLICY.md](docs/API_POLICY.md) and covered by SemVer:
-> breaking changes require a major bump and removals carry a one-minor
-> deprecation runway. All features are driven by real
+> **Status:** 1.0 stable. The public API is documented in the
+> [API Policy](https://qubitrenegade.github.io/clickwork/explanation/api-policy/)
+> and covered by SemVer: breaking changes require a major bump and
+> removals carry a one-minor deprecation runway. All features are
+> driven by real
 > [orbit-admin](https://github.com/qubitrenegade/qbrd-orbit-widener)
 > needs -- no speculative abstractions.
 
-Upgrading from 0.2.x? See
-[docs/MIGRATING.md](docs/MIGRATING.md) for the complete
-before/after diff.
+Upgrading from 0.2.x? See the
+[Migrating guide](https://qubitrenegade.github.io/clickwork/reference/migrating/)
+for the complete before/after diff.
 
 ## Installation
 
@@ -92,29 +95,57 @@ working example with subcommand groups.
 
 ## Documentation
 
-- **[Guide](docs/GUIDE.md)** -- Step-by-step tutorial: building a CLI,
-  adding config, using subprocess helpers, distributing as a package,
-  testing your commands.
-- **[Plugins](docs/PLUGINS.md)** -- 15-minute walkthrough for shipping
-  a pip-installable plugin via the `clickwork.commands` entry-point
-  group.
-- **[Architecture](docs/ARCHITECTURE.md)** -- Design decisions, module
-  responsibilities, security model, and the reasoning behind non-obvious
-  choices.
-- **[Security](docs/SECURITY.md)** -- What clickwork defends against,
-  what it leaves to the CLI author, threat model assumptions, and how
-  to report vulnerabilities.
-- **[Migrating 0.2.x to 1.0](docs/MIGRATING.md)** -- Breaking changes,
-  new opt-in surfaces, and concrete before/after diffs for upgraders.
-- **[API Policy](docs/API_POLICY.md)** -- The 1.0 public surface:
-  which symbols are covered by SemVer, deprecation runway, supported
-  Python and Click ranges.
-- **[LLM Reference](docs/LLM_REFERENCE.md)** -- Compact, LLM-oriented
-  cheat sheet of the public surface with a "Common Footguns" section
-  (patching prereqs, `ClickException` routing, CliRunner streams,
-  secrets-in-argv, `bash -c` risks, etc.). Useful whether you're an
-  AI agent generating clickwork code or a human skimming for
-  gotchas.
+The full site lives at
+**<https://qubitrenegade.github.io/clickwork/>**. Highlights:
+
+### Start here
+
+- **[Quickstart](https://qubitrenegade.github.io/clickwork/tutorials/quickstart/)**
+  -- install to first working command in about 5 minutes.
+- **[Practical Walkthrough](https://qubitrenegade.github.io/clickwork/tutorials/walkthrough/)**
+  -- build a realistic CLI with a local command, an installed plugin,
+  and a publishable wheel.
+
+### Cookbook
+
+- **[How-To recipes](https://qubitrenegade.github.io/clickwork/how-to/)**
+  -- tame an out-of-control script directory, add a command, write a
+  plugin, migrate from argparse.
+
+### Reference
+
+- **[User Guide](https://qubitrenegade.github.io/clickwork/reference/guide/)**
+  -- Step-by-step tutorial: building a CLI, adding config, using
+  subprocess helpers, distributing as a package, testing your
+  commands.
+- **[Plugins](https://qubitrenegade.github.io/clickwork/reference/plugins/)**
+  -- 15-minute walkthrough for shipping a pip-installable plugin via
+  the `clickwork.commands` entry-point group.
+- **[Security](https://qubitrenegade.github.io/clickwork/reference/security/)**
+  -- What clickwork defends against, what it leaves to the CLI
+  author, threat model assumptions, and how to report
+  vulnerabilities.
+- **[Migrating 0.2.x to 1.0](https://qubitrenegade.github.io/clickwork/reference/migrating/)**
+  -- Breaking changes, new opt-in surfaces, and concrete before/after
+  diffs for upgraders.
+- **[API Reference](https://qubitrenegade.github.io/clickwork/reference/api/)**
+  -- Auto-generated from docstrings.
+- **[LLM Reference](https://qubitrenegade.github.io/clickwork/reference/llm-reference/)**
+  -- Compact, LLM-oriented cheat sheet of the public surface with a
+  "Common Footguns" section. Useful whether you're an AI agent
+  generating clickwork code or a human skimming for gotchas.
+
+### Explanation
+
+- **[Architecture](https://qubitrenegade.github.io/clickwork/explanation/architecture/)**
+  -- Design decisions, module responsibilities, security model, and
+  the reasoning behind non-obvious choices.
+- **[API Policy](https://qubitrenegade.github.io/clickwork/explanation/api-policy/)**
+  -- The 1.0 public surface: which symbols are covered by SemVer,
+  deprecation runway, supported Python and Click ranges.
+- **[Plugin Model](https://qubitrenegade.github.io/clickwork/explanation/plugin-model/)**
+  -- Why entry points, why local files win on collision, and how
+  discovery actually works.
 
 ## Features
 
