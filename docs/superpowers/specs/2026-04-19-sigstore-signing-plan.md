@@ -129,7 +129,7 @@ Q4 is decided (**B, Path 1** — workflow-only GPG key). Implementation:
 
 1. Generate a new GPG key specifically for workflow signing. Identity: something like `clickwork-release-bot <release@clickwork.example>` or similar — clearly NOT the maintainer's personal identity. Passwordless.
 2. Upload the public half to the maintainer's GitHub account (`Settings → SSH and GPG keys → New GPG key`) so signatures on tags show the Verified badge against the maintainer's account.
-3. Store the private half as an encrypted secret in the `pypi` environment (we already gate PyPI publish on that environment for approval). Suggest secret names: `RELEASE_GPG_PRIVATE_KEY` (armored private block), `RELEASE_GPG_KEY_ID` (long-form fingerprint for `git config user.signingkey`).
+3. Store the private half as an encrypted secret in the `pypi` environment (we already gate PyPI publish on that environment for approval). Suggest secret names: `RELEASE_GPG_PRIVATE_KEY` (armored private block), `RELEASE_GPG_FINGERPRINT` (full 40-character fingerprint — NOT a short or long key ID — for `git config user.signingkey`).
 4. Generate a fine-scoped PAT (fine-grained PAT limited to this repo with `contents: write`, or a classic token with `repo` scope) for pushing the signed tag back to origin. Store as `RELEASE_TAG_PUSH_TOKEN` in the same `pypi` environment. See "Gotcha" below for why `GITHUB_TOKEN` alone isn't enough. (Rotate alongside the GPG key.)
 5. Document the rotation cadence in `CONTRIBUTING.md` — suggested: rotate yearly or on any suspected exposure. GPG key revocation publishes a new `.asc` to both GitHub and the secret; PAT rotation is a secret update plus revoking the old PAT in account settings.
 
@@ -150,7 +150,7 @@ Because the workflow is triggered by a tag push, it cannot re-tag the commit it 
 
 **Chosen mitigation: M1.** One more secret (`RELEASE_TAG_PUSH_TOKEN`), no change to `publish.yml`, minimum runbook surface. Rotation pairs with GPG key rotation. Rejected M2 because splitting `publish.yml`'s trigger surface invites subtle divergence between "maintainer pushes tag directly" and "workflow pushed tag" paths; rejected M3 because the GitHub App story is too much operational weight for a one-maintainer repo.
 
-**Target diff size:** ~80 lines new workflow (`sign-release-tag.yml`) + ~30 lines secrets-setup documentation in `CONTRIBUTING.md` (now covers `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_KEY_ID`, and `RELEASE_TAG_PUSH_TOKEN`) + ~20 lines rotation runbook.
+**Target diff size:** ~80 lines new workflow (`sign-release-tag.yml`) + ~30 lines secrets-setup documentation in `CONTRIBUTING.md` (now covers `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_FINGERPRINT`, and `RELEASE_TAG_PUSH_TOKEN`) + ~20 lines rotation runbook.
 
 ### Wave 3 (PR #c): Verification docs
 
