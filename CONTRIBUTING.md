@@ -149,6 +149,44 @@ single-PR cuts that bump version and changelog. If you're unsure
 whether a change you want to make warrants a roadmap-style rollout,
 open an issue and ask.
 
+### Cutting a release
+
+1. Merge a release PR that bumps `version` in `pyproject.toml`,
+   adds the new entry to `CHANGELOG.md`, and (if relevant) updates
+   the trove classifier from Beta -> Production/Stable.
+2. Pull main, then sign and push the version tag. Write a proper
+   tag annotation -- `git show v1.0.0` and the tag detail page on
+   GitHub surface it; the GitHub Release body itself is separately
+   auto-generated from `.github/release.yml` (see step 3):
+
+   ```bash
+   git checkout main && git pull
+   git tag -s vX.Y.Z -m "clickwork X.Y.Z — <headline>"
+   git push origin vX.Y.Z
+   ```
+
+   **GPG on a headless terminal:** if `git tag -s` fails with
+   `gpg failed to sign the data` / `Inappropriate ioctl for
+   device`, `gpg-agent` can't find a TTY for the pinentry
+   passphrase prompt. Fix before retrying:
+
+   ```bash
+   export GPG_TTY=$(tty)
+   ```
+
+   Adding that to your shell rc makes the fix permanent for
+   future releases.
+
+3. The push fires `.github/workflows/publish.yml`: build wheel +
+   sdist, create the GitHub Release with auto-generated notes
+   (from `.github/release.yml` label grouping) and the dist files
+   attached, then publish to PyPI via Trusted Publishing.
+4. The `pypi` environment is gated on maintainer approval. After
+   the tag push, open the Actions tab, find the Publish run, click
+   "Review deployments", approve `pypi`. The publish job finishes
+   shortly after (typically under a minute; longer if runner load
+   or the PyPI upload API is slow).
+
 ## Code of conduct
 
 This project follows the spirit of the
