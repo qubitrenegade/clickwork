@@ -5,6 +5,21 @@
 **Parent issue:** [#62](https://github.com/qubitrenegade/clickwork/issues/62)
 **Relevant docs:** [README.md](../../../README.md) install section, [pyproject.toml](../../../pyproject.toml) (input to `grayskull pypi clickwork`, which produces a first-pass `meta.yaml` we hand-edit; conda-forge itself doesn't auto-generate from pyproject.toml)
 
+## Decisions (locked 2026-04-19)
+
+After review on PR #98 the maintainer confirmed:
+
+| # | Question | Decision |
+|---|---|---|
+| Q1 | When do we submit? | **C** — wait ~2 weeks after 1.0.0 release (starting ~2026-05-03) to confirm no PyPI-side bugs in the wild before entering staged-recipes review |
+| Q2 | Who maintains the feedstock? | **B** — clickwork maintainer + request a community co-maintainer from conda-forge in the staged-recipes PR (standard for first-timers, zero cost, rotates off after a few cycles) |
+| Q3 | Python version range in recipe? | **A** — mirror PyPI pin exactly: `python >=3.11` (no invented upper bound; per-version test confidence stays with GitHub Actions CI) |
+| Q4 | Build system declaration? | **A + B** — `noarch: python` with `{{ PYTHON }} -m pip install .` build script, plus explicit `host:` requirements naming `python`, `pip`, `hatchling` |
+| Q5 | conda install command wording in README? | **A** — one line alongside existing pip/uv commands, no separate subsection |
+| Q6 | Staged-recipes PR shape? | **A + C** — one focused PR, one recipe, use `grayskull pypi clickwork` to generate the initial draft then hand-edit for maintainers list, home URL, etc |
+
+Implementation waves below assume these decisions are final.
+
 ## Goal
 
 Submit a `meta.yaml` recipe for clickwork to the [conda-forge/staged-recipes](https://github.com/conda-forge/staged-recipes) repo, get it merged, and confirm the resulting `clickwork-feedstock` publishes to conda-forge so users can `conda install -c conda-forge clickwork`. Document the install path in the README alongside `pip` / `uv`.
@@ -31,7 +46,9 @@ Submit a `meta.yaml` recipe for clickwork to the [conda-forge/staged-recipes](ht
 5. Update clickwork's README with the conda install command.
 6. First-month follow-up: respond to the first auto-generated feedstock maintenance PR (dep updates, etc) to learn the maintainer workflow.
 
-## Design questions
+## Design questions (resolved — kept for historical context)
+
+The A/B/C alternatives below were the options considered; each has a **Decision:** line pointing at the locked choice from the table above. Left in the doc so future readers can see what was weighed and why.
 
 ### Q1. When do we submit?
 
@@ -39,9 +56,7 @@ Submit a `meta.yaml` recipe for clickwork to the [conda-forge/staged-recipes](ht
 - **B) Wait for 1.0.1** — give Sigstore work (#61) time to land first, so the conda-forge recipe references an already-verified PyPI release. conda-forge bot pulls the sdist from PyPI and verifies against its hash; Sigstore bundles are a separate layer conda-forge doesn't use directly, so there's no hard dependency.
 - **C) Wait 1-2 weeks of real PyPI usage first** — the #62 issue itself says "wait until 1.0 is stable on PyPI (a week or two) before submitting to staged-recipes so we aren't iterating on a moving target inside the conda-forge review process." This matches the issue author's original intent.
 
-**Recommendation:** C per the issue's own guidance. staged-recipes review can take 1-4 weeks; starting too early means the recipe might need republishing to 1.0.1 mid-review if a PyPI-side bug surfaces.
-
-**Open question for maintainer:** C (wait), or push to A/B to get it in sooner?
+**Decision: C.** Per the issue's own guidance. staged-recipes review can take 1-4 weeks; starting too early means the recipe might need republishing to 1.0.1 mid-review if a PyPI-side bug surfaces.
 
 ### Q2. Who maintains the feedstock?
 
@@ -51,9 +66,7 @@ Once staged-recipes merges, conda-forge bot creates `conda-forge/clickwork-feeds
 - **B) clickwork maintainer + a conda-forge "community maintainer"** — conda-forge often assigns one of their own to help with the first few PRs until the project-side maintainer is familiar. Ask for this in the staged-recipes PR.
 - **C) clickwork maintainer + a named backup from elsewhere in our org / collaborators** — requires finding a willing second.
 
-**Recommendation:** B. Standard conda-forge pattern for first-time submitters. The community maintainer rotates off after a few cycles. No commitment burden on another person in our circle.
-
-**Open question for maintainer:** confirm B, or prefer A (solo) / C (named collaborator)?
+**Decision: B.** Standard conda-forge pattern for first-time submitters. The community maintainer is a volunteer from the conda-forge organisation — no hiring, no cost, and no commitment burden on anyone in our circle. They rotate off after a few cycles once the clickwork maintainer is familiar with the feedstock maintenance workflow. Request is made in the staged-recipes PR body (e.g., "Requesting a community co-maintainer per the first-time-submitter convention; `@conda-forge/help-python` tag when appropriate").
 
 ### Q3. Python version range in the recipe?
 
@@ -63,9 +76,7 @@ clickwork requires Python >=3.11 per `pyproject.toml`. conda-forge recipes speci
 - **B) Also cap at a known-good upper bound: `python >=3.11,<3.14`** — conda-forge sometimes asks for an upper bound to prevent unexpected breakage on new Python releases.
 - **C) `python >=3.11` + an explicit test matrix for 3.11, 3.12, 3.13** — mostly symbolic for a `noarch: python` recipe, since noarch builds once on a single Python and relies on import-time compatibility rather than per-version CI.
 
-**Recommendation:** A. Matches PyPI, matches our documented policy, doesn't invent a cap we don't actually have evidence for. For `noarch: python` recipes the feedstock runs the test section once on a single migrator-selected Python — we don't get a free per-version test matrix from conda-forge here. If we want per-version test confidence, that's already our GitHub Actions CI's job on the PyPI side, not the feedstock's.
-
-**Open question for maintainer:** confirm A.
+**Decision: A.** Matches PyPI, matches our documented policy, doesn't invent a cap we don't actually have evidence for. For `noarch: python` recipes the feedstock runs the test section once on a single migrator-selected Python — we don't get a free per-version test matrix from conda-forge here. If we want per-version test confidence, that's already our GitHub Actions CI's job on the PyPI side, not the feedstock's.
 
 ### Q4. Build system declaration?
 
@@ -75,9 +86,7 @@ conda-forge needs to know how to build clickwork. We use `hatchling` via `pyproj
 - **B) Explicit `host:` requirement naming the concrete conda packages: `python`, `pip`, `hatchling`** (these are the actual conda-forge package names for the build toolchain; `python-build-backend` is not a conda package). More explicit; staged-recipes reviewers typically ask for it.
 - **C) `pyproject.toml`-native build via conda-forge's `python-build` helper** — newer pattern, cleaner recipe, but support matrix is narrower.
 
-**Recommendation:** A with B's explicit `host:` list as a safety net. grayskull usually generates A+B by default. Matches what other modern pure-Python packages in staged-recipes look like.
-
-**Open question for maintainer:** confirm A+B, OR if you've seen recent staged-recipes reviewers push to C.
+**Decision: A + B.** `noarch: python` with `{{ PYTHON }} -m pip install .` plus explicit `host:` requirements naming `python`, `pip`, `hatchling`. grayskull generates this shape by default. Matches what other modern pure-Python packages in staged-recipes look like and survives staged-recipes reviewers' typical requests.
 
 ### Q5. conda install command wording in README?
 
@@ -87,9 +96,7 @@ Once the feedstock publishes:
 - **B) Separate subsection for conda** — "## Install via conda" — lets us explain channel pinning and caveats briefly.
 - **C) One-liner in the existing install block + a brief footnote** — progressive disclosure.
 
-**Recommendation:** A. The existing install section is already short and channel-hopping is not something clickwork users need to think about. Less prose = less rot.
-
-**Open question for maintainer:** confirm A.
+**Decision: A.** The existing install section is already short and channel-hopping is not something clickwork users need to think about. Less prose = less rot.
 
 ### Q6. Staged-recipes PR shape?
 
@@ -99,13 +106,11 @@ staged-recipes expects one recipe per PR, with `recipes/<package>/meta.yaml` and
 - **B) Bundle with related-ecosystem packages if we plan to submit more soon.** — not applicable; no other packages in flight.
 - **C) Use `grayskull` to auto-generate first draft, hand-edit minimally.** — grayskull is the conda-forge-recommended tool for turning PyPI metadata into a starting-point recipe. Worth using.
 
-**Recommendation:** A+C. Use grayskull for the initial draft, open one focused PR.
-
-**Open question for maintainer:** confirm this.
+**Decision: A + C.** Use `grayskull pypi clickwork` for the initial draft, hand-edit for maintainers list + home URL + any version-pinning tweaks, open one focused PR against `conda-forge/staged-recipes`.
 
 ## Proposed implementation waves
 
-Assuming maintainer picks **Q1=C, Q2=B, Q3=A, Q4=A+B, Q5=A, Q6=A+C**:
+Based on the locked decisions above — **Q1=C, Q2=B, Q3=A, Q4=A+B, Q5=A, Q6=A+C**:
 
 ### Wave 0 (local prep, no PR on clickwork)
 
