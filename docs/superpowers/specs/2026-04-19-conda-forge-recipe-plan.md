@@ -7,7 +7,7 @@
 
 ## Decisions (locked 2026-04-19)
 
-After review on PR #98 the maintainer confirmed:
+After review on this PR the maintainer confirmed:
 
 | # | Question | Decision |
 |---|---|---|
@@ -131,7 +131,7 @@ Based on the locked decisions above — **Q1=C, Q2=B, Q3=A, Q4=A+B, Q5=A, Q6=A+C
 - Small PR, docs-only.
 - Gated on Wave 1 being fully merged + the feedstock actually publishing (check `https://anaconda.org/conda-forge/clickwork` for a non-404 response).
 
-### Wave 3 (followup, no scheduled PR)
+### Wave 3 (follow-up, no scheduled PR)
 
 - First time the feedstock bot opens a maintenance PR on `clickwork-feedstock` (dep bump, rebuild, etc), the clickwork maintainer should walk through the merge flow once to learn the shape.
 - Document the feedstock maintenance pattern in `docs/superpowers/specs/` or `CONTRIBUTING.md` if it's worth preserving for future maintainers.
