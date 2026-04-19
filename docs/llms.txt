@@ -8,27 +8,27 @@ correctly.
 
 ## Tutorials
 
-- [Quickstart](https://qubitrenegade.github.io/clickwork/tutorials/quickstart/): Install to first working command, five-minute read.
-- [Practical Walkthrough](https://qubitrenegade.github.io/clickwork/tutorials/walkthrough/): Multi-page guided build of a realistic CLI with a local command and an installed plugin.
+- [Quickstart](https://clickwork.readthedocs.io/tutorials/quickstart/): Install to first working command, five-minute read.
+- [Practical Walkthrough](https://clickwork.readthedocs.io/tutorials/walkthrough/): Multi-page guided build of a realistic CLI with a local command and an installed plugin.
 
 ## How-To
 
-- [Tame a script directory](https://qubitrenegade.github.io/clickwork/how-to/tame-a-script-directory/): Convert a pile of utility scripts into one clickwork CLI.
-- [Add a command](https://qubitrenegade.github.io/clickwork/how-to/add-a-command/): Short version for existing clickwork projects.
-- [Write a plugin](https://qubitrenegade.github.io/clickwork/how-to/write-a-plugin/): Entry-point-based plugin authoring.
-- [Migrate from argparse](https://qubitrenegade.github.io/clickwork/how-to/migrate-from-argparse/): Pattern-by-pattern conversion.
+- [Tame a script directory](https://clickwork.readthedocs.io/how-to/tame-a-script-directory/): Convert a pile of utility scripts into one clickwork CLI.
+- [Add a command](https://clickwork.readthedocs.io/how-to/add-a-command/): Short version for existing clickwork projects.
+- [Write a plugin](https://clickwork.readthedocs.io/how-to/write-a-plugin/): Entry-point-based plugin authoring.
+- [Migrate from argparse](https://clickwork.readthedocs.io/how-to/migrate-from-argparse/): Pattern-by-pattern conversion.
 
 ## Reference
 
-- [User Guide](https://qubitrenegade.github.io/clickwork/reference/guide/): Full reference for `create_cli()`, config, process, logging.
-- [Plugins](https://qubitrenegade.github.io/clickwork/reference/plugins/): Entry-point format and discovery rules.
-- [Security](https://qubitrenegade.github.io/clickwork/reference/security/): Threat model and what clickwork does/doesn't defend against.
-- [Migrating 0.x -> 1.0](https://qubitrenegade.github.io/clickwork/reference/migrating/): Breaking changes across the 0.2 -> 1.0 cycle.
-- [API Reference](https://qubitrenegade.github.io/clickwork/reference/api/): Auto-generated from docstrings.
-- [LLM Reference](https://qubitrenegade.github.io/clickwork/reference/llm-reference/): Compact reference designed for use with coding assistants.
+- [User Guide](https://clickwork.readthedocs.io/reference/guide/): Full reference for `create_cli()`, config, process, logging.
+- [Plugins](https://clickwork.readthedocs.io/reference/plugins/): Entry-point format and discovery rules.
+- [Security](https://clickwork.readthedocs.io/reference/security/): Threat model and what clickwork does/doesn't defend against.
+- [Migrating 0.x -> 1.0](https://clickwork.readthedocs.io/reference/migrating/): Breaking changes across the 0.2 -> 1.0 cycle.
+- [API Reference](https://clickwork.readthedocs.io/reference/api/): Auto-generated from docstrings.
+- [LLM Reference](https://clickwork.readthedocs.io/reference/llm-reference/): Compact reference designed for use with coding assistants.
 
 ## Explanation
 
-- [Architecture](https://qubitrenegade.github.io/clickwork/explanation/architecture/): High-level design.
-- [API Policy](https://qubitrenegade.github.io/clickwork/explanation/api-policy/): Public API surface and semver promise.
-- [Plugin Model](https://qubitrenegade.github.io/clickwork/explanation/plugin-model/): Why entry points, why local-wins.
+- [Architecture](https://clickwork.readthedocs.io/explanation/architecture/): High-level design.
+- [API Policy](https://clickwork.readthedocs.io/explanation/api-policy/): Public API surface and semver promise.
+- [Plugin Model](https://clickwork.readthedocs.io/explanation/plugin-model/): Why entry points, why local-wins.

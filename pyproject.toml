@@ -32,7 +32,7 @@ Homepage = "https://github.com/qubitrenegade/clickwork"
 Repository = "https://github.com/qubitrenegade/clickwork"
 Issues = "https://github.com/qubitrenegade/clickwork/issues"
 Changelog = "https://github.com/qubitrenegade/clickwork/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/qubitrenegade/clickwork/blob/main/docs/GUIDE.md"
+Documentation = "https://clickwork.readthedocs.io/"
 
 [project.optional-dependencies]
 dev = [

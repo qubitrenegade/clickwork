@@ -27,17 +27,7 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          # Exclude the deployed docs URL until the account-level
-          # custom-domain redirect is resolved (currently redirects
-          # qubitrenegade.github.io/clickwork -> qubitrenegade.com/
-          # clickwork which 404s). Remove this --exclude once the
-          # redirect is fixed so the linkcheck actually verifies the
-          # published site's own URL.
-          args: >-
-            --verbose
-            --no-progress
-            --exclude 'https://qubitrenegade\.github\.io/clickwork/'
-            'docs/**/*.md' README.md
+          args: --verbose --no-progress 'docs/**/*.md' README.md
           fail: false
 
       - name: Look for an existing open link-check issue
