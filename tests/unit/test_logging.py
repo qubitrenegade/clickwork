@@ -460,6 +460,16 @@ class TestSetupLoggingReinvocationContract:
         host's root handler. Calling ``setup_logging()`` a second time
         in this state must NOT flip-flop -- it must stay at zero
         clickwork-owned StreamHandlers.
+
+        Also asserts the "live level update" half of the re-invocation
+        contract holds under host-configured root: the named logger's
+        level must reflect the SECOND call's verbosity, so
+        ``setup_logging(verbose=0)`` then ``setup_logging(verbose=1)``
+        leaves the logger at INFO even though no handler is owned.
+        Without this assertion the test would pass if a future
+        refactor returned early before ``logger.setLevel`` under the
+        host-configured branch -- a silent behaviour change that
+        breaks the 1.0 contract.
         """
         # Install a fake "host" root handler so ``_host_root_is_configured()``
         # returns True.
@@ -483,6 +493,15 @@ class TestSetupLoggingReinvocationContract:
         assert owned_streams == [], (
             "host-configured re-invocation must not attach a "
             f"clickwork-owned StreamHandler; got: {owned_streams}"
+        )
+        # Live level update: second call was ``verbose=1`` -> INFO.
+        # verbose=0 would have left it at WARNING; if the level doesn't
+        # actually update under host-configured root, this assertion
+        # catches the regression.
+        assert logger.level == logging.INFO, (
+            "host-configured re-invocation must still update the logger's "
+            f"level on the second call; expected INFO (verbose=1), got "
+            f"{logging.getLevelName(logger.level)} ({logger.level})"
         )
 
     def test_reinvocation_evicts_stream_handler_when_host_configures_after(self, reset_logging):
