@@ -242,7 +242,7 @@ on:
 - `uv.lock` is included so a lockfile change re-runs CI.
 - `.github/workflows/docs.yml` is included so edits to CI config itself re-trigger the job.
 - `.markdownlint.yaml`, `.vale.ini`, and `.vale/**` are included so rule changes re-run lint output on the existing corpus.
-- `src/**` is included **only in the `push` trigger (main-branch merges), not `pull_request`**. `reference/api.md` is auto-generated from `src/` via `mkdocstrings`, so a code-only merge to main must re-deploy the site to keep the API reference in sync. Leaving it out of the PR trigger preserves the "code-only PRs don't burn docs CI" intent; any docstring-rendering breakage surfaces on main immediately because the push trigger will rebuild.
+- `src/**` is included **only in the `push` trigger (main-branch merges), not `pull_request`**. `reference/api.md` is auto-generated from `src/` via `mkdocstrings`, so a code-only merge to main must re-deploy the site to keep the API reference in sync. Leaving `src/**` out of the `pull_request` trigger keeps the PR-event behavior we want — a code-only PR does not run docs CI. Code-only *merges to main* do run the docs workflow by design, because that is the moment the deployed API reference would otherwise go stale; any docstring-rendering breakage surfaces on main immediately because the push trigger will rebuild.
 
 Jobs:
 
@@ -297,7 +297,7 @@ Every other file in the nav is an existing doc moved into its Diátaxis slot.
 - Redirect stubs exist for every moved file so inbound links from outside the repo still resolve.
 - `llms.txt` is reachable at `https://qubitrenegade.github.io/clickwork/llms.txt`.
 - Nav surfaces Home plus the four Diátaxis sections in the order Home → Tutorials → How-To → Explanation → Reference.
-- No code-only PR triggers the docs workflow. (Filtering the other direction — preventing docs-only PRs from triggering the existing `test.yml` / `lint.yml` / `types.yml` — is out of scope for this initiative; it would require editing those workflows and is a separate follow-up.)
+- No code-only pull request event triggers the docs workflow. (Code-only merges *to main* do trigger the workflow by design, to redeploy the `mkdocstrings`-generated API reference.) Filtering the other direction — preventing docs-only PRs from triggering the existing `test.yml` / `lint.yml` / `types.yml` — is out of scope for this initiative; it would require editing those workflows and is a separate follow-up.
 
 ## Open questions
 
