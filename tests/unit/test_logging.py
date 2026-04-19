@@ -53,6 +53,7 @@ def reset_logging():
         "test_propagate",
         "test_no_dup",
         "test_standalone",
+        "test_transition",
     ]
     snapshots = []
     for name in logger_names:
@@ -482,4 +483,64 @@ class TestSetupLoggingReinvocationContract:
         assert owned_streams == [], (
             "host-configured re-invocation must not attach a "
             f"clickwork-owned StreamHandler; got: {owned_streams}"
+        )
+
+    def test_reinvocation_evicts_stream_handler_when_host_configures_after(self, reset_logging):
+        """Bare-root ``setup_logging()`` then host ``basicConfig``; second
+        ``setup_logging()`` must evict the clickwork stream handler.
+
+        This is the transition path Copilot flagged on PR #89 that the
+        earlier test_reinvocation_with_host_configured_keeps_no_stream_handler
+        does not exercise: the ``_clickwork_owned`` handler was already
+        attached when the first call ran under a bare root, and the
+        second call needs to ``removeHandler`` it because the host has
+        since taken responsibility for root-level output.
+
+        Without the eviction, records propagate to the host's root AND
+        get printed by the now-stale clickwork stream handler, so the
+        operator sees each line twice. That was the original duplicate-
+        output bug from #43; this test pins it stays fixed across
+        re-invocation.
+        """
+        # Reset root handlers -- see the sibling test for why pytest's
+        # default handlers need to come off first.
+        root = logging.getLogger()
+        root.handlers = []
+
+        from clickwork._logging import setup_logging
+
+        # 1. Bare root: first call attaches a clickwork-owned StreamHandler.
+        setup_logging(verbose=0, quiet=False, name="test_transition")
+        logger = logging.getLogger("test_transition")
+        owned_before_host = [
+            h
+            for h in logger.handlers
+            if getattr(h, "_clickwork_owned", False)
+            and isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.NullHandler)
+        ]
+        assert len(owned_before_host) == 1, (
+            "bare-root setup_logging must attach exactly one clickwork-owned "
+            f"StreamHandler on first call; got {owned_before_host}"
+        )
+
+        # 2. Host takes over root (simulating a later ``basicConfig()``
+        # or a framework wiring up logging after clickwork imported).
+        host_buffer = io.StringIO()
+        root.addHandler(logging.StreamHandler(host_buffer))
+
+        # 3. Second call must notice the host is now configured and
+        # evict the clickwork-owned StreamHandler left over from step 1.
+        setup_logging(verbose=0, quiet=False, name="test_transition")
+        owned_after_host = [
+            h
+            for h in logger.handlers
+            if getattr(h, "_clickwork_owned", False)
+            and isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.NullHandler)
+        ]
+        assert owned_after_host == [], (
+            "re-invocation under a host that configured root AFTER the "
+            "first setup_logging must evict the stale clickwork-owned "
+            f"StreamHandler; got {owned_after_host}"
         )
