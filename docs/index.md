@@ -22,16 +22,17 @@ Requires Python 3.11+.
 
 === "New here"
 
-    A guided Quickstart and a multi-page practical Walkthrough are
-    landing in the next docs PR. Until then, start with the
-    [User Guide](reference/guide.md) for a single-page tour.
+    Start with the **[Quickstart](tutorials/quickstart.md)** — install
+    to first working command in about 5 minutes. Then the
+    **[Practical Walkthrough](tutorials/walkthrough/index.md)** takes
+    you through building a realistic small CLI with a local command
+    and an installed plugin.
 
 === "I know what I want to do"
 
-    Task-oriented How-To recipes are landing in the next docs PR. For
-    now, the [User Guide](reference/guide.md) has examples inline and
-    the [Plugin reference](reference/plugins.md) covers plugin
-    authoring.
+    The **[How-To](how-to/index.md)** section has recipes for common
+    tasks — taming an out-of-control script dir, adding a command,
+    writing a plugin, migrating from argparse.
 
 === "I need to look something up"
 
