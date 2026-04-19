@@ -154,8 +154,10 @@ open an issue and ask.
 1. Merge a release PR that bumps `version` in `pyproject.toml`,
    adds the new entry to `CHANGELOG.md`, and (if relevant) updates
    the trove classifier from Beta -> Production/Stable.
-2. Pull main, then sign and push the version tag. Include an
-   annotation so the GitHub Release body reads well:
+2. Pull main, then sign and push the version tag. Write a proper
+   tag annotation -- `git show v1.0.0` and the tag detail page on
+   GitHub surface it; the GitHub Release body itself is separately
+   auto-generated from `.github/release.yml` (see step 3):
 
    ```bash
    git checkout main && git pull
@@ -172,8 +174,8 @@ open an issue and ask.
    export GPG_TTY=$(tty)
    ```
 
-   Adding that to your shell rc makes the problem permanent-fixed
-   for future releases.
+   Adding that to your shell rc makes the fix permanent for
+   future releases.
 
 3. The push fires `.github/workflows/publish.yml`: build wheel +
    sdist, create the GitHub Release with auto-generated notes
@@ -182,7 +184,8 @@ open an issue and ask.
 4. The `pypi` environment is gated on maintainer approval. After
    the tag push, open the Actions tab, find the Publish run, click
    "Review deployments", approve `pypi`. The publish job finishes
-   within ~30s.
+   shortly after (typically under a minute; longer if runner load
+   or the PyPI upload API is slow).
 
 ## Code of conduct
 
