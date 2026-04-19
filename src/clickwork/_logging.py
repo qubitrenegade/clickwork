@@ -115,6 +115,23 @@ def setup_logging(
     The public signature is unchanged from 0.2, so 0.2-era call sites
     continue to work -- only the side effects differ.
 
+    On repeated invocation (issue #60 item 1): ``setup_logging()`` is
+    idempotent with respect to handler attachment and live with respect
+    to level. Calling it a second (or Nth) time in the same process --
+    which happens routinely in test suites that exercise a CLI via
+    ``CliRunner``, and in long-running hosts that import a clickwork CLI
+    module more than once -- will NEVER stack a duplicate
+    clickwork-owned handler. Instead, the function finds any existing
+    handler it previously attached via the ``_clickwork_owned`` marker
+    attribute and reuses it in place. The second call IS still
+    meaningful, not a no-op: it updates the verbosity level on both the
+    logger and the clickwork-owned handler, so
+    ``setup_logging(verbose=0)`` followed by ``setup_logging(verbose=2)``
+    correctly switches output from WARNING to DEBUG. This combination
+    (idempotent handler identity, live level updates) is part of the 1.0
+    public contract; see ``docs/API_POLICY.md`` for the SemVer
+    implications.
+
     Args:
         verbose: How many -v flags were passed (0, 1, or 2+).
         quiet: Whether --quiet was passed. Overrides verbose.

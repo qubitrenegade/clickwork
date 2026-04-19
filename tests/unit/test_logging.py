@@ -344,3 +344,142 @@ class TestHostPreservingBehavior:
         )
         # Final level should reflect the LAST call (-v -> INFO).
         assert owned[0].level == logging.INFO
+
+
+class TestSetupLoggingReinvocationContract:
+    """Pin the public re-invocation contract for ``setup_logging()`` (issue #60 item 1).
+
+    The scenarios this class targets come up in the wild more often than
+    they look:
+
+    - **Test suites** that exercise a CLI by calling its entry-point
+      function in-process multiple times (pytest + Click's ``CliRunner``
+      is the canonical example). Each invocation re-runs
+      ``setup_logging()``.
+    - **Long-running hosts** that import a clickwork CLI module for its
+      public API (e.g. a REPL, a notebook, or a supervisor process) and
+      may import/reload it more than once in the lifetime of the
+      interpreter.
+
+    The contract ``TestSetupLoggingReinvocationContract`` pins:
+
+    1. **Handler identity is idempotent.** Calling ``setup_logging()``
+       again never stacks a second clickwork-owned handler on top of the
+       first. The count stays at exactly one, whether the second call is
+       made with identical arguments or with different verbosity.
+    2. **Level is live-updated.** A second call with a different
+       ``verbose`` / ``quiet`` argument UPDATES the level on both the
+       logger and its clickwork-owned handler -- it is NOT a no-op. This
+       is the behavior CLI users expect (``my-tool -v subcommand``
+       followed by ``my-tool -vv subcommand`` from the same Python
+       process should reflect the second verbosity).
+
+    Changing either half of this contract is a SemVer major bump per
+    ``docs/API_POLICY.md``.
+    """
+
+    def test_same_args_twice_keeps_single_handler(self, reset_logging):
+        """Calling ``setup_logging`` twice with the same args keeps exactly one handler.
+
+        This is the canonical test-harness scenario: a ``CliRunner``
+        invokes the CLI entry point, which calls ``setup_logging()``,
+        and then the same test file invokes the entry point a second
+        time in the same process. The second call must not stack a
+        duplicate handler -- if it did, every subsequent log record
+        would emit twice, which is exactly the double-output bug #43
+        fixed for the host-preserving case.
+        """
+        # Bare root simulates "no host logging configured", which is the
+        # branch that actually attaches a StreamHandler. (The
+        # host-configured branch is covered in
+        # ``TestHostPreservingBehavior`` above.)
+        root = logging.getLogger()
+        root.handlers = []
+
+        from clickwork._logging import setup_logging
+
+        # First call: attach the clickwork-owned StreamHandler.
+        setup_logging(verbose=0, quiet=False, name="test_no_dup")
+        # Second call with IDENTICAL arguments. The expected outcome is
+        # that the existing handler is found via its ``_clickwork_owned``
+        # marker and reused in place; no second handler is appended.
+        setup_logging(verbose=0, quiet=False, name="test_no_dup")
+
+        logger = logging.getLogger("test_no_dup")
+        owned = [h for h in logger.handlers if getattr(h, "_clickwork_owned", False)]
+        assert len(owned) == 1, (
+            f"setup_logging(verbose=0) called twice must not stack "
+            f"handlers; got {len(owned)} clickwork-owned handlers: "
+            f"{logger.handlers}"
+        )
+
+    def test_second_call_updates_level_not_noop(self, reset_logging):
+        """Second call with different verbosity UPDATES level; it is NOT a no-op.
+
+        Pins the "level is live-updated" half of the re-invocation
+        contract. Both the logger itself and the clickwork-owned handler
+        must reflect the NEW level after the second call. If a future
+        refactor ever makes the second call a no-op (e.g., guarding
+        "already configured" at the top of the function), this test
+        catches the regression.
+        """
+        # Bare root so the StreamHandler path runs -- this is where the
+        # "update the handler level too" code lives.
+        root = logging.getLogger()
+        root.handlers = []
+
+        from clickwork._logging import setup_logging
+
+        # First call: WARNING-level baseline.
+        logger = setup_logging(verbose=0, quiet=False, name="test_no_dup")
+        assert logger.level == logging.WARNING
+
+        # Second call with -vv should switch the level to DEBUG. The
+        # clickwork-owned handler's ``setLevel`` is called on every
+        # invocation, so both logger.level and handler.level should move.
+        logger = setup_logging(verbose=2, quiet=False, name="test_no_dup")
+        assert logger.level == logging.DEBUG, (
+            f"second setup_logging call must update logger level to " f"DEBUG; got {logger.level}"
+        )
+
+        # And verify the handler's own level moved too -- if only the
+        # logger level updated, records above the handler's stale
+        # threshold would still be filtered out at the handler stage.
+        owned = [h for h in logger.handlers if getattr(h, "_clickwork_owned", False)]
+        assert len(owned) == 1
+        assert (
+            owned[0].level == logging.DEBUG
+        ), f"handler level must update on re-invocation; got {owned[0].level}"
+
+    def test_reinvocation_with_host_configured_keeps_no_stream_handler(self, reset_logging):
+        """Re-invocation under a host-configured root must never (re)attach a StreamHandler.
+
+        Host-configured path: ``setup_logging()`` attaches only a
+        NullHandler baseline, and propagation delivers records to the
+        host's root handler. Calling ``setup_logging()`` a second time
+        in this state must NOT flip-flop -- it must stay at zero
+        clickwork-owned StreamHandlers.
+        """
+        # Install a fake "host" root handler so ``_host_root_is_configured()``
+        # returns True.
+        root = logging.getLogger()
+        root.handlers = []
+        root.addHandler(logging.StreamHandler(io.StringIO()))
+
+        from clickwork._logging import setup_logging
+
+        setup_logging(verbose=0, quiet=False, name="test_no_dup")
+        setup_logging(verbose=1, quiet=False, name="test_no_dup")
+
+        logger = logging.getLogger("test_no_dup")
+        owned_streams = [
+            h
+            for h in logger.handlers
+            if getattr(h, "_clickwork_owned", False)
+            and isinstance(h, logging.StreamHandler)
+            and not isinstance(h, logging.NullHandler)
+        ]
+        assert owned_streams == [], (
+            "host-configured re-invocation must not attach a "
+            f"clickwork-owned StreamHandler; got: {owned_streams}"
+        )
