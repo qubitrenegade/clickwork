@@ -24,7 +24,7 @@ Implementation waves below assume these decisions are final.
 
 ## Goal
 
-Add Sigstore keyless signing for clickwork's release artifacts (wheel + sdist), publish the resulting `.sigstore` bundles alongside the artifacts on the GitHub Release, move git-tag signing from the maintainer's local GPG key into the release workflow, and document verification commands in `docs/SECURITY.md` so downstream consumers can prove provenance of every 1.0.x release onward.
+Add Sigstore keyless signing for clickwork's release artifacts (wheel + sdist), publish the resulting `.sigstore` bundles alongside the artifacts on the GitHub Release, move git-tag signing from the maintainer's local GPG key into the release workflow, and document verification guidance with a short summary in `docs/SECURITY.md` and detailed commands in `docs/VERIFYING.md` so downstream consumers can prove provenance of every 1.0.x release onward.
 
 ## Non-goals
 
@@ -135,7 +135,7 @@ Q4 is decided (**B, Path 1** — workflow-only GPG key). Implementation:
 
 **Workflow changes:**
 
-Because the workflow is triggered by a tag push, it cannot re-tag the commit it already ran on. Two options:
+Because the workflow is triggered by a tag push, re-tagging the commit it already ran on from within that same run is awkward and risky. Two options:
 
 - **B.1 Pre-release workflow**: separate `.github/workflows/sign-release-tag.yml` fired via `workflow_dispatch` (or on release-PR merge) that signs a planned vX.Y.Z tag BEFORE the maintainer pushes it. Maintainer merges the release PR → workflow dispatch → workflow creates the signed tag → `publish.yml` fires on the tag push as usual. This keeps the existing `publish.yml` untouched.
 - **B.2 Force-resign in publish.yml**: riskier — delete and recreate the tag during the run. Generally discouraged because it re-triggers `publish.yml` in a loop unless carefully guarded.
