@@ -31,18 +31,23 @@ Edit `projectctl-deploy/pyproject.toml` and add the
 `clickwork.commands` entry-point group:
 
 ```toml
-[project.entry-points."clickwork.commands.projectctl"]
+[project.entry-points."clickwork.commands"]
 deploy = "projectctl_deploy:cli"
 ```
 
 Two things are happening here:
 
-- `clickwork.commands.projectctl` is the entry-point group — the
-  `.projectctl` suffix tells clickwork this plugin contributes
-  commands to the CLI named `projectctl`. Other CLIs (e.g. a sibling
-  `dataops` CLI) have their own suffix and won't see these.
+- `clickwork.commands` is the entry-point group — every clickwork CLI
+  running in this Python environment will discover entry points
+  registered under this group. There is no per-CLI scoping today; if
+  you publish a command under this group in a venv that also has a
+  sibling CLI, both CLIs see it. Design per-command names carefully
+  to avoid collisions, and watch `logger.warning` output for
+  duplicate-name signals from clickwork's discovery.
 - `deploy = "projectctl_deploy:cli"` says "expose a `deploy` command
-  whose Click object lives at `projectctl_deploy.cli`".
+  whose Click object lives at `projectctl_deploy.cli`". The command
+  name on the command line comes from the entry-point key (`deploy`),
+  not from the Click command's internal `.name`.
 
 ## Write the command
 

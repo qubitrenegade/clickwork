@@ -61,12 +61,20 @@ And your first command `greet/commands/hello.py`:
 import click
 
 
-@click.command()
+@click.command(name="hello")
 @click.option("--name", default="world", help="Who to greet.")
 def cli(name: str) -> None:
     """Say hello."""
     click.echo(f"Hello, {name}!")
 ```
+
+**Why `name="hello"`:** clickwork keys each registered command off the
+Click command's `.name` attribute (falling back to the filename only
+if `.name` is unset). When you write `@click.command()` on a function
+called `cli`, Click derives the name as `"cli"` — which means without
+the explicit `name="hello"`, this file would register as a command
+named `cli` (and would collide with any other file that did the
+same). Setting `name=` explicitly is the safest pattern.
 
 ## Step 3 — run it
 
@@ -89,8 +97,11 @@ You've just written a clickwork CLI.
 - `create_cli()` returned a Click `Group` configured to load commands
   from `greet/commands/`.
 - Each file in that directory that exposes a `cli` attribute becomes
-  a subcommand, named after the file (so `hello.py` becomes
-  `greet hello`).
+  a subcommand, using the Click command's own `.name` (falling back
+  to the filename stem only when `.name` is unset). That's why the
+  example uses `@click.command(name="hello")` — without the explicit
+  name, Click would derive it from the decorated function's name
+  (`cli`), and every such file would collide on the name `cli`.
 - The `--name` option is plain Click — clickwork doesn't get in
   Click's way.
 

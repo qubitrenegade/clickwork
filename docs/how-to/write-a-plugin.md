@@ -14,17 +14,19 @@ cd my-cli-deploy
 ## Entry point in pyproject.toml
 
 ```toml
-[project.entry-points."clickwork.commands.<target-cli-name>"]
+[project.entry-points."clickwork.commands"]
 deploy = "my_cli_deploy:cli"
 ```
 
 Breakdown:
 
-- `clickwork.commands.<target-cli-name>` — the entry-point group.
-  The `.<target-cli-name>` suffix scopes the plugin to a specific
-  CLI. If your plugin ships commands for `projectctl`, it's
-  `clickwork.commands.projectctl`.
+- `clickwork.commands` — the entry-point group. Every clickwork CLI
+  running in the same Python environment discovers entry points
+  under this single group; there is no per-CLI scoping in the
+  current implementation.
 - `deploy` — the command name as it appears on the command line.
+  Pick names carefully so they don't collide with commands from
+  other plugins or with local `commands/` files in target CLIs.
 - `my_cli_deploy:cli` — the import path of the Click object.
 
 ## Write the command

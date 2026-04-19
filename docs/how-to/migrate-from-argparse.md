@@ -49,12 +49,18 @@ if args.cmd == "greet":
 import click
 
 
-@click.command()
+@click.command(name="greet")
 @click.option("--name", default="world", show_default=True)
 def cli(name: str) -> None:
     """Say hello."""
     click.echo(f"Hello, {name}!")
 ```
+
+`name="greet"` is important: clickwork keys commands off the Click
+command's `.name` attribute, and `@click.command()` without `name=`
+derives it from the function — which here is `cli`. Without
+`name="greet"`, every file doing the `def cli(...)` pattern would
+collide on the name `cli`.
 
 ## Convert a positional
 

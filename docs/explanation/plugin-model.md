@@ -6,21 +6,23 @@ works conceptually, and how the local-wins rule plays out.
 ## The shape
 
 Plugins are regular Python packages. They contribute commands by
-declaring an entry point in the `clickwork.commands.<cli-name>` group
-of their `pyproject.toml`.
+declaring an entry point in the `clickwork.commands` group of their
+`pyproject.toml`.
 
 ```toml
-[project.entry-points."clickwork.commands.projectctl"]
+[project.entry-points."clickwork.commands"]
 deploy = "projectctl_deploy:cli"
 ```
 
-When `create_cli(name="projectctl")` runs, clickwork:
+When `create_cli()` runs, clickwork:
 
-1. Iterates `importlib.metadata.entry_points(group=
-   "clickwork.commands.projectctl")` and loads each entry point's
-   `cli` object.
+1. Iterates `importlib.metadata.entry_points(group="clickwork.commands")`
+   and wraps each in a `LazyEntryPointCommand` keyed by the entry-point
+   name (the LHS — `deploy` above).
 2. Reads the local `commands_dir` (when it exists and auto mode is
-   active) and registers every file that exposes a `cli` attribute.
+   active) and registers every file that exposes a `cli` attribute,
+   keyed by the Click command's `.name` attribute (with fallback to
+   the filename stem only if `.name` is unset).
 3. Overlays directory commands on top of entry-point commands, so
    local files win any name collision. clickwork emits an INFO log
    when a local file shadows an installed command, so stale local
@@ -44,20 +46,48 @@ Three alternatives got rejected in the 0.x cycle:
 
 Entry points are the Python ecosystem's native plugin mechanism.
 `pip install` registers them; `pip uninstall` unregisters them; the
-tooling already knows how to introspect them
-(`pip show -f <package>` lists entry points).
+tooling already knows how to introspect them.
 
-## Why the `.<cli-name>` suffix
+To see the entry points a distribution declares, read the
+distribution's `*.dist-info/entry_points.txt` directly, or use the
+programmatic API:
 
-A sibling CLI named `dataops` in the same venv shouldn't see
-`projectctl`'s deploy plugin. Scoping by CLI name keeps plugins
-targeted:
+```python
+import importlib.metadata
+for ep in importlib.metadata.entry_points(group="clickwork.commands"):
+    print(ep.name, "->", ep.value, "from", ep.dist.name)
+```
 
-- `clickwork.commands.projectctl` → plugins for the `projectctl` CLI
-- `clickwork.commands.dataops` → plugins for the `dataops` CLI
+(`pip show -f <package>` lists installed files but does not parse
+entry-point metadata, so it's not the right tool for this question.)
 
-Without this, every plugin would appear in every CLI, and names
-would collide in minutes.
+## No per-CLI scoping today
+
+The entry-point group is `clickwork.commands` — a single global group
+for every clickwork-built CLI. Every CLI running in the same Python
+environment sees every plugin published under this group. There is
+no `.<cli-name>` suffix or other per-CLI scoping in the current
+implementation.
+
+The practical consequences:
+
+- When authoring a plugin, choose command names that are unlikely to
+  collide with other plugins or with local command-directory files
+  in target CLIs.
+- If two plugins (or a plugin and a local file) register the same
+  command name, clickwork keeps the first-loaded one deterministically
+  (directory scan is sorted alphabetically, entry-point iteration
+  order is `importlib.metadata`'s) and emits a warning on the
+  others. Strict mode promotes the duplicate to a hard error.
+- If you're planning to ship an ecosystem of distinct CLIs in the
+  same venv, be deliberate about namespacing command names at
+  design time (`projectctl-deploy`, `dataops-deploy`, not just
+  `deploy`, `deploy`).
+
+Per-CLI scoping is a credible future feature (it'd scope a group
+name like `clickwork.commands.projectctl`), but it's not shipped.
+Don't publish plugins under a scoped group name today — clickwork
+won't read them.
 
 ## Why local wins on collision
 

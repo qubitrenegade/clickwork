@@ -12,7 +12,7 @@ attribute that's a Click command:
 import click
 
 
-@click.command()
+@click.command(name="status")
 @click.option("--json", "as_json", is_flag=True,
               help="Emit machine-readable JSON.")
 def cli(as_json: bool) -> None:
@@ -29,8 +29,13 @@ def cli(as_json: bool) -> None:
 uv run python -m <project> --help
 ```
 
-The command shows up, named after the file (underscores become
-hyphens: `status.py` → `status`; `tail_logs.py` → `tail-logs`).
+The command shows up under the name set in `@click.command(name=...)`.
+Without that explicit `name=`, Click derives the command's `.name`
+from the decorated function — which for `def cli(...)` is `cli`.
+clickwork keys registered commands off the Click command's `.name`
+(falling back to the filename stem only when `.name` is unset),
+so always set `name=` explicitly to avoid collisions between files.
+For multi-word commands, use `-` in the name (`@click.command(name="tail-logs")`).
 
 ## Ship it
 

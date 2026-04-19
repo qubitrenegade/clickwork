@@ -6,17 +6,17 @@ command and understand how clickwork finds commands on disk.
 ## Scaffold the project
 
 ```bash
-mkdir -p projectctl/commands
+mkdir projectctl
 cd projectctl
 uv init --package .
 ```
 
 `uv init --package .` gives you a modern `pyproject.toml` and a
-`src/projectctl/` layout. Move the `commands/` dir inside the package:
+`src/projectctl/` layout. Create the `commands/` directory **inside
+the package** (that's where `commands_dir` will point):
 
 ```bash
 mkdir -p src/projectctl/commands
-rmdir projectctl/commands
 ```
 
 ## Wire up the CLI

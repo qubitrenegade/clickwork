@@ -75,7 +75,7 @@ from pathlib import Path
 import click
 
 
-@click.command()
+@click.command(name="cleanup")
 @click.argument("path", type=click.Path(path_type=Path, exists=True,
                                          file_okay=False))
 @click.option("--pattern", default="*.tmp", show_default=True)
@@ -85,6 +85,12 @@ def cli(path: Path, pattern: str) -> None:
         f.unlink()
         click.echo(f"removed {f}")
 ```
+
+**Why `name="cleanup"`:** clickwork keys registered commands off the
+Click command's `.name` attribute. `@click.command()` without `name=`
+derives the name from the decorated function, which here is `cli` —
+so without the explicit `name="cleanup"`, every command file doing
+this pattern would collide on the name `cli`.
 
 Benefits: proper `--help`, validated path, the pattern is now
 discoverable, the command prints what it did.
