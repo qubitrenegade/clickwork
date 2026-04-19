@@ -23,7 +23,7 @@ Release flow on `main` (from `.github/workflows/publish.yml`):
 
 1. Push tag `v*` → workflow fires.
 2. `build` job: `uv build` → `dist/*.whl` + `dist/*.tar.gz` → upload artifact.
-3. `create-release` job: download artifact → `softprops/action-gh-release@v2` creates the Release, attaches the dist files, uses `.github/release.yml` for auto-generated notes.
+3. `create-release` job: download artifact → `softprops/action-gh-release` (pinned to a specific commit SHA that resolves to the v2 line, per supply-chain discipline) creates the Release, attaches the dist files, uses `.github/release.yml` for auto-generated notes.
 4. `publish` job: download artifact → `pypa/gh-action-pypi-publish` uploads to PyPI via Trusted Publishing (OIDC).
 
 Tag signing today: maintainer runs `git tag -s vX.Y.Z` locally, which requires `GPG_TTY=$(tty)` export and a GPG key in the maintainer's keyring. See the "Cutting a release" runbook in `CONTRIBUTING.md`. The tag is cryptographically signed but the workflow itself is not involved — future maintainers would need their own GPG key + the same runbook.
@@ -63,10 +63,10 @@ Three pieces, each with one or more open design questions the maintainer needs t
 ### Q3. How are `.sigstore` bundles published?
 
 - **A) Release assets only** — bundles live on GitHub Release alongside wheel/sdist. Verification command: download bundle + artifact, `sigstore verify identity ...`.
-- **B) PyPI attestations + Release assets** — same as A, PLUS publish to PyPI's attestation endpoint via `pypa/gh-action-pypi-publish` `attestations: true`. Verification command (PyPI side): `pip` / `uv` auto-verifies during install.
+- **B) PyPI attestations + Release assets** — same as A, PLUS publish to PyPI's attestation endpoint via `pypa/gh-action-pypi-publish` `attestations: true`. Verification command (PyPI side) is manual today via `pypi-attestations verify` or `sigstore-python`; pip/uv auto-verify of PyPI attestations is not GA yet (tracked upstream; once it ships, B upgrades to "automatic on install" for free).
 - **C) Release assets + Sigstore transparency log only** — rely on Rekor transparency log + artifact hash for verification, skip bundle files on the Release.
 
-**Recommendation:** B. PyPI attestations make verification automatic for the most common install path (`pip install clickwork`), and the Release-side bundles cover anyone installing from a tarball or a git tag. A alone means `pip install` users get no automatic verification. C alone makes manual verification harder and depends entirely on Rekor uptime.
+**Recommendation:** B. PyPI attestations give every `pip install clickwork` consumer a future-proof path to automatic verification (the moment pip lands auto-verify, B starts working with zero action from us), while the Release-side bundles cover anyone installing from a tarball or a git tag today. A alone leaves PyPI consumers with no attestation story at all. C alone makes manual verification harder and depends entirely on Rekor uptime.
 
 **Open question for maintainer:** confirm B (bundle + PyPI attestation both).
 
@@ -110,9 +110,9 @@ Assuming maintainer picks **Q1=A, Q2=A, Q3=B, Q4=B (or hybrid A+B), Q5=C, Q6=A**
 
 ### Wave 1 (PR #a): Sigstore bundle signing on release artifacts
 
-- Add `sigstore/gh-action-sigstore-python@v3` step in the `build` job after `uv build`. Signs `dist/*.whl` and `dist/*.tar.gz`. Produces `.sigstore` bundles next to the artifacts.
-- Extend the `upload-artifact` step to include `*.sigstore` bundles.
-- Extend `softprops/action-gh-release@v2` `files:` glob to include `dist/*.sigstore`.
+- Add `sigstore/gh-action-sigstore-python@v3` step in the `build` job after `uv build`. Signs `dist/*.whl` and `dist/*.tar.gz`. Produces `.sigstore` bundles in `dist/` alongside the artifacts.
+- The current `upload-artifact` step already uploads the entire `dist/` directory, so `.sigstore` files emitted into `dist/` come along automatically — no change to that step needed.
+- Extend `softprops/action-gh-release` `files:` glob to include `dist/*.sigstore` so the bundles appear as Release assets.
 - In the `publish` job, add `attestations: true` to `pypa/gh-action-pypi-publish`. This handles Q3=B's PyPI attestation side.
 - New permissions on the build job: `id-token: write` (for OIDC → Fulcio). Already present on the publish job for Trusted Publishing.
 
