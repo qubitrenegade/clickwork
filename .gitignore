@@ -7,3 +7,7 @@ build/
 .venv/
 *.egg
 .pytest_cache/
+
+# mkdocs build output
+site/
+
