@@ -3,19 +3,18 @@
 ## Scope
 
 This document defines clickwork's public API surface and the
-compatibility guarantees that apply to it once version 1.0.0 ships. It
-covers which symbols callers can depend on, what constitutes a breaking
-change, how long deprecated symbols stick around, and which dependency
-and interpreter versions clickwork commits to supporting. The policy
-below starts applying on 1.0.0; pre-1.0 releases (0.x) carry no
-compatibility promise by semver convention, and the 1.0 release is
-explicitly allowed to break 0.2.x where the break corrects a genuine
-design mistake.
+compatibility guarantees that apply to it. It covers which symbols
+callers can depend on, what constitutes a breaking change, how long
+deprecated symbols stick around, and which dependency and interpreter
+versions clickwork commits to supporting. The policy is in effect
+from 1.0.0 onward; the 1.0 cut was explicitly allowed to break 0.2.x
+where the break corrected a genuine design mistake, and those
+breakages are catalogued in [`MIGRATING.md`](MIGRATING.md).
 
-Related docs that will cross-reference this policy once they land: see
-`MIGRATING.md` (tracked by Wave 4 issue #56) for the 0.x to 1.0 upgrade
-path, and `SECURITY.md` (tracked by Wave 4 issue #55) for the security
-properties clickwork asserts about its public surface.
+Related docs: [`MIGRATING.md`](MIGRATING.md) for the 0.x to 1.0
+upgrade path (covers every breaking change introduced in 1.0),
+and [`SECURITY.md`](SECURITY.md) for the security properties
+clickwork asserts about its public surface.
 
 ## Public API surface
 

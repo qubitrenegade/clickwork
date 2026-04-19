@@ -27,9 +27,9 @@ clickwork gives you the scaffolding. You write the commands.
 
 ```bash
 # From PyPI (preferred)
-uv pip install "clickwork==0.2.0"
+uv pip install "clickwork>=1.0,<2"
 # or, pinning to a git tag if you need a ref PyPI doesn't expose
-uv pip install "git+https://github.com/qubitrenegade/clickwork.git@v0.2.0"
+uv pip install "git+https://github.com/qubitrenegade/clickwork.git@v1.0.0"
 ```
 
 For local development alongside your project:

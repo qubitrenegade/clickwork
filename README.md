@@ -6,19 +6,24 @@ Reusable CLI framework for project automation. Build project-specific CLIs
 with plugin discovery, layered config, subprocess helpers, and common
 utilities -- so your commands focus on business logic, not boilerplate.
 
-> **Status:** Pre-1.0 (`0.x`). API is unstable. All features are driven by
-> real [orbit-admin](https://github.com/qubitrenegade/qbrd-orbit-widener)
+> **Status:** 1.0 stable. The public API is documented in
+> [docs/API_POLICY.md](docs/API_POLICY.md) and covered by SemVer:
+> breaking changes require a major bump and removals carry a one-minor
+> deprecation runway. All features are driven by real
+> [orbit-admin](https://github.com/qubitrenegade/qbrd-orbit-widener)
 > needs -- no speculative abstractions.
 
-See [docs/API_POLICY.md](docs/API_POLICY.md) for the post-1.0 public API and compatibility policy.
+Upgrading from 0.2.x? See
+[docs/MIGRATING.md](docs/MIGRATING.md) for the complete
+before/after diff.
 
 ## Installation
 
 ```bash
 # From PyPI (preferred)
-uv pip install "clickwork==0.2.0"
+uv pip install "clickwork>=1.0,<2"
 # or, pinning to a git tag if you need a ref PyPI doesn't expose
-uv pip install "git+https://github.com/qubitrenegade/clickwork.git@v0.2.0"
+uv pip install "git+https://github.com/qubitrenegade/clickwork.git@v1.0.0"
 ```
 
 For local development alongside a consumer project:

@@ -275,7 +275,7 @@ you want CI to honour.
 Each clickwork minor ships with a migration note in `CHANGELOG.md`,
 and breaking changes carry a `BREAKING:` marker in the PR that
 introduced them. For the 0.x to 1.0 jump specifically, see
-`MIGRATING.md` once 1.0 ships -- it will enumerate every breaking
+[`MIGRATING.md`](MIGRATING.md) -- it enumerates every breaking
 change from the 0.2.x series, every deprecation shim, and every new
 public API your plugin can start relying on.
 
