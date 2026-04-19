@@ -26,11 +26,11 @@ Each deferral below is listed with the reason it does not trap us if added later
 
 - **`mike` versioned docs.** 1.x is stable and single-version docs are sufficient. `mike` can layer on later without reshaping existing pages — it operates by copying the built site into version-prefixed directories on the `gh-pages` branch.
 - **`mkdocstrings` beyond the Reference appendix.** The auto-generated API page is in scope; rewriting hand-authored docs around embedded docstring directives is not. The auto-generated page is additive — pulling docstrings into prose sections can happen page-by-page later if it ever becomes valuable.
-- **Custom domain.** Landing on `github.io/clickwork/` is fine. A `CNAME` file plus a DNS change lights up a custom domain without any content edits.
+- **Custom domain.** Landing on `https://qubitrenegade.github.io/clickwork/` is fine. A `CNAME` file plus a DNS change lights up a custom domain without any content edits.
 - **External link checker as blocking CI.** External sites go down; a per-PR blocking check would cause flakes unrelated to the PR. Scheduled weekly instead.
 - **Vale as blocking CI.** Prose linters produce too much subjective noise to block merges on. Annotations-only mode gives authors the signal without the friction.
 - **Splitting `GUIDE.md` into the new Diátaxis sections.** Kept intact under Reference for v1. Harvesting pieces into How-To can happen once real usage shows which parts readers reach for; splitting speculatively now risks breaking inbound links without a clear target shape.
-- **Doctest-style verified examples.** `pytest --doctest-glob='*.md'` can run fenced code blocks as tests. Skipped for v1: fragile under whitespace and nondeterministic output, and we have no evidence yet of example drift being a real problem.
+- **Doctest-style verified examples.** `pytest --doctest-glob='*.md'` treats matching files as doctest inputs, picking up `>>>` REPL-style prompts inline; testing fenced code blocks specifically would need a separate plugin such as [`pytest-examples`](https://github.com/pydantic/pytest-examples). Either approach is skipped for v1: fragile under whitespace and nondeterministic output, and we have no evidence yet of example drift being a real problem.
 
 ## Information architecture
 
