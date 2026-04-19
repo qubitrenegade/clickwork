@@ -18,7 +18,13 @@ build:
     post_create_environment:
       - python -m pip install uv
     pre_install:
-      - uv export --frozen --no-dev --extra docs --format requirements-txt --output-file /tmp/rtd-docs-requirements.txt
+      # --no-emit-project excludes the clickwork package itself from
+      # the requirements file. Without this, uv emits `-e .` as line
+      # 3 of the output, pip auto-enables --require-hashes (because
+      # other lines in the file have hashes), and then refuses the
+      # editable install because you can't hash a directory. Install
+      # clickwork separately in the next step.
+      - uv export --frozen --no-dev --extra docs --no-emit-project --format requirements-txt --output-file /tmp/rtd-docs-requirements.txt
       - python -m pip install --requirement /tmp/rtd-docs-requirements.txt
       # Install clickwork itself (editable) so mkdocstrings can import
       # the package to pull docstrings. --no-deps because the
