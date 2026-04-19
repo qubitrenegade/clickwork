@@ -82,9 +82,23 @@ plugins:
 
 nav:
   - Home: index.md
+  - Tutorials:
+      - Quickstart: tutorials/quickstart.md
+      - Walkthrough:
+          - tutorials/walkthrough/index.md
+          - Your first command: tutorials/walkthrough/01-your-first-command.md
+          - Adding a plugin: tutorials/walkthrough/02-adding-a-plugin.md
+          - Packaging: tutorials/walkthrough/03-packaging.md
+  - How-To:
+      - how-to/index.md
+      - Tame a script directory: how-to/tame-a-script-directory.md
+      - Add a command: how-to/add-a-command.md
+      - Write a plugin: how-to/write-a-plugin.md
+      - Migrate from argparse: how-to/migrate-from-argparse.md
   - Explanation:
       - Architecture: explanation/architecture.md
       - API Policy: explanation/api-policy.md
+      - Plugin Model: explanation/plugin-model.md
   - Reference:
       - User Guide: reference/guide.md
       - Plugins: reference/plugins.md
