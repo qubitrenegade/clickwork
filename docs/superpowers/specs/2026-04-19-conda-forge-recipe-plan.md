@@ -53,7 +53,7 @@ Once staged-recipes merges, conda-forge bot creates `conda-forge/clickwork-feeds
 
 **Recommendation:** B. Standard conda-forge pattern for first-time submitters. The community maintainer rotates off after a few cycles. No commitment burden on another person in our circle.
 
-**Open question for maintainer:** confirm B, or prefer A / named-B / C?
+**Open question for maintainer:** confirm B, or prefer A (solo) / C (named collaborator)?
 
 ### Q3. Python version range in the recipe?
 
@@ -109,7 +109,7 @@ Assuming maintainer picks **Q1=C, Q2=B, Q3=A, Q4=A+B, Q5=A, Q6=A+C**:
 
 ### Wave 0 (local prep, no PR on clickwork)
 
-- Wait 1-2 weeks from 1.0.0 (2026-05-03 or thereabouts) to confirm no PyPI-side bugs.
+- Wait ~2 weeks after the 1.0.0 release (so starting roughly 2026-05-03 given 1.0.0 shipped 2026-04-19) to confirm no PyPI-side bugs in the wild.
 - In the meantime: install grayskull locally, run `grayskull pypi clickwork`, review the generated `meta.yaml`, hand-edit as needed for our specific needs (maintainers list, home URL, etc).
 
 ### Wave 1 (PR on conda-forge/staged-recipes, not clickwork)
@@ -134,7 +134,7 @@ Assuming maintainer picks **Q1=C, Q2=B, Q3=A, Q4=A+B, Q5=A, Q6=A+C**:
 ## Merge-order constraints
 
 - Wave 2 (README update) CANNOT land until Wave 1's staged-recipes PR merges AND `clickwork-feedstock` actually publishes. Otherwise we document an install command that doesn't work yet.
-- Wave 0/1 have no constraint on clickwork's repo state beyond "1.0.0 stable on PyPI" (already satisfied).
+- Wave 0/1 have no constraint on clickwork's repo state beyond "1.0.0 is released to PyPI" (satisfied today) AND "has 1-2 weeks of in-the-wild usage without regressions" (Q1's "stable" bar — NOT yet satisfied; that's what Wave 0's waiting period is for).
 - No dependency on #61 Sigstore work — conda-forge has its own signing chain.
 
 ## Success criteria
