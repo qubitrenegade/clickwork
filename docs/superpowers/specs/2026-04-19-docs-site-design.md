@@ -95,10 +95,10 @@ The pair of surfaces costs one plugin entry, one stub file per moved doc, and a 
 
 ### Packaging
 
-Docs dependencies live in `pyproject.toml` under a `docs` dependency group (the project already uses `uv`):
+Docs dependencies live in `pyproject.toml` under the existing `[project.optional-dependencies]` table as a `docs` extra. This matches the repo's existing `dev` extra pattern and how workflows like `test.yml` / `types.yml` install with `uv sync --extra dev`:
 
 ```toml
-[dependency-groups]
+[project.optional-dependencies]
 docs = [
     "mkdocs-material",
     "mkdocstrings[python]",
@@ -106,8 +106,8 @@ docs = [
 ]
 ```
 
-Local authoring: `uv sync --group docs && uv run mkdocs serve`.
-CI: `uv sync --frozen --group docs`, then `uv run mkdocs build --strict` (see the CI section for why `--frozen` specifically).
+Local authoring: `uv sync --extra docs && uv run mkdocs serve`.
+CI: `uv sync --frozen --extra docs`, then `uv run mkdocs build --strict` (see the CI section for why `--frozen` specifically).
 
 No parallel `requirements-docs.txt` — the dependency group is the single source of truth. CI pins via the committed `uv.lock` and `--frozen` makes stale-lock a hard failure.
 
@@ -238,7 +238,7 @@ on:
       - 'uv.lock'
 ```
 
-- `pyproject.toml` is included because changing the `docs` dependency group affects the build.
+- `pyproject.toml` is included because changing the `docs` extra's dependency list affects the build.
 - `uv.lock` is included so a lockfile change re-runs CI.
 - `.github/workflows/docs.yml` is included so edits to CI config itself re-trigger the job.
 - `.markdownlint.yaml`, `.vale.ini`, and `.vale/**` are included so rule changes re-run lint output on the existing corpus.
@@ -247,7 +247,7 @@ on:
 Jobs:
 
 1. **`build`** (runs on PR and main):
-   - `uv sync --frozen --group docs` (`--frozen` matches `.github/workflows/bench.yml` and ensures CI fails on a stale lockfile rather than silently re-resolving).
+   - `uv sync --frozen --extra docs` (`--frozen` matches `.github/workflows/bench.yml` and ensures CI fails on a stale lockfile rather than silently re-resolving; `--extra docs` matches how other clickwork workflows install optional dependency sets).
    - `uv run mkdocs build --strict` (broken internal links, missing nav entries, orphaned pages → fail).
    - `markdownlint-cli2 'docs/**/*.md'` with a checked-in `.markdownlint.yaml` config. Blocking.
    - Vale via `errata-ai/vale-action@v2` with `fail_on_error: false`. Advisory annotations only.
