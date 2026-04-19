@@ -82,6 +82,20 @@ as the symbol surface.
   installed when the caller passes `version=` or `package_name=` to
   `create_cli()`; its presence is opt-in so existing CLIs opt in at
   their own cadence.
+- The re-invocation semantics of `setup_logging()` — called internally
+  by `create_cli()` on every CLI invocation. Re-invocation in the same
+  process (test suites that drive a CLI via `CliRunner` multiple times,
+  long-running hosts that import a clickwork CLI module repeatedly) is
+  **idempotent for handler identity and live for level**: a second call
+  never stacks a duplicate clickwork-owned handler, but a second call
+  with a different `verbose` / `quiet` argument DOES update the level
+  on both the logger and the clickwork-owned handler. Changing either
+  half of this contract — stacking a duplicate, or making the second
+  call a no-op that ignores the new verbosity — is a major-version
+  break. The identity check relies on a private `_clickwork_owned`
+  marker attribute on the handler; the marker itself is an
+  implementation detail (underscore-prefixed) and is not part of the
+  public surface.
 
 ## Private and unstable
 
