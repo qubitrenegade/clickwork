@@ -5,6 +5,14 @@ on:
     - cron: '0 12 * * 1'  # Mondays 12:00 UTC
   workflow_dispatch: {}
 
+# Serialize runs so the "is there already an open linkcheck issue?"
+# check between a scheduled run and a manual workflow_dispatch can't
+# race and open duplicates (cancel-in-progress: false preserves the
+# in-flight run; the second run queues).
+concurrency:
+  group: docs-linkcheck
+  cancel-in-progress: false
+
 permissions:
   contents: read
   issues: write  # lychee opens an issue on failure
@@ -19,17 +27,26 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --verbose --no-progress 'docs/**/*.md' README.md
+          # Exclude the deployed docs URL until the account-level
+          # custom-domain redirect is resolved (currently redirects
+          # qubitrenegade.github.io/clickwork -> qubitrenegade.com/
+          # clickwork which 404s). Remove this --exclude once the
+          # redirect is fixed so the linkcheck actually verifies the
+          # published site's own URL.
+          args: >-
+            --verbose
+            --no-progress
+            --exclude 'https://qubitrenegade\.github\.io/clickwork/'
+            'docs/**/*.md' README.md
           fail: false
 
       - name: Look for an existing open link-check issue
         # Dedup guard: if a prior week already filed an issue for
-        # persistently-broken links, don't open another one. The title is
-        # the exact dedup key. The matching issue (if any) is captured
-        # so the next step can comment on it instead of creating a new
-        # issue.
-        if: steps.lychee.outputs.exit_code != 0
+        # persistently-broken links, don't open another one. The title
+        # is the exact dedup key. Result feeds both the create-new
+        # and comment-on-existing branches below.
         id: existing
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -57,3 +74,19 @@ jobs:
           gh issue comment "${{ steps.existing.outputs.issue_number }}" \
             --repo "${{ github.repository }}" \
             --body-file ./lychee/out.md
+
+      - name: Auto-close the open linkcheck issue when runs go green
+        # If the last-known-broken links are fixed and lychee is now
+        # clean, close the rolling issue with a final comment. Keeps
+        # the open-issue list honest about current status instead of
+        # leaving stale reports hanging.
+        if: steps.lychee.outputs.exit_code == 0 && steps.existing.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue comment "${{ steps.existing.outputs.issue_number }}" \
+            --repo "${{ github.repository }}" \
+            --body "Link-check run on ${{ github.sha }} is clean. Closing."
+          gh issue close "${{ steps.existing.outputs.issue_number }}" \
+            --repo "${{ github.repository }}" \
+            --reason completed
