@@ -106,6 +106,15 @@ working example with subcommand groups.
   to report vulnerabilities.
 - **[Migrating 0.2.x to 1.0](docs/MIGRATING.md)** -- Breaking changes,
   new opt-in surfaces, and concrete before/after diffs for upgraders.
+- **[API Policy](docs/API_POLICY.md)** -- The 1.0 public surface:
+  which symbols are covered by SemVer, deprecation runway, supported
+  Python and Click ranges.
+- **[LLM Reference](docs/LLM_REFERENCE.md)** -- Compact, LLM-oriented
+  cheat sheet of the public surface with a "Common Footguns" section
+  (patching prereqs, `ClickException` routing, CliRunner streams,
+  secrets-in-argv, `bash -c` risks, etc.). Useful whether you're an
+  AI agent generating clickwork code or a human skimming for
+  gotchas.
 
 ## Features
 

@@ -135,9 +135,9 @@ complete 0.2.x → 1.0 upgrade guide including before/after diffs.
 
 ### Docs
 
-- **LLM_REFERENCE.md "Common Footguns"** section collecting every
-  gotcha that external reviewers and auto-review tools have caught
-  on clickwork PRs (rewritten throughout the 1.0 cycle).
+- **`docs/LLM_REFERENCE.md` "Common Footguns"** section collecting
+  every gotcha that external reviewers and auto-review tools have
+  caught on clickwork PRs (rewritten throughout the 1.0 cycle).
 - **GUIDE.md "Testing commands with clickwork.testing"** section
   consolidated the testing story.
 - **README.md** rebuilt around the documented public surface with
@@ -153,8 +153,9 @@ numbers**, except where explicitly noted as `(PR #NN)`. Major new
 modules: `clickwork.http`, `clickwork.platform`, `clickwork.testing`.
 New helpers on `CliContext`: `run_with_secrets`, stdin forwarding. New
 public API for docs-level CLIs: `add_global_option`. New dotenv helper:
-`clickwork.config.load_env_file`. Plus docs: LLM_REFERENCE "Common
-Footguns" section and GUIDE "Testing commands" subsection.
+`clickwork.config.load_env_file`. Plus docs: `docs/LLM_REFERENCE.md`
+"Common Footguns" section and `docs/GUIDE.md` "Testing commands"
+subsection.
 
 ### Added
 
