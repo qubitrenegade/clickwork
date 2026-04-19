@@ -3,7 +3,7 @@
 **Date:** 2026-04-19
 **Milestone:** post-1.0
 **Parent issue:** [#62](https://github.com/qubitrenegade/clickwork/issues/62)
-**Relevant docs:** [README.md](../../../README.md) install section, [pyproject.toml](../../../pyproject.toml) (conda-forge recipe auto-generates from this)
+**Relevant docs:** [README.md](../../../README.md) install section, [pyproject.toml](../../../pyproject.toml) (input to `grayskull pypi clickwork`, which produces a first-pass `meta.yaml` we hand-edit; conda-forge itself doesn't auto-generate from pyproject.toml)
 
 ## Goal
 
@@ -61,9 +61,9 @@ clickwork requires Python >=3.11 per `pyproject.toml`. conda-forge recipes speci
 
 - **A) Mirror the PyPI pin exactly: `python >=3.11`**
 - **B) Also cap at a known-good upper bound: `python >=3.11,<3.14`** — conda-forge sometimes asks for an upper bound to prevent unexpected breakage on new Python releases.
-- **C) `python >=3.11` + a test matrix that runs against 3.11, 3.12, 3.13** — conda-forge's CI will run this automatically against all supported Pythons anyway.
+- **C) `python >=3.11` + an explicit test matrix for 3.11, 3.12, 3.13** — mostly symbolic for a `noarch: python` recipe, since noarch builds once on a single Python and relies on import-time compatibility rather than per-version CI.
 
-**Recommendation:** A. Matches PyPI, matches our documented policy, doesn't invent a cap we don't actually have evidence for. conda-forge CI verifies on all supported interpreters automatically.
+**Recommendation:** A. Matches PyPI, matches our documented policy, doesn't invent a cap we don't actually have evidence for. For `noarch: python` recipes the feedstock runs the test section once on a single migrator-selected Python — we don't get a free per-version test matrix from conda-forge here. If we want per-version test confidence, that's already our GitHub Actions CI's job on the PyPI side, not the feedstock's.
 
 **Open question for maintainer:** confirm A.
 
@@ -72,7 +72,7 @@ clickwork requires Python >=3.11 per `pyproject.toml`. conda-forge recipes speci
 conda-forge needs to know how to build clickwork. We use `hatchling` via `pyproject.toml`.
 
 - **A) `noarch: python` + `{{ PYTHON }} -m pip install .` in the build script** — standard pure-Python recipe shape. Works for hatchling projects out of the box.
-- **B) Explicit `host:` requirement on `hatchling` and `python-build-backend`** — more explicit about the build toolchain. Sometimes required for staged-recipes to accept.
+- **B) Explicit `host:` requirement naming the concrete conda packages: `python`, `pip`, `hatchling`** (these are the actual conda-forge package names for the build toolchain; `python-build-backend` is not a conda package). More explicit; staged-recipes reviewers typically ask for it.
 - **C) `pyproject.toml`-native build via conda-forge's `python-build` helper** — newer pattern, cleaner recipe, but support matrix is narrower.
 
 **Recommendation:** A with B's explicit `host:` list as a safety net. grayskull usually generates A+B by default. Matches what other modern pure-Python packages in staged-recipes look like.
