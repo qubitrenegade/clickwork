@@ -138,11 +138,11 @@ complete 0.2.x → 1.0 upgrade guide including before/after diffs.
 - **`docs/LLM_REFERENCE.md` "Common Footguns"** section collecting
   every gotcha that external reviewers and auto-review tools have
   caught on clickwork PRs (rewritten throughout the 1.0 cycle).
-- **GUIDE.md "Testing commands with clickwork.testing"** section
-  consolidated the testing story.
-- **README.md** rebuilt around the documented public surface with
-  direct links to `GUIDE`, `API_POLICY`, `PLUGINS`, `SECURITY`, and
-  `MIGRATING`.
+- **`docs/GUIDE.md` "Testing commands with clickwork.testing"**
+  section consolidated the testing story.
+- **`README.md`** rebuilt around the documented public surface with
+  direct links to `docs/GUIDE.md`, `docs/API_POLICY.md`,
+  `docs/PLUGINS.md`, `docs/SECURITY.md`, and `docs/MIGRATING.md`.
 
 ## [0.2.0] - 2026-04-18
 
@@ -188,15 +188,15 @@ subsection.
   preserving SIGINT forwarding. (#10)
 - `create_cli()` now accepts `enable_parent_package_imports=True` to
   opt into importing commands as relative to a parent package. (#15)
-- LLM_REFERENCE.md — new "Common Footguns" section (11 entries:
+- `docs/LLM_REFERENCE.md` — new "Common Footguns" section (11 entries:
   patching prereqs, `ClickException` routing, CliRunner streams,
   URL-encoding, secrets-in-argv, `.env` parsing, platform dispatch,
   HTTP calls, `import sys`, `bash -c` risk, module-scope
   `Secret.get()`). (#17)
-- GUIDE.md — new "Testing commands with `clickwork.testing`"
+- `docs/GUIDE.md` — new "Testing commands with `clickwork.testing`"
   subsection covering the new helpers and `result.output` /
   `.stdout` / `.stderr` semantics on Click 8.2+.
-- CHANGELOG.md (this file).
+- `CHANGELOG.md` (this file).
 
 ### Changed
 
