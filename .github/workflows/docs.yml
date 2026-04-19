@@ -19,6 +19,12 @@ on:
       - '.vale/**'
       - 'pyproject.toml'
       - 'uv.lock'
+      # src/** so PRs that only touch the codebase still surface
+      # mkdocstrings / api.md rendering regressions before they hit
+      # RTD on main. Without this, a code-only PR could break the
+      # auto-generated API reference and only get caught in RTD's
+      # post-merge build.
+      - 'src/**'
 
 permissions:
   contents: read
