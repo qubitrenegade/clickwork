@@ -5,7 +5,7 @@
 **Parent plan:** [2026-04-19-sigstore-signing-plan.md](2026-04-19-sigstore-signing-plan.md) (locked decisions: Q1=A, Q2=A, Q3=B, Q4=B Path 1, Q5=C, Q6=A)
 **Parent issue:** [#61](https://github.com/qubitrenegade/clickwork/issues/61)
 **Scope:** Wave 1 only — Sigstore bundle signing + PyPI attestations on release artifacts. Waves 2-4 are separate plans/PRs.
-**Relevant files:** [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (current 3-job pipeline), [.github/workflows/release-smoke.yml](../../../.github/workflows/release-smoke.yml) (existing post-release smoke test pattern)
+**Relevant files:** [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (current 3-job pipeline), [.github/workflows/release-smoke.yml](../../../.github/workflows/release-smoke.yml) (existing release packaging smoke test pattern — triggered on push/PR/dispatch, not on release)
 
 ## Goal
 
@@ -176,6 +176,8 @@ If anything fails, the RC is throwaway — yank on PyPI, delete the GitHub Relea
 
 - `publish.yml`: +~10 lines net (one new permission, one new step with 5 lines, one `files:` extension with 1 line, one `with:` option with 1 line).
 - No new files, no changes to `CONTRIBUTING.md` in Wave 1 (documentation is Wave 3).
+
+> Note on divergence from parent plan: the parent plan (`2026-04-19-sigstore-signing-plan.md`) estimated "~30 lines of `publish.yml` + workflow smoke-test verification" for Wave 1. This implementation plan refines that estimate by separating the code diff (~10 lines in `publish.yml`) from the smoke-test ritual (a runbook-level procedure in the "Smoke-test plan" section above, executed against an RC tag, not committed code). The parent's ~30-line figure bundled both; this plan splits them so the implementation-PR diff stays crisp and the smoke-test is a release-cutting activity, not code review surface.
 
 ## Merge-order constraints
 
