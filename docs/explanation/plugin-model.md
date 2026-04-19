@@ -25,8 +25,21 @@ When `create_cli()` runs, clickwork:
    the filename stem only if `.name` is unset).
 3. Overlays directory commands on top of entry-point commands, so
    local files win any name collision. clickwork emits an INFO log
-   when a local file shadows an installed command, so stale local
-   files don't silently hide plugin updates.
+   when a local file shadows an installed command — visibility
+   depends on the host's logging setup though (see the caveat
+   below).
+
+**Caveat on visibility of these log messages.** Discovery runs
+during `create_cli()` — often at module import time, before the
+host application has configured logging. clickwork attaches a
+`NullHandler` on its own logger at import time, so discovery-time
+records don't produce "no handlers" complaints, but they may also
+not reach any handler the host installs later. For WARNING+
+records, Python's "last resort" stderr fallback usually kicks in;
+INFO records typically do not. If you need collisions / import
+errors surfaced reliably regardless of logging config, pass
+`strict=True` to `create_cli()` — discovery failures become a
+`ClickworkDiscoveryError` raised at CLI construction time.
 
 ## Why entry points
 

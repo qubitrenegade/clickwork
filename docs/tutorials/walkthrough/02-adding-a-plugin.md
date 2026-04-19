@@ -42,8 +42,13 @@ Two things are happening here:
   registered under this group. There is no per-CLI scoping today; if
   you publish a command under this group in a venv that also has a
   sibling CLI, both CLIs see it. Design per-command names carefully
-  to avoid collisions, and watch `logger.warning` output for
-  duplicate-name signals from clickwork's discovery.
+  to avoid collisions. When you need collisions surfaced reliably,
+  pass `strict=True` to `create_cli()` — clickwork raises
+  `ClickworkDiscoveryError` on duplicates. (Relying on
+  `logger.warning` alone is fragile: clickwork attaches a
+  `NullHandler` at import time and discovery runs during CLI
+  construction, before most hosts have configured logging, so the
+  messages often go unseen.)
 - `deploy = "projectctl_deploy:cli"` says "expose a `deploy` command
   whose Click object lives at `projectctl_deploy.cli`". The command
   name on the command line comes from the entry-point key (`deploy`),
