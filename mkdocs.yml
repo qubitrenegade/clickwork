@@ -1,5 +1,5 @@
 site_name: clickwork
-site_url: https://qubitrenegade.github.io/clickwork/
+site_url: https://clickwork.readthedocs.io/
 site_description: Reusable CLI framework for project automation.
 repo_url: https://github.com/qubitrenegade/clickwork
 repo_name: qubitrenegade/clickwork

@@ -1,34 +1,30 @@
 name: Docs
 
+# PR-only validation. Read the Docs handles the actual deploy off `main`
+# via its own webhook, so there's no push-trigger / deploy-job here any
+# more — the `.readthedocs.yaml` at the repo root is what drives
+# production builds. This workflow's job is to catch build/lint
+# regressions BEFORE they hit main, so RTD's next main-branch build
+# succeeds.
+
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'docs/**'
-      - 'mkdocs.yml'
-      - '.github/workflows/docs.yml'
-      - '.markdownlint.yaml'
-      - '.vale.ini'
-      - '.vale/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'src/**'
   pull_request:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - '.readthedocs.yaml'
       - '.github/workflows/docs.yml'
       - '.markdownlint.yaml'
       - '.vale.ini'
       - '.vale/**'
       - 'pyproject.toml'
       - 'uv.lock'
-
-# src/** is intentionally ONLY in the push trigger (main-branch merges).
-# reference/api.md is auto-generated from src/ via mkdocstrings, so a
-# code-only merge to main must re-deploy to keep the API reference
-# fresh. Leaving src/** out of the PR trigger preserves the "code-only
-# PRs don't burn docs CI" intent.
+      # src/** so PRs that only touch the codebase still surface
+      # mkdocstrings / api.md rendering regressions before they hit
+      # RTD on main. Without this, a code-only PR could break the
+      # auto-generated API reference and only get caught in RTD's
+      # post-merge build.
+      - 'src/**'
 
 permissions:
   contents: read
@@ -94,28 +90,3 @@ jobs:
           version: 3.9.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  deploy:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python
-        run: |
-          uv python install 3.13
-          uv python pin 3.13
-
-      - name: Install docs deps
-        run: uv sync --frozen --extra docs
-
-      - name: mkdocs gh-deploy
-        run: uv run mkdocs gh-deploy --force
