@@ -36,6 +36,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # reviewdog (inside errata-ai/vale-action) posts Vale findings as
+      # PR check annotations and inline review comments. Without these
+      # writes it 403s when posting and the findings silently vanish
+      # (even with continue-on-error suppressing the step-failure).
+      checks: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
