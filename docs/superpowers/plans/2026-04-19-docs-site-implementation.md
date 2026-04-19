@@ -618,7 +618,15 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        # Match the repo's other workflows (lint.yml, bench.yml, publish.yml):
+        # install AND pin the interpreter so docs builds are reproducible as
+        # the ubuntu-latest image's default Python drifts.
+        run: |
+          uv python install 3.13
+          uv python pin 3.13
 
       - name: Install docs deps
         run: uv sync --frozen --extra docs
@@ -650,7 +658,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v4
+      - run: |
+          uv python install 3.13
+          uv python pin 3.13
       - run: uv sync --frozen --extra docs
       - run: uv run mkdocs gh-deploy --force
 ```
@@ -826,16 +837,24 @@ cd greet
 Then create the entry point `greet/cli.py`:
 
 ```python
+from pathlib import Path
+
 from clickwork import create_cli
 
 cli = create_cli(
     name="greet",
-    commands_dir="greet/commands",
+    commands_dir=Path(__file__).parent / "commands",
 )
 
 if __name__ == "__main__":
     cli()
 ```
+
+`commands_dir` is typed as `pathlib.Path`, not `str` — clickwork's
+discovery calls `.is_dir()` and `.glob()` on it directly. Using
+`Path(__file__).parent / "commands"` makes the path resolve
+relative to the cli.py file, so `python -m greet.cli` works from
+any working directory.
 
 And your first command `greet/commands/hello.py`:
 
@@ -977,13 +996,20 @@ if __name__ == "__main__":
 And `src/projectctl/cli.py`:
 
 ```python
+from pathlib import Path
+
 from clickwork import create_cli
 
 cli = create_cli(
     name="projectctl",
-    commands_dir="src/projectctl/commands",
+    commands_dir=Path(__file__).parent / "commands",
 )
 ```
+
+`commands_dir` is typed as `pathlib.Path` (discovery calls `.is_dir()`
+and `.glob()` on it). `Path(__file__).parent / "commands"` resolves
+relative to this `cli.py` so the command works regardless of what
+directory you run `python -m projectctl` from.
 
 ## Write the first command
 
@@ -1336,13 +1362,18 @@ mkdir -p src/<project>/commands
 Create `src/<project>/cli.py`:
 
 ```python
+from pathlib import Path
+
 from clickwork import create_cli
 
 cli = create_cli(
     name="<project>",
-    commands_dir="src/<project>/commands",
+    commands_dir=Path(__file__).parent / "commands",
 )
 ```
+
+`commands_dir` is typed as `pathlib.Path`. Resolving via
+`Path(__file__).parent` makes the path work from any cwd.
 
 And `src/<project>/__main__.py`:
 
@@ -1392,20 +1423,23 @@ discoverable, the command prints what it did.
 ## Step 4 — convert a shell script
 
 Shell scripts become Python commands that shell out. Use `clickwork`'s
-subprocess helpers for correct signal forwarding:
+process helpers for correct signal forwarding:
 
 ```python
 import click
-from clickwork.subprocess import run
+from clickwork.process import run
 
 @click.command(name="do-the-thing")
-@click.option("--verbose", is_flag=True)
-def cli(verbose: bool) -> None:
+def cli() -> None:
     """What this actually does (write ONE sentence)."""
-    run(["bash", "scripts/do_the_thing.sh"],
-        check=True,
-        capture_output=not verbose)
+    run(["bash", "scripts/do_the_thing.sh"])
 ```
+
+`clickwork.process.run()` streams output in real time and raises
+`CliProcessError` on non-zero exit — no `check=` kwarg needed
+(non-zero always raises). If you want the output captured into a
+string instead of streamed, use `clickwork.process.capture()`
+instead of `run()`.
 
 You can keep the original `.sh` file and wrap it, OR rewrite the
 logic in Python. Wrap first, rewrite later if it stays.
@@ -1715,16 +1749,20 @@ cli.add_command(count.cli)
 **After:**
 
 ```python
+from pathlib import Path
+
 from clickwork import create_cli
 
 cli = create_cli(
     name="<project>",
-    commands_dir="src/<project>/commands",
+    commands_dir=Path(__file__).parent / "commands",
 )
 ```
 
 No `add_command` calls. Dropping a new file in `commands/` is the only
-action needed to add a command.
+action needed to add a command. `commands_dir` is a `pathlib.Path`;
+`Path(__file__).parent / "commands"` resolves relative to the cli
+module so the command works from any cwd.
 
 ## What doesn't translate
 
@@ -1780,11 +1818,15 @@ deploy = "projectctl_deploy:cli"
 
 When `create_cli(name="projectctl")` runs, clickwork:
 
-1. Reads the local `commands_dir` and registers every file that
-   exposes a `cli` attribute.
-2. Iterates `importlib.metadata.entry_points(group=
-   "clickwork.commands.projectctl")` and loads each `cli` object.
-3. Merges them, with local files winning any name collision.
+1. Iterates `importlib.metadata.entry_points(group=
+   "clickwork.commands.projectctl")` and loads each entry point's
+   `cli` object.
+2. Reads the local `commands_dir` (when it exists and auto mode is
+   active) and registers every file that exposes a `cli` attribute.
+3. Overlays directory commands on top of entry-point commands, so
+   local files win any name collision. clickwork emits an INFO log
+   when a local file shadows an installed command, so stale local
+   files don't silently hide plugin updates.
 
 ## Why entry points
 
