@@ -41,7 +41,7 @@ Release flow on `main` (from `.github/workflows/publish.yml`):
 3. `create-release` job: download artifact → `softprops/action-gh-release` (pinned to a specific commit SHA that resolves to the v2 line, per supply-chain discipline) creates the Release, attaches the dist files, uses `.github/release.yml` for auto-generated notes.
 4. `publish` job: download artifact → `pypa/gh-action-pypi-publish` uploads to PyPI via Trusted Publishing (OIDC).
 
-Tag signing today: maintainer runs `git tag -s vX.Y.Z` locally, which requires `GPG_TTY=$(tty)` export and a GPG key in the maintainer's keyring. See the "Cutting a release" runbook in `CONTRIBUTING.md`. The tag is cryptographically signed but the workflow itself is not involved — future maintainers would need their own GPG key + the same runbook.
+Tag signing today: maintainer runs `git tag -s vX.Y.Z` locally, which requires a GPG key in the maintainer's keyring; in some environments `GPG_TTY=$(tty)` may also need to be exported so GPG pinentry can access a TTY. See the "Cutting a release" runbook in `CONTRIBUTING.md`. The tag is cryptographically signed but the workflow itself is not involved — future maintainers would need their own GPG key + the same runbook.
 
 `docs/SECURITY.md` has a placeholder "Verifying release artifacts" section with a pip hash-check example and a note that Sigstore signing is planned for 1.0.1 with `cosign verify-blob` / `sigstore-python` as the recommended verify path.
 
