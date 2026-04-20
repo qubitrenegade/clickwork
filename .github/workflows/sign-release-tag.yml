@@ -1,0 +1,141 @@
+name: Sign release tag
+
+# Creates and pushes a GPG-signed annotated tag for a planned release,
+# using a dedicated workflow-only GPG key (NOT the maintainer's personal
+# key). The pushed tag fires publish.yml and runs the existing 3-job
+# pipeline (build → create-release → publish).
+#
+# This replaces the prior CONTRIBUTING.md runbook of "locally run
+# git tag -s && git push origin vX.Y.Z". See Wave 2 plan
+# (docs/superpowers/specs/2026-04-20-sigstore-wave2-impl-plan.md)
+# and parent plan (docs/superpowers/specs/2026-04-19-sigstore-signing-plan.md)
+# for the full rationale and design decisions.
+#
+# Why a PAT instead of GITHUB_TOKEN for the push: pushes authored by
+# GITHUB_TOKEN do NOT fire sibling on:push workflows (GitHub's
+# anti-recursion guard). So a naive GITHUB_TOKEN push here would
+# silently skip publish.yml. The RELEASE_TAG_PUSH_TOKEN PAT bypasses
+# that restriction while keeping least-privilege (contents:write on
+# this repo only).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag (without leading v), e.g. 1.0.1 or 1.0.1rc0'
+        required: true
+        type: string
+      commit_sha:
+        description: 'Commit to tag (default: main HEAD)'
+        required: false
+        type: string
+      headline:
+        description: 'Release headline for tag annotation (e.g. "Sigstore signing end-to-end")'
+        required: true
+        type: string
+
+# Workflow-level deny-all. The job re-grants only what it needs.
+permissions: {}
+
+jobs:
+  sign-and-push:
+    name: Sign and push release tag
+    runs-on: ubuntu-latest
+    # Same pypi environment as publish.yml — the maintainer approves
+    # a deployment here before the release-signing secrets become
+    # readable to the job. First of the two release-flow approvals
+    # (second is publish.yml's PyPI job).
+    environment: pypi
+
+    # contents:read is for checkout only. The actual tag push is
+    # authenticated with RELEASE_TAG_PUSH_TOKEN (a fine-scoped PAT
+    # with contents:write on this repo), NOT with GITHUB_TOKEN.
+    # See workflow header for why.
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the tag points at a real commit. Default
+          # shallow fetch would work for main HEAD but not for an
+          # arbitrary commit_sha input.
+          ref: ${{ inputs.commit_sha || 'main' }}
+          fetch-depth: 0
+
+      - name: Import GPG key + configure git identity
+        # crazy-max/ghaction-import-gpg sets user.name, user.email,
+        # user.signingkey, and enables tag GPG signing from the
+        # imported key's UID. The runner starts with an unconfigured
+        # git identity, so without this step `git tag -s` would fail
+        # with "please tell me who you are".
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          git_user_signingkey: true
+          git_tag_gpgsign: true
+
+      - name: Pin signing key by fingerprint
+        # Belt-and-suspenders: the import step sets user.signingkey
+        # to whatever identifier the action derives. We override with
+        # the full 40-char fingerprint so collisions against any
+        # other key in the ephemeral keyring are impossible.
+        run: git config user.signingkey "${{ secrets.RELEASE_GPG_FINGERPRINT }}"
+
+      - name: Create signed tag
+        # Shell-injection hardening: pass inputs.version and
+        # inputs.headline via env vars rather than direct ${{ }}
+        # interpolation. Validate version against a shell-
+        # metacharacter-free character set (digits, letters, dot,
+        # plus, hyphen) so PEP 440 prereleases like 1.0.1rc0 and
+        # hyphenated tags like 1.0.1-rc0 both pass, but `;`, `$`,
+        # `|`, spaces, etc. are rejected. Write the annotation body
+        # to a temp file and `git tag -F` from it so quotes/newlines
+        # in the headline can't break out of the shell context.
+        env:
+          VERSION: ${{ inputs.version }}
+          HEADLINE: ${{ inputs.headline }}
+        run: |
+          set -eu
+          case "$VERSION" in
+            '')
+              echo "Version must not be empty" >&2
+              exit 1
+              ;;
+            *[!0-9a-zA-Z.+-]*)
+              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
+              exit 1
+              ;;
+          esac
+          if printf '%s' "$HEADLINE" | grep -q '[[:cntrl:]]'; then
+            echo "Headline must not contain control characters" >&2
+            exit 1
+          fi
+          TAG="v$VERSION"
+          msg_file="$(mktemp)"
+          trap 'rm -f "$msg_file"' EXIT
+          printf 'clickwork %s — %s\n' "$VERSION" "$HEADLINE" >"$msg_file"
+          git tag -s "$TAG" -F "$msg_file"
+
+      - name: Push tag with PAT
+        # Same hardening: VERSION via env, re-validate (defense in
+        # depth). PAT-authenticated URL authenticates as the PAT
+        # owner, not as GITHUB_TOKEN, so the tag push fires
+        # publish.yml normally.
+        env:
+          PAT: ${{ secrets.RELEASE_TAG_PUSH_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          case "$VERSION" in
+            '')
+              echo "Version must not be empty" >&2
+              exit 1
+              ;;
+            *[!0-9a-zA-Z.+-]*)
+              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
+              exit 1
+              ;;
+          esac
+          TAG="v$VERSION"
+          git push "https://x-access-token:${PAT}@github.com/${{ github.repository }}.git" "$TAG"
