@@ -97,6 +97,40 @@ jobs:
           fi
           git checkout --detach "$COMMIT_SHA"
 
+      - name: Preflight — inputs.version matches pyproject.toml + CHANGELOG.md
+        # Without this check, a skew between inputs.version and the
+        # pyproject.toml version at the checked-out commit produces a
+        # silently-broken release: the tag says v1.0.1 but uv build
+        # reads pyproject.toml (still 1.0.0) and the artifacts are
+        # 1.0.0-named. publish.yml then either fails the PyPI upload
+        # (1.0.0 already published) or, worse, overwrites/republishes
+        # something unintended. Fail loudly here instead.
+        #
+        # Also require a matching CHANGELOG.md entry — Keep-a-Changelog
+        # format (## [X.Y.Z]) — so a maintainer can't ship a release
+        # without noting it in the changelog.
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          # awk extracts the first `version = "..."` line (the one
+          # under [project]; pyproject.toml doesn't have others at
+          # time of writing, but if it did we'd only match the first).
+          PROJECT_VERSION=$(awk -F'"' '/^version = "/ { print $2; exit }' pyproject.toml)
+          if [ -z "$PROJECT_VERSION" ]; then
+            echo "Could not parse version from pyproject.toml" >&2
+            exit 1
+          fi
+          if [ "$PROJECT_VERSION" != "$VERSION" ]; then
+            echo "Version mismatch: inputs.version=$VERSION but pyproject.toml has $PROJECT_VERSION." >&2
+            echo "Merge a release PR that bumps pyproject.toml to $VERSION before dispatching this workflow." >&2
+            exit 1
+          fi
+          if ! grep -qF "## [${VERSION}]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no entry '## [$VERSION]'. Add a Keep-a-Changelog entry before cutting the release." >&2
+            exit 1
+          fi
+
       - name: Import GPG key + configure git identity
         # crazy-max/ghaction-import-gpg sets user.name, user.email,
         # user.signingkey, and enables tag GPG signing from the
