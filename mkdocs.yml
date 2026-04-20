@@ -10,6 +10,7 @@ exclude_docs: |
   GUIDE.md
   PLUGINS.md
   SECURITY.md
+  VERIFYING.md
   MIGRATING.md
   ARCHITECTURE.md
   API_POLICY.md
@@ -75,6 +76,7 @@ plugins:
         GUIDE.md: reference/guide.md
         PLUGINS.md: reference/plugins.md
         SECURITY.md: reference/security.md
+        VERIFYING.md: reference/verifying.md
         MIGRATING.md: reference/migrating.md
         LLM_REFERENCE.md: reference/llm-reference.md
         ARCHITECTURE.md: explanation/architecture.md
@@ -103,6 +105,7 @@ nav:
       - User Guide: reference/guide.md
       - Plugins: reference/plugins.md
       - Security: reference/security.md
+      - Verifying: reference/verifying.md
       - Migrating: reference/migrating.md
       - API Reference: reference/api.md
       - LLM Reference: reference/llm-reference.md

@@ -214,9 +214,19 @@ Implementation: `clickwork.config._check_owner_only_permissions`.
 
 ## Verifying release artifacts
 
-For 1.0.0, verify PyPI downloads by pinning the release hash. pip's
-hash-checking mode reads hashes from a requirements file rather than
-the command line:
+Every release from 1.0.1 onward can be verified three ways:
+
+1. **PyPI attestation** (PEP 740) —
+   `pypi-attestations verify pypi clickwork==<version>`
+2. **Sigstore bundle** (GitHub Release asset) —
+   `sigstore verify identity <artifact> --bundle <artifact>.sigstore --cert-identity <workflow-url> --cert-oidc-issuer https://token.actions.githubusercontent.com`
+3. **Signed git tag** — `git verify-tag v<version>`
+
+See [verifying.md](verifying.md) for worked examples + troubleshooting.
+
+For pre-1.0.1 releases (no signing) or as a fallback if verify
+tooling is unavailable, pin by hash. `pip`'s hash-checking mode
+reads hashes from a requirements file rather than the command line:
 
 ```text
 # requirements.txt
@@ -231,11 +241,6 @@ PyPI publishes SHA-256 hashes for each artifact on the release page.
 `uv.lock` captures the same hashes when `uv add clickwork==1.0.0` is
 used, and `uv sync --locked` refuses to install anything whose hash
 no longer matches the lockfile.
-
-Sigstore keyless signing is planned for 1.0.1 and tracked in
-[#61](https://github.com/qubitrenegade/clickwork/issues/61). Once it
-ships, `cosign verify-blob` or `sigstore-python` will be the
-recommended verification path.
 
 ## Cross-references
 
