@@ -173,7 +173,7 @@ In one maintainer session:
 - `pyproject.toml`: 1 line changed.
 - `CHANGELOG.md`: ~30 lines added.
 
-Total: Wave 4a's PR is ~31 lines. Waves 4b–d are maintainer activity, not committed code.
+Total: Wave 4a's PR is ~31 lines. Waves 4b–4c are maintainer activity, not committed code.
 
 ## Merge-order constraints
 
@@ -193,9 +193,9 @@ Total: Wave 4a's PR is ~31 lines. Waves 4b–d are maintainer activity, not comm
 
 ## Risks / open
 
-- **Secrets-setup friction delays the cut.** Wave 4b is a one-time ~10-minute task for the maintainer; if GPG keyring or PAT generation trips up, the release slips. Mitigated by the detailed runbook in CONTRIBUTING.md. Any secrets-wiring bug surfaces in 4c's first workflow dispatch with a clear error message from the fingerprint-validation / PAT-empty checks added in Wave 2 rounds 5 and 11.
+- **Secrets-setup friction delays the cut.** Wave 4b is a one-time ~10-minute task for the maintainer; if GPG keyring or PAT generation trips up, the release slips. Mitigated by the detailed runbook in CONTRIBUTING.md. Any secrets-wiring bug surfaces in 4c's first workflow dispatch with a clear error message from the fingerprint-validation / PAT-empty checks in `.github/workflows/sign-release-tag.yml` (introduced in #110).
 - **Auto-generated release notes don't cover all the Sigstore-related PRs.** `#108`/`#110`/`#112` should be labeled `enhancement` or `documentation`; if they landed without labels, they fall under "Other changes" in the auto-generated body. Can be fixed with a post-merge label sweep before Wave 4c, or accepted (the CHANGELOG entry is the authoritative changelog anyway).
-- **Verify commands diverge between `docs/reference/verifying.md` (written pre-1.0.1) and reality (observed at 4d).** If any divergence surfaces, file a follow-up against verifying.md. Low-probability since the commands were derived from Wave 1+2 implementation shapes, not guessed.
+- **Verify commands diverge between `docs/reference/verifying.md` (written pre-1.0.1) and reality (observed at 4c).** If any divergence surfaces, file a follow-up against verifying.md. Low-probability since the commands were derived from Wave 1+2 implementation shapes, not guessed.
 - **PyPI attestation endpoint is flaky at the moment of publish.** Outside our control; `publish.yml` fails loudly if attestation upload fails. Retry by re-running the publish job (the sign-release-tag workflow doesn't need to re-run).
 
 ## Out of scope for this plan
