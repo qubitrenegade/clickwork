@@ -219,7 +219,7 @@ Every release from 1.0.1 onward can be verified three ways:
 1. **PyPI attestation** (PEP 740) —
    `pypi-attestations verify pypi clickwork==<version>`
 2. **Sigstore bundle** (GitHub Release asset) —
-   `sigstore verify identity <wheel> --bundle <wheel>.sigstore --cert-identity <workflow-url> --cert-oidc-issuer https://token.actions.githubusercontent.com`
+   `sigstore verify identity <artifact> --bundle <artifact>.sigstore --cert-identity <workflow-url> --cert-oidc-issuer https://token.actions.githubusercontent.com`
 3. **Signed git tag** — `git verify-tag v<version>`
 
 See [verifying.md](verifying.md) for worked examples + troubleshooting.

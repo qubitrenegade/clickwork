@@ -43,14 +43,14 @@ you downloaded — for a prerelease use the hyphenated form, e.g.
 `@refs/tags/v1.0.1-rc0`):
 
     sigstore verify identity \
-      dist/clickwork-1.0.1-py3-none-any.whl \
-      --bundle dist/clickwork-1.0.1-py3-none-any.whl.sigstore \
+      ./clickwork-1.0.1-py3-none-any.whl \
+      --bundle ./clickwork-1.0.1-py3-none-any.whl.sigstore \
       --cert-identity https://github.com/qubitrenegade/clickwork/.github/workflows/publish.yml@refs/tags/v1.0.1 \
       --cert-oidc-issuer https://token.actions.githubusercontent.com
 
 (Repeat with the sdist if you pulled the sdist.)
 
-Expected output: `OK: dist/clickwork-1.0.1-py3-none-any.whl`.
+Expected output: `OK: ./clickwork-1.0.1-py3-none-any.whl`.
 
 ## Verifying the git tag
 
