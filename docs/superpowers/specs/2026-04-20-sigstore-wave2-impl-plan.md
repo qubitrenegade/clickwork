@@ -192,18 +192,25 @@ jobs:
       - name: Create signed tag
         # Shell-injection hardening: pass inputs.version and inputs.headline
         # via env vars rather than direct ${{ }} interpolation inside the
-        # shell command. Validate version before use (digits + dots only,
-        # no more than 3 dots). Write the annotation body to a temp file
-        # and `git tag -F` from it so any punctuation in the headline
-        # (quotes, newlines) can't break out of the shell context.
+        # shell command. Validate version against a shell-metacharacter-free
+        # character set (digits, letters, dot, plus, hyphen) so PEP 440
+        # prereleases like 1.0.1rc0 and the hyphenated tag convention
+        # `v1.0.1-rc0` both pass, but `;`, `$`, `|`, spaces, etc. are
+        # rejected. Write the annotation body to a temp file and use
+        # `git tag -F` so quotes/newlines in the headline can't break
+        # out of the shell context.
         env:
           VERSION: ${{ inputs.version }}
           HEADLINE: ${{ inputs.headline }}
         run: |
           set -eu
           case "$VERSION" in
-            ''|*[!0-9.]*|*.*.*.*)
-              echo "Invalid version: $VERSION" >&2
+            '')
+              echo "Version must not be empty" >&2
+              exit 1
+              ;;
+            *[!0-9a-zA-Z.+-]*)
+              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
               exit 1
               ;;
           esac
@@ -228,8 +235,12 @@ jobs:
         run: |
           set -eu
           case "$VERSION" in
-            ''|*[!0-9.]*|*.*.*.*)
-              echo "Invalid version: $VERSION" >&2
+            '')
+              echo "Version must not be empty" >&2
+              exit 1
+              ;;
+            *[!0-9a-zA-Z.+-]*)
+              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
               exit 1
               ;;
           esac
