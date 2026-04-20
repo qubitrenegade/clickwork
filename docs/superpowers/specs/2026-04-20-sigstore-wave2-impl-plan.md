@@ -105,7 +105,7 @@ These are maintainer-side setup tasks, documented here for visibility. They're N
    gpg --batch --passphrase '' --quick-gen-key 'clickwork-release-bot <release@clickwork.invalid>' rsa4096 sign 0
    ```
    Passwordless (`--passphrase ''`) — the workflow can't type a passphrase. The identity is `clickwork-release-bot`, clearly NOT `qubitrenegade`.
-2. **Export the public half + upload to the maintainer's GitHub** (Settings → SSH and GPG keys → New GPG key). This is what gives tag-signature commits the "Verified" badge against the maintainer's account.
+2. **Export the public half + upload to the maintainer's GitHub** (Settings → SSH and GPG keys → New GPG key). This is what lets GitHub show signed tags from this key as "Verified" on the maintainer's account.
    ```bash
    gpg --armor --export <fingerprint>
    ```
@@ -113,9 +113,10 @@ These are maintainer-side setup tasks, documented here for visibility. They're N
    ```bash
    gpg --armor --export-secret-keys <fingerprint>
    ```
-4. **Capture the full 40-character fingerprint** for the `git config user.signingkey` step:
+4. **Capture the full 40-character fingerprint** for the `git config user.signingkey` step. Filter by the new key's UID so multiple secret keys in the keyring don't cause the wrong fingerprint to be picked up:
    ```bash
-   gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}'
+   gpg --list-secret-keys --with-colons 'clickwork-release-bot <release@clickwork.invalid>' \
+     | awk -F: '$1=="fpr" {print $10; exit}'
    ```
 5. **Create a fine-scoped PAT** for pushing the signed tag (GitHub Settings → Developer settings → Personal access tokens → Fine-grained):
    - Repository access: Only `qubitrenegade/clickwork`.
@@ -166,15 +167,25 @@ jobs:
           ref: ${{ inputs.commit_sha || 'main' }}
           fetch-depth: 0  # full history so the tag points at a real commit
 
-      - name: Import GPG key
+      - name: Import GPG key + configure git identity
+        # crazy-max/ghaction-import-gpg sets user.name, user.email,
+        # user.signingkey, and enables tag/commit GPG signing from the
+        # imported key's UID. The runner starts with an unconfigured
+        # git identity, so without this step `git tag -s` would fail
+        # with "please tell me who you are".
         uses: crazy-max/ghaction-import-gpg@<pinned-sha>  # v6.x or similar
         with:
           gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           git_user_signingkey: true
           git_tag_gpgsign: true
-          # name/email come from the key's UID
+          # git_committer_name and git_committer_email are derived
+          # from the key's UID automatically.
 
-      - name: Configure git signingkey fingerprint
+      - name: Pin signing key by fingerprint
+        # Belt-and-suspenders: the import step sets user.signingkey
+        # to the key's ID, but we override with the full 40-char
+        # fingerprint so collisions against any other key in the
+        # runner's ephemeral keyring are impossible.
         run: git config user.signingkey ${{ secrets.RELEASE_GPG_FINGERPRINT }}
 
       - name: Create signed tag
@@ -259,15 +270,15 @@ procedure:
 After this PR's implementation merges:
 
 1. Maintainer completes the prerequisite steps (generate key + PAT + secrets), per the Prerequisites section.
-2. Dispatch the new workflow against a throwaway version like `0.0.0-wave2-smoke` pointing at main HEAD. Approve the `pypi` environment gate.
+2. Dispatch the new workflow against a throwaway version like `0.0.0-wave2-smoke` pointing at main HEAD. Approve the `pypi` environment gate for the **signing workflow** so it can read the release secrets.
 3. Verify:
    - Workflow run succeeds end-to-end.
    - Tag `v0.0.0-wave2-smoke` exists on the repo with a GPG "Verified" badge on the tag detail page.
    - `publish.yml` fires on the tag push (check Actions tab).
-   - `publish.yml`'s build job succeeds (it'll upload to PyPI with a prerelease version, which is fine — we'll yank).
-4. **Do NOT approve `publish.yml`'s PyPI job** for this smoke test; cancel it. We just want the tag-push-triggers-publish chain verified, not another PyPI artifact.
+   - `publish.yml`'s build job succeeds, and the workflow then waits at its gated PyPI publish job.
+4. **Do NOT approve `publish.yml`'s PyPI job** for this smoke test. Cancel it or let the gate expire. Critical: the built artifact's version comes from `pyproject.toml` (currently `1.0.0`), NOT from the throwaway tag name, so approving PyPI here would attempt a re-upload of `1.0.0` and fail — or, worse, publish an unintended real version if `pyproject.toml` had been bumped. This smoke test verifies tag-signing + tag-push-triggers-publish only; it must not touch PyPI.
 5. Delete the smoke-test tag: `git push --delete origin v0.0.0-wave2-smoke` + delete the Release.
-6. Repeat against a real 1.0.1 prerelease (`v1.0.1-rc0`) once Wave 3 docs are ready.
+6. Repeat the real RC flow (`v1.0.1-rc0`, with `pyproject.toml` bumped to `1.0.1rc0` first) once Wave 3 docs are ready — that RC exercises the full Sigstore + tag-signing + PyPI path end-to-end.
 
 If anything fails, the failure is in the workflow file or the secrets; fix, push another commit, dispatch again.
 
