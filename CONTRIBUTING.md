@@ -179,9 +179,10 @@ they were created and how to rotate).
 3. Click **Run workflow**. The `pypi` environment's approval gate
    fires — open the run, click "Review deployments", approve
    `pypi`. The workflow imports the release-signing GPG key,
-   creates and pushes a signed `vX.Y.Z` tag using the PAT
-   (`RELEASE_TAG_PUSH_TOKEN`) so the tag push fires
-   `publish.yml` normally.
+   creates and pushes a signed `v...` tag using the PAT
+   (`RELEASE_TAG_PUSH_TOKEN`) — `vX.Y.Z` for final releases, or
+   a hyphenated prerelease tag such as `vX.Y.Z-rc0` / `vX.Y.Z-dev0`
+   — so the tag push fires `publish.yml` normally.
 4. The push fires `.github/workflows/publish.yml`: build wheel +
    sdist, Sigstore-sign them, create the GitHub Release with
    auto-generated notes (from `.github/release.yml` label
