@@ -35,12 +35,13 @@ The current `security.md` "Verifying release artifacts" section is a placeholder
 
 ## Scope of this plan
 
-Four deliverables:
+Five deliverables:
 
 1. **New file** `docs/reference/verifying.md` — the canonical "how to verify a clickwork release" page. Three concrete command blocks (one per verify path), plus a short "troubleshooting" subsection.
 2. **New file** `docs/VERIFYING.md` (top-level) — 1-line redirect stub pointing at `reference/verifying.md`. This matches the existing `docs/SECURITY.md` → `reference/security.md` pattern and honors parent plan #97's Q5=C wording which named the detailed doc as "`docs/VERIFYING.md`".
-3. **Rewrite** `docs/reference/security.md` lines 215–238 from hash-pinning-focused to a short "Verifying release artifacts" summary that names the three paths and links to `verifying.md`.
-4. **Cross-link** from `README.md` (install section mentions the verify doc) and `CONTRIBUTING.md` (release-cutting runbook references the verify doc for consumer-side expectations).
+3. **`mkdocs.yml` updates** — add `VERIFYING.md` to `exclude_docs`, add `VERIFYING.md: reference/verifying.md` to `plugins.redirects.redirect_maps`, add `Verifying: reference/verifying.md` to `nav.Reference`. Without these, RTD's `fail_on_warning` build breaks on (a) the new orphan page in `docs/` and (b) the `reference/verifying.md` page not being in nav.
+4. **Rewrite** `docs/reference/security.md` lines 215–238 from hash-pinning-focused to a short "Verifying release artifacts" summary that names the three paths and links to `verifying.md`.
+5. **Cross-link** from `README.md` (install section mentions the verify doc) and `CONTRIBUTING.md` (release-cutting runbook references the verify doc for consumer-side expectations).
 
 ## Design questions
 
@@ -100,8 +101,8 @@ Structure:
 Every release from 1.0.1 onward is provenance-protected three ways:
 the PyPI package carries PEP 740 attestations, the GitHub Release
 carries Sigstore `.sigstore` bundles, and the git tag is GPG-signed
-by the clickwork-release-bot key. Pick whichever verify path matches
-how you installed.
+(workflow key by default; maintainer key in fallback). Pick whichever
+verify path matches how you installed.
 
 (Examples below use `1.0.1` as the target version — substitute the
 version you installed.)
@@ -188,7 +189,7 @@ unsigned and this fallback flow does not apply.
 
 - [security.md](security.md) — threat model + hash-pinning fallback
   verify path for pre-1.0.1 releases.
-- [CONTRIBUTING.md#cutting-a-release-recommended-workflow-driven](../../CONTRIBUTING.md) — how the release-signing machinery works from the maintainer side.
+- [CONTRIBUTING.md — Cutting a release (recommended: workflow-driven)](https://github.com/qubitrenegade/clickwork/blob/main/CONTRIBUTING.md#cutting-a-release-recommended-workflow-driven) — how the release-signing machinery works from the maintainer side. (Absolute GitHub URL — `CONTRIBUTING.md` isn't published under `docs/` and a relative link would break RTD's `fail_on_warning` build.)
 - Parent issue: [#61](https://github.com/qubitrenegade/clickwork/issues/61).
 ```
 
@@ -202,7 +203,31 @@ Mirrors `docs/SECURITY.md`:
 
 Exists so the parent-plan-named path (`docs/VERIFYING.md`) resolves for anyone who reads the parent plan directly, and so future cross-links can use either the short top-level path or the full `reference/` path.
 
-### Step 3. Rewrite `docs/reference/security.md` "Verifying release artifacts" section (~25 lines → ~15 lines)
+### Step 3. `mkdocs.yml` updates (~6 lines)
+
+Three changes to keep the RTD `fail_on_warning` build green:
+
+1. Add `VERIFYING.md` to `exclude_docs` (top-level stub is a redirect, not a published page):
+
+       exclude_docs: |
+         # ... existing entries ...
+         VERIFYING.md
+
+2. Add a redirect entry in `plugins.redirects.redirect_maps`:
+
+       redirect_maps:
+         # ... existing entries ...
+         VERIFYING.md: reference/verifying.md
+
+3. Add `Verifying: reference/verifying.md` to `nav.Reference` (otherwise the new page is an orphan and `strict`/RTD builds warn):
+
+       nav:
+         # ...
+         - Reference:
+             # ... existing entries ...
+             - Verifying: reference/verifying.md
+
+### Step 4. Rewrite `docs/reference/security.md` "Verifying release artifacts" section (~25 lines → ~15 lines)
 
 Replace the existing hash-pinning-focused paragraph with:
 
@@ -223,25 +248,18 @@ unavailable, pin by hash:
 <retain the existing requirements.txt + pip --require-hashes + uv.lock paragraphs, about 15 lines>
 ```
 
-### Step 4. README cross-link
+### Step 5. README cross-link
 
-Append a short note to the existing `## Installation` section (the actual heading — not "Install"):
+Append a short note to the existing `## Installation` section (the actual heading — not "Install"). The existing section already contains the `uv pip install "clickwork>=1.0,<2"` block and surrounding prose; we add a new trailing paragraph:
 
-```markdown
-## Installation
-
-```bash
-# From PyPI (preferred)
-uv pip install "clickwork>=1.0,<2"
-[existing prose stays]
-```
-
-**Verifying your install:** see [docs/VERIFYING.md](docs/VERIFYING.md) (top-level redirect to [docs/reference/verifying.md](docs/reference/verifying.md)) for the three verify paths — PyPI attestation, Sigstore bundle, signed tag.
-```
+    **Verifying your install:** see [docs/VERIFYING.md](docs/VERIFYING.md)
+    (top-level redirect to [docs/reference/verifying.md](docs/reference/verifying.md))
+    for the three verify paths — PyPI attestation, Sigstore bundle,
+    signed tag.
 
 ~3 lines added.
 
-### Step 5. CONTRIBUTING.md cross-link
+### Step 6. CONTRIBUTING.md cross-link
 
 At the end of the "Cutting a release (recommended: workflow-driven)" subsection, add:
 
@@ -264,11 +282,12 @@ Running those commands against the RC tag during smoke-test
 
 - `docs/reference/verifying.md`: ~120 new lines (real content).
 - `docs/VERIFYING.md`: ~1 new line (redirect stub, mirrors `SECURITY.md`).
+- `mkdocs.yml`: ~6 lines added (exclude_docs entry, redirect_maps entry, nav entry).
 - `docs/reference/security.md`: ~25 lines removed, ~15 added (net −10).
 - `README.md`: ~3 lines added.
 - `CONTRIBUTING.md`: ~4 lines added.
 
-Total: ~130 lines net, 2 new files.
+Total: ~135 lines net, 2 new files.
 
 ## Merge-order constraints
 
