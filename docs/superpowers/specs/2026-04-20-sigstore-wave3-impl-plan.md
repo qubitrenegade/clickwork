@@ -125,7 +125,7 @@ Install `pypi-attestations` in a scratch venv:
 
     pip install pypi-attestations
 
-Verify the attestations for an installed clickwork:
+Verify the attestations for clickwork 1.0.1 on PyPI:
 
     pypi-attestations verify pypi clickwork==1.0.1
 
