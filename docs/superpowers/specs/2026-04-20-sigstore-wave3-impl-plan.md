@@ -35,25 +35,26 @@ The current `security.md` "Verifying release artifacts" section is a placeholder
 
 ## Scope of this plan
 
-Three deliverables:
+Four deliverables:
 
 1. **New file** `docs/reference/verifying.md` — the canonical "how to verify a clickwork release" page. Three concrete command blocks (one per verify path), plus a short "troubleshooting" subsection.
-2. **Rewrite** `docs/reference/security.md` lines 215–238 from hash-pinning-focused to a short "Verifying release artifacts" summary that names the three paths and links to `verifying.md`.
-3. **Cross-link** from `README.md` (install section mentions the verify doc) and `CONTRIBUTING.md` (release-cutting runbook references the verify doc for consumer-side expectations).
+2. **New file** `docs/VERIFYING.md` (top-level) — 1-line redirect stub pointing at `reference/verifying.md`. This matches the existing `docs/SECURITY.md` → `reference/security.md` pattern and honors parent plan #97's Q5=C wording which named the detailed doc as "`docs/VERIFYING.md`".
+3. **Rewrite** `docs/reference/security.md` lines 215–238 from hash-pinning-focused to a short "Verifying release artifacts" summary that names the three paths and links to `verifying.md`.
+4. **Cross-link** from `README.md` (install section mentions the verify doc) and `CONTRIBUTING.md` (release-cutting runbook references the verify doc for consumer-side expectations).
 
 ## Design questions
 
 ### Q1. File path for the verify doc?
 
-clickwork's `docs/` tree has `reference/`, `how-to/`, `tutorials/`, `explanation/` (Diátaxis-style structure).
+clickwork's `docs/` tree has `reference/`, `how-to/`, `tutorials/`, `explanation/` (Diátaxis-style structure). Parent plan #97's locked Q5=C specifically named `docs/VERIFYING.md` (top-level), but `docs/SECURITY.md` is itself a redirect-stub to `docs/reference/security.md`, so "top-level path" has precedent for being a redirect rather than the real content.
 
-- **A) `docs/reference/verifying.md`** — matches `docs/reference/security.md` neighbour; reference-style "these commands, this output" content. Consistent with how `security.md` itself is placed.
-- **B) `docs/how-to/verify-a-release.md`** — Diátaxis says "how-to" is for goal-oriented recipes, which fits verification perfectly.
-- **C) `docs/VERIFYING.md`** (top-level) — matches CONTRIBUTING.md / MIGRATING.md pattern. Shorter URL, easier to link from README.
+- **A) `docs/reference/verifying.md` for real content + top-level `docs/VERIFYING.md` redirect stub** — matches the existing `SECURITY.md` → `reference/security.md` pattern. Honors parent plan's "docs/VERIFYING.md" wording (the top-level path exists) while keeping the real content beside `security.md` in `reference/`.
+- **B) `docs/how-to/verify-a-release.md`** — Diátaxis says "how-to" is for goal-oriented recipes, which fits verification perfectly. Diverges from parent plan.
+- **C) Top-level `docs/VERIFYING.md` with no redirect** — literal reading of parent plan. Inconsistent with how `security.md` is placed (real content lives in `reference/`).
 
-**Recommendation:** A. `security.md` is already reference-style and the verify doc is naturally a sibling of it. Keeping them adjacent in `docs/reference/` means the short-summary in security.md can link with `verifying.md` (no path prefix). B is defensible but verifying-is-a-recipe vs verifying-is-a-reference-page is a judgment call and we already have `security.md` in reference/; consistency wins.
+**Recommendation:** A. The `SECURITY.md` → `reference/security.md` redirect pattern is already the project's established convention; applying it to VERIFYING.md keeps docs/reference/ as the home for detailed reference pages while the top-level path still resolves for anyone following the parent plan's wording or wanting a short URL.
 
-**Open question for maintainer:** confirm A, or prefer B's how-to placement?
+**Open question for maintainer:** confirm A (redirect + reference/ content), or push back toward B (how-to) or C (top-level only)?
 
 ### Q2. Depth of worked examples — templates vs specific version?
 
@@ -170,15 +171,18 @@ path documented in `security.md`.
 Check you're on 1.0.1 or later: `pip show clickwork`. Attestations
 start with 1.0.1.
 
-### `git verify-tag` says "no signature"
+### `git verify-tag` says "Can't check signature: No public key"
 
 The local-GPG fallback path (documented in `CONTRIBUTING.md`) was
 used for this release. The tag is still signed, but with the
 maintainer's personal key rather than the workflow key. Either tag
 signature verifies via `git verify-tag`; this message means your
-local GPG keyring doesn't have the public key. Fetch it:
+local GPG keyring doesn't have the signer public key yet. Fetch it:
 
     gpg --keyserver keys.openpgp.org --recv-keys <fingerprint-from-tag-page>
+
+If `git verify-tag` instead reports "no signature", the tag is
+unsigned and this fallback flow does not apply.
 
 ## See also
 
@@ -188,7 +192,17 @@ local GPG keyring doesn't have the public key. Fetch it:
 - Parent issue: [#61](https://github.com/qubitrenegade/clickwork/issues/61).
 ```
 
-### Step 2. Rewrite `docs/reference/security.md` "Verifying release artifacts" section (~25 lines → ~15 lines)
+### Step 2. `docs/VERIFYING.md` (top-level redirect stub, ~1 line)
+
+Mirrors `docs/SECURITY.md`:
+
+```markdown
+> This page has moved to [reference/verifying.md](reference/verifying.md).
+```
+
+Exists so the parent-plan-named path (`docs/VERIFYING.md`) resolves for anyone who reads the parent plan directly, and so future cross-links can use either the short top-level path or the full `reference/` path.
+
+### Step 3. Rewrite `docs/reference/security.md` "Verifying release artifacts" section (~25 lines → ~15 lines)
 
 Replace the existing hash-pinning-focused paragraph with:
 
@@ -209,23 +223,25 @@ unavailable, pin by hash:
 <retain the existing requirements.txt + pip --require-hashes + uv.lock paragraphs, about 15 lines>
 ```
 
-### Step 3. README cross-link
+### Step 4. README cross-link
 
-Add a short note to the existing install section:
+Append a short note to the existing `## Installation` section (the actual heading — not "Install"):
 
 ```markdown
-## Install
+## Installation
 
-    pip install clickwork
-
+```bash
+# From PyPI (preferred)
+uv pip install "clickwork>=1.0,<2"
 [existing prose stays]
+```
 
-**Verifying your install:** see [docs/reference/verifying.md](docs/reference/verifying.md) for the three verify paths (PyPI attestation, Sigstore bundle, signed tag).
+**Verifying your install:** see [docs/VERIFYING.md](docs/VERIFYING.md) (top-level redirect to [docs/reference/verifying.md](docs/reference/verifying.md)) for the three verify paths — PyPI attestation, Sigstore bundle, signed tag.
 ```
 
 ~3 lines added.
 
-### Step 4. CONTRIBUTING.md cross-link
+### Step 5. CONTRIBUTING.md cross-link
 
 At the end of the "Cutting a release (recommended: workflow-driven)" subsection, add:
 
@@ -240,18 +256,19 @@ Running those commands against the RC tag during smoke-test
 
 ## Smoke-test plan
 
-- After this PR merges: render the new `verifying.md` in the docs site (mkdocs or whatever generates `clickwork.dev`), confirm links resolve.
+- After this PR merges: render the new `verifying.md` in the published docs site (`clickwork.readthedocs.io` per `mkdocs.yml`), confirm links resolve.
 - Dry-run the three verify commands against an existing test RC if Wave 2 produced one. Document any command-string glitches.
 - Do NOT ship 1.0.1 yet — Wave 4 handles that, and its smoke-test explicitly runs these verify commands against the first real signed release.
 
 ## Target diff size
 
-- `docs/reference/verifying.md`: ~120 new lines.
+- `docs/reference/verifying.md`: ~120 new lines (real content).
+- `docs/VERIFYING.md`: ~1 new line (redirect stub, mirrors `SECURITY.md`).
 - `docs/reference/security.md`: ~25 lines removed, ~15 added (net −10).
 - `README.md`: ~3 lines added.
 - `CONTRIBUTING.md`: ~4 lines added.
 
-Total: ~130 lines net, 1 new file.
+Total: ~130 lines net, 2 new files.
 
 ## Merge-order constraints
 
