@@ -115,7 +115,7 @@ jobs:
           msg_file="$(mktemp)"
           trap 'rm -f "$msg_file"' EXIT
           printf 'clickwork %s — %s\n' "$VERSION" "$HEADLINE" >"$msg_file"
-          git tag -s "$TAG" -F "$msg_file"
+          git tag -s -F "$msg_file" "$TAG"
 
       - name: Push tag with PAT
         # Same hardening: VERSION via env, re-validate (defense in

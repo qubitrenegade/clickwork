@@ -285,20 +285,28 @@ PAT rotate **yearly, or immediately on any suspected exposure**.
    - `RELEASE_GPG_FINGERPRINT` — 40-character fingerprint from step 4.
    - `RELEASE_TAG_PUSH_TOKEN` — PAT from step 5.
 
-**Yearly rotation:**
+**Yearly rotation (no compromise suspected):**
 
 1. Generate a new GPG key + PAT, same procedure as steps 1-5
    above.
 2. Upload the new public GPG key to your GitHub account. Do NOT
-   delete the old public key yet — existing tag signatures
-   reference it.
+   delete the old public key — existing tag signatures reference
+   it and should remain verifiable.
 3. Update `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_FINGERPRINT`,
    and `RELEASE_TAG_PUSH_TOKEN` in the `pypi` environment.
 4. Run the next release through the workflow to confirm it signs
    cleanly against the new key.
-5. After a clean release with the new key: revoke the old GPG key
-   (upload the revocation certificate to your GitHub account) and
-   delete the old PAT.
+5. After a clean release with the new key: delete the old PAT.
+   Keep the old public GPG key published on your GitHub account so
+   historical signed tags continue to show as "Verified".
+
+**If the old GPG private key is exposed or compromised:** revoke
+the old GPG key (publish the revocation certificate to your GitHub
+account's GPG keys and to any keyservers it was distributed to).
+Revocation is for compromise handling, NOT routine yearly rotation
+— revoking a key causes historical tag signatures made with it to
+be treated as suspect by verifiers, which is appropriate when the
+key was stolen but a regression in the routine-rotation case.
 
 ## Code of conduct
 
