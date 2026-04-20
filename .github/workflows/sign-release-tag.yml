@@ -5,8 +5,10 @@ name: Sign release tag
 # key). The pushed tag fires publish.yml and runs the existing 3-job
 # pipeline (build → create-release → publish).
 #
-# This replaces the prior CONTRIBUTING.md runbook of "locally run
-# git tag -s && git push origin vX.Y.Z". See Wave 2 plan
+# This workflow is the recommended path for most releases and
+# supersedes the prior CONTRIBUTING.md runbook of "locally run
+# git tag -s && git push origin vX.Y.Z" in the common case, while
+# keeping the local-GPG flow documented as a fallback. See Wave 2 plan
 # (docs/superpowers/specs/2026-04-20-sigstore-wave2-impl-plan.md)
 # and parent plan (docs/superpowers/specs/2026-04-19-sigstore-signing-plan.md)
 # for the full rationale and design decisions.
@@ -41,6 +43,19 @@ jobs:
   sign-and-push:
     name: Sign and push release tag
     runs-on: ubuntu-latest
+    # Defense-in-depth branch guard: workflow_dispatch can be fired
+    # from any branch that contains this workflow file. Without this
+    # check, a maintainer could accidentally (or an attacker with
+    # write access could intentionally) push a modified copy of this
+    # workflow to a non-main branch, dispatch it, and that modified
+    # workflow would run with access to the pypi environment's
+    # RELEASE_GPG_PRIVATE_KEY + RELEASE_TAG_PUSH_TOKEN secrets.
+    # Comparing github.ref_name to the repo's default_branch ensures
+    # we only sign tags from trusted main-branch workflow contents.
+    # The pypi environment's deployment_branch_policy is the other
+    # layer of this protection; this if: guard makes the same rule
+    # enforced in the workflow itself, visible in code review.
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
     # Same pypi environment as publish.yml — the maintainer approves
     # a deployment here before the release-signing secrets become
     # readable to the job. First of the two release-flow approvals
