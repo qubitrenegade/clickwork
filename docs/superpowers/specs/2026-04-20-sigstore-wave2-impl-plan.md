@@ -102,9 +102,10 @@ These are maintainer-side setup tasks, documented here for visibility. They're N
 
 1. **Generate a dedicated release-signing GPG key** (not the maintainer's personal identity):
    ```bash
-   gpg --batch --passphrase '' --quick-gen-key 'clickwork-release-bot <release@clickwork.invalid>' rsa4096 sign 0
+   gpg --batch --pinentry-mode loopback --passphrase '' \
+       --quick-gen-key 'clickwork-release-bot <release@clickwork.invalid>' rsa4096 sign 0
    ```
-   Passwordless (`--passphrase ''`) — the workflow can't type a passphrase. The identity is `clickwork-release-bot`, clearly NOT `qubitrenegade`.
+   Passwordless (`--passphrase ''`) — the workflow can't type a passphrase. On GnuPG 2.1+ the `--passphrase` flag is ignored without `--pinentry-mode loopback`, so include both to keep the one-time batch setup deterministic across environments. The identity is `clickwork-release-bot`, clearly NOT `qubitrenegade`.
 2. **Export the public half + upload to the maintainer's GitHub** (Settings → SSH and GPG keys → New GPG key). This is what lets GitHub show signed tags from this key as "Verified" on the maintainer's account.
    ```bash
    gpg --armor --export <fingerprint>
@@ -189,14 +190,51 @@ jobs:
         run: git config user.signingkey ${{ secrets.RELEASE_GPG_FINGERPRINT }}
 
       - name: Create signed tag
+        # Shell-injection hardening: pass inputs.version and inputs.headline
+        # via env vars rather than direct ${{ }} interpolation inside the
+        # shell command. Validate version before use (digits + dots only,
+        # no more than 3 dots). Write the annotation body to a temp file
+        # and `git tag -F` from it so any punctuation in the headline
+        # (quotes, newlines) can't break out of the shell context.
+        env:
+          VERSION: ${{ inputs.version }}
+          HEADLINE: ${{ inputs.headline }}
         run: |
-          git tag -s "v${{ inputs.version }}" -m "clickwork ${{ inputs.version }} — ${{ inputs.headline }}"
+          set -eu
+          case "$VERSION" in
+            ''|*[!0-9.]*|*.*.*.*)
+              echo "Invalid version: $VERSION" >&2
+              exit 1
+              ;;
+          esac
+          if printf '%s' "$HEADLINE" | grep -q '[[:cntrl:]]'; then
+            echo "Headline must not contain control characters" >&2
+            exit 1
+          fi
+          TAG="v$VERSION"
+          msg_file="$(mktemp)"
+          trap 'rm -f "$msg_file"' EXIT
+          printf 'clickwork %s — %s\n' "$VERSION" "$HEADLINE" >"$msg_file"
+          git tag -s "$TAG" -F "$msg_file"
 
       - name: Push tag with PAT
+        # Same hardening: VERSION via env, re-validate (the tag-create step
+        # and the push step may execute in different shells on some
+        # runners, so defense in depth rather than relying on the earlier
+        # check alone).
         env:
           PAT: ${{ secrets.RELEASE_TAG_PUSH_TOKEN }}
+          VERSION: ${{ inputs.version }}
         run: |
-          git push "https://x-access-token:${PAT}@github.com/${{ github.repository }}.git" "v${{ inputs.version }}"
+          set -eu
+          case "$VERSION" in
+            ''|*[!0-9.]*|*.*.*.*)
+              echo "Invalid version: $VERSION" >&2
+              exit 1
+              ;;
+          esac
+          TAG="v$VERSION"
+          git push "https://x-access-token:${PAT}@github.com/${{ github.repository }}.git" "$TAG"
 ```
 
 Key properties:
