@@ -37,6 +37,8 @@ cd your-project
 uv pip install -e ../clickwork
 ```
 
+**Verifying your install:** see <https://clickwork.readthedocs.io/reference/verifying/> for the three verify paths — PyPI attestation, Sigstore bundle, signed tag. (Applies to 1.0.1 and later; pre-1.0.1 releases can be verified via the hash-pinning fallback documented in [Security](https://clickwork.readthedocs.io/reference/security/).)
+
 ## Quick Start
 
 ### 1. Create your entry point

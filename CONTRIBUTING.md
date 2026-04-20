@@ -194,6 +194,11 @@ they were created and how to rotate).
    — one for tag signing, one for PyPI publish.) The publish job
    finishes shortly after (typically under a minute).
 
+Consumers verify the release using the commands documented in
+[`docs/reference/verifying.md`](docs/reference/verifying.md). Running
+those commands against an RC tag during smoke-test catches most
+pipeline bugs before a final release ships.
+
 ### Cutting a release (fallback: local GPG)
 
 Use this path if the release-signing secrets aren't configured yet,
