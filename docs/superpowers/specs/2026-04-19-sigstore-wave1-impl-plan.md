@@ -13,8 +13,8 @@ After review on this PR the maintainer confirmed:
 
 | # | Question | Decision |
 |---|---|---|
-| Q1 | Pin the Sigstore action? | **A** — pin `sigstore/gh-action-sigstore-python` by commit SHA with a trailing `# vX.Y.Z` comment (matches the `softprops/action-gh-release` pattern already in `publish.yml`; Dependabot can bump) |
-| Q2 | Pre-1.0.1 smoke test? | **A** — cut a throwaway `v1.0.1-rc0` prerelease tag, exercise the full pipeline end-to-end (build → sign → Release → PyPI). `prerelease: true` is already wired up; yank + re-cut `rc1` if anything fails |
+| Q1 | Pin the Sigstore action? | **A** — pin `sigstore/gh-action-sigstore-python` by commit SHA with a trailing `# vX.Y.Z` comment (matches the `softprops/action-gh-release` pattern already in `publish.yml`; Dependabot, once configured, can bump — see Out-of-scope below) |
+| Q2 | Pre-1.0.1 smoke test? | **A** — cut a throwaway `v1.0.1-rc0` prerelease tag, exercise the full pipeline end-to-end (build → sign → Release → PyPI). Prerelease handling is already wired up for hyphenated tags via `prerelease: ${{ contains(github.ref_name, '-') }}`; yank + re-cut `rc1` if anything fails |
 | Q3 | PyPI attestation scope? | **A** — attest both wheel and sdist (modern sigstore-action + pypa-publish default); covers every consumer path |
 
 Implementation below assumes these decisions are final.
@@ -60,7 +60,7 @@ The A/B/C alternatives below were the options considered; each has a **Decision:
 - **B) Use the moving `@v3` tag** — shorter, matches the pattern used for `astral-sh/setup-uv@v4` and `pypa/gh-action-pypi-publish@release/v1` in this same workflow. Trusts GitHub's tag immutability (which can be force-pushed by the action author in rare cases).
 - **C) Use `@main`** — pinning to upstream HEAD. Definitively rejected: breaks supply-chain guarantees and would fail a reasonable supply-chain audit.
 
-**Decision: A.** The existing workflow is already inconsistent (softprops pinned by SHA, others by moving ref). Pinning this addition by SHA nudges the workflow toward the safer pattern without touching the others in this PR. The tradeoff is one extra Dependabot PR per sigstore-action release, which we want anyway.
+**Decision: A.** The existing workflow is already inconsistent (softprops pinned by SHA, others by moving ref). Pinning this addition by SHA nudges the workflow toward the safer pattern without touching the others in this PR. The tradeoff is one manual SHA update per sigstore-action release — until Dependabot is configured on this repo (no `.github/dependabot.yml` currently), updates are manual; once added, Dependabot would automate the bumps.
 
 ### Q2. How do we smoke-test Wave 1 before cutting 1.0.1?
 
@@ -212,3 +212,4 @@ If anything fails, the RC is throwaway — yank on PyPI, delete the GitHub Relea
 - Documentation updates in `CONTRIBUTING.md` or `SECURITY.md` (Wave 3).
 - Tag signing (Wave 2).
 - Release cut (Wave 4).
+- Adding `.github/dependabot.yml` so SHA-pinned actions are auto-bumped. Currently no Dependabot config on this repo; until added, the SHA pin introduced here is a manual-update surface. Worth filing a follow-up issue but not blocking Wave 1.
