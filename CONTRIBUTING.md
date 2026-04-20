@@ -306,7 +306,7 @@ account's GPG keys and to any keyservers it was distributed to).
 Revocation is for compromise handling, NOT routine yearly rotation
 — revoking a key causes historical tag signatures made with it to
 be treated as suspect by verifiers, which is appropriate when the
-key was stolen but a regression in the routine-rotation case.
+key was stolen but is a regression in the routine-rotation case.
 
 ## Code of conduct
 
