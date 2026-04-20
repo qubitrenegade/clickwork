@@ -7,6 +7,18 @@
 **Scope:** Wave 1 only — Sigstore bundle signing + PyPI attestations on release artifacts. Waves 2-4 are separate plans/PRs.
 **Relevant files:** [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (current 3-job pipeline), [.github/workflows/release-smoke.yml](../../../.github/workflows/release-smoke.yml) (existing release packaging smoke test pattern — triggered on push/PR/dispatch, not on release)
 
+## Decisions (locked 2026-04-20)
+
+After review on this PR the maintainer confirmed:
+
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Pin the Sigstore action? | **A** — pin `sigstore/gh-action-sigstore-python` by commit SHA with a trailing `# vX.Y.Z` comment (matches the `softprops/action-gh-release` pattern already in `publish.yml`; Dependabot can bump) |
+| Q2 | Pre-1.0.1 smoke test? | **A** — cut a throwaway `v1.0.1-rc0` prerelease tag, exercise the full pipeline end-to-end (build → sign → Release → PyPI). `prerelease: true` is already wired up; yank + re-cut `rc1` if anything fails |
+| Q3 | PyPI attestation scope? | **A** — attest both wheel and sdist (modern sigstore-action + pypa-publish default); covers every consumer path |
+
+Implementation below assumes these decisions are final.
+
 ## Goal
 
 Wire Sigstore keyless signing into the existing release pipeline so that `v1.0.1` ships with `.sigstore` bundles on both the GitHub Release assets AND PyPI's attestation endpoint — without changing what a consumer has to do to `pip install clickwork` or re-architecting the 3-job structure.
@@ -38,7 +50,9 @@ Three concrete changes, one commit per logical change:
 
 All three land in a single PR (small, cohesive diff ~10 lines net — see "Target diff size" below).
 
-## Design questions
+## Design questions (resolved — kept for historical context)
+
+The A/B/C alternatives below were the options considered; each has a **Decision:** line pointing at the locked choice from the table above. Left in the doc so future readers can see what was weighed and why.
 
 ### Q1. Pin `sigstore/gh-action-sigstore-python` by SHA or moving ref?
 
@@ -46,9 +60,7 @@ All three land in a single PR (small, cohesive diff ~10 lines net — see "Targe
 - **B) Use the moving `@v3` tag** — shorter, matches the pattern used for `astral-sh/setup-uv@v4` and `pypa/gh-action-pypi-publish@release/v1` in this same workflow. Trusts GitHub's tag immutability (which can be force-pushed by the action author in rare cases).
 - **C) Use `@main`** — pinning to upstream HEAD. Definitively rejected: breaks supply-chain guarantees and would fail a reasonable supply-chain audit.
 
-**Recommendation:** A. The existing workflow is already inconsistent (softprops pinned by SHA, others by moving ref). Pinning this addition by SHA nudges the workflow toward the safer pattern without touching the others in this PR. The tradeoff is one extra Dependabot PR per sigstore-action release, which we want anyway.
-
-**Open question for maintainer:** A (SHA pin), or B (match the other unpinned actions for consistency with current style)?
+**Decision: A.** The existing workflow is already inconsistent (softprops pinned by SHA, others by moving ref). Pinning this addition by SHA nudges the workflow toward the safer pattern without touching the others in this PR. The tradeoff is one extra Dependabot PR per sigstore-action release, which we want anyway.
 
 ### Q2. How do we smoke-test Wave 1 before cutting 1.0.1?
 
@@ -59,9 +71,7 @@ The workflow only runs on `push: tags: v*`. We need verification it works before
 - **C) Test on a fork with its own PyPI Trusted Publisher** — clean-room, no risk to production. High setup cost and fork drift risk.
 - **D) Just ship it on 1.0.1 and roll forward on failure** — cheapest; yanking a failed 1.0.1 and cutting 1.0.2 is tolerable.
 
-**Recommendation:** A with prerelease flag (so it doesn't advance the "latest" pointer). We already have `prerelease: ${{ contains(github.ref_name, '-') }}` in the workflow. A pre-release RC is a real end-to-end test without compromising 1.0.1 itself; if the RC fails we yank and try again without consumer-visible damage. B is tempting but adding a dry-run trigger is a new surface we'd have to maintain.
-
-**Open question for maintainer:** confirm A (ship a `v1.0.1-rc0` first), or D (skip the RC and fix forward)?
+**Decision: A.** With prerelease flag (so it doesn't advance the "latest" pointer). We already have `prerelease: ${{ contains(github.ref_name, '-') }}` in the workflow. A pre-release RC is a real end-to-end test without compromising 1.0.1 itself; if the RC fails we yank and try again without consumer-visible damage. B is tempting but adding a dry-run trigger is a new surface we'd have to maintain.
 
 ### Q3. PyPI attestation edge cases — wheel-only or wheel + sdist?
 
@@ -71,9 +81,7 @@ The workflow only runs on `push: tags: v*`. We need verification it works before
 - **B) Attest wheel only** — older versions of the action only attested wheels, since many consumers only pull the wheel. Would require explicit config or an older action.
 - **C) Attest neither** — disables `attestations: true`; Wave 1 ships without PyPI attestations (only Release-side bundles). Gives up half of Q3=B's promise.
 
-**Recommendation:** A. The action (recent versions) attests both by default; `.sigstore` bundles for each artifact are published to PyPI's `/simple/` index per PEP 740. Every consumer path (wheel-only install, sdist-only install, or manual tarball) gets attestation coverage.
-
-**Open question for maintainer:** is there a known issue in the sigstore-action ↔ pypa-publish interplay for sdists that you'd want me to hedge around?
+**Decision: A.** The action (recent versions) attests both by default; `.sigstore` bundles for each artifact are published to PyPI's `/simple/` index per PEP 740. Every consumer path (wheel-only install, sdist-only install, or manual tarball) gets attestation coverage.
 
 ## Proposed implementation
 
