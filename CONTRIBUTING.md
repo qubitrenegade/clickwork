@@ -162,9 +162,12 @@ they were created and how to rotate).
    adds the new entry to `CHANGELOG.md`, and (if relevant) updates
    the trove classifier from Beta -> Production/Stable.
 2. Go to **Actions → Sign release tag → Run workflow**. Fill in:
-   - `version`: e.g. `1.0.1` (no leading `v`). PEP 440 prereleases
-     like `1.0.1rc0` and hyphenated forms like `1.0.1-rc0` are both
-     accepted.
+   - `version`: e.g. `1.0.1` (no leading `v`). For prereleases, use
+     the hyphenated form `1.0.1-rc0` — `publish.yml` marks
+     `prerelease: true` only when the tag contains a hyphen, so
+     PEP 440's unhyphenated form (`1.0.1rc0`) would silently land
+     as a "latest" release. The workflow rejects unhyphenated
+     letter forms at validation.
    - `commit_sha`: leave blank for `main` HEAD, or paste a SHA if
      `main` has moved since the release PR merged and you want to
      tag a specific commit.
@@ -244,11 +247,16 @@ PAT rotate **yearly, or immediately on any suspected exposure**.
 
    ```bash
    gpg --batch --pinentry-mode loopback --passphrase '' \
-       --quick-gen-key 'clickwork-release-bot <release@clickwork.invalid>' rsa4096 sign 0
+       --quick-gen-key 'clickwork-release-bot <release@clickwork.invalid>' rsa4096 sign 1y
    ```
 
    `--pinentry-mode loopback` is required on GnuPG 2.1+ for
-   `--passphrase ''` to be honored in batch mode.
+   `--passphrase ''` to be honored in batch mode. The `1y`
+   expiration matches the yearly rotation cadence — if a rotation
+   is missed, the key expires on its own instead of silently
+   working past its intended lifetime. Extend manually with
+   `gpg --edit-key <fingerprint>` → `expire` if you need to push
+   the expiry forward before rotating.
 
 2. Export and upload the public half to the maintainer's GitHub
    account (Settings → SSH and GPG keys → New GPG key). This is

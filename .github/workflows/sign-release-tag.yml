@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to tag (without leading v), e.g. 1.0.1 or 1.0.1rc0'
+        description: 'Version to tag (without leading v). Final: 1.0.1. Prerelease: 1.0.1-rc0 (hyphenated — publish.yml uses hyphen to mark prerelease).'
         required: true
         type: string
       commit_sha:
@@ -145,10 +145,35 @@ jobs:
               exit 1
               ;;
           esac
-          if printf '%s' "$HEADLINE" | grep -q '[[:cntrl:]]'; then
-            echo "Headline must not contain control characters" >&2
-            exit 1
-          fi
+          # Prereleases must use hyphenated form (1.0.1-rc0) not PEP 440
+          # unhyphenated (1.0.1rc0). publish.yml keys its prerelease
+          # field on whether the tag contains a hyphen (see publish.yml
+          # "prerelease:" line). An unhyphenated prerelease would
+          # create a GitHub Release NOT marked as prerelease, silently
+          # advancing the "latest" pointer.
+          case "$VERSION" in
+            *[a-zA-Z]*)
+              case "$VERSION" in
+                *-*) ;;  # Has letters AND a hyphen — OK
+                *)
+                  echo "Prerelease versions must use hyphenated form: '1.0.1-rc0' not '1.0.1rc0'" >&2
+                  echo "publish.yml marks Release.prerelease=true based on hyphen presence." >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+          esac
+          # grep -q [[:cntrl:]] is line-oriented and misses embedded
+          # newlines in HEADLINE (the newline becomes the record
+          # separator, so each sub-line is checked independently with
+          # no control chars in it). Shell `case` sees the full string
+          # and correctly matches [[:cntrl:]] anywhere in HEADLINE.
+          case "$HEADLINE" in
+            *[[:cntrl:]]*)
+              echo "Headline must not contain control characters (newlines, tabs, etc.)" >&2
+              exit 1
+              ;;
+          esac
           TAG="v$VERSION"
           msg_file="$(mktemp)"
           trap 'rm -f "$msg_file"' EXIT
@@ -182,6 +207,17 @@ jobs:
             *[!0-9a-zA-Z.+-]*)
               echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
               exit 1
+              ;;
+          esac
+          case "$VERSION" in
+            *[a-zA-Z]*)
+              case "$VERSION" in
+                *-*) ;;
+                *)
+                  echo "Prerelease versions must use hyphenated form: '1.0.1-rc0' not '1.0.1rc0'" >&2
+                  exit 1
+                  ;;
+              esac
               ;;
           esac
           TAG="v$VERSION"
