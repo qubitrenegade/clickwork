@@ -13,7 +13,7 @@ After review on this PR the maintainer confirmed:
 
 | # | Question | Decision |
 |---|---|---|
-| Q1 | RC first, or straight to 1.0.1 final? | **B (revised from C)** — cut `v1.0.1` directly as the first real signed release. Q1=C (throwaway `v0.0.0-wave2-smoke` smoke dispatch) was incompatible with the Wave 2 preflight check (`sign-release-tag.yml` enforces `PKG_VERSION == pyproject.toml.version` and a matching CHANGELOG entry — both blocks dispatching any version that doesn't live on main). Rather than weaken the preflight with a smoke-mode bypass, drop the smoke step; the preflight + CHANGELOG + commit_sha validation already provide the safety rails the smoke was supposed to supply |
+| Q1 | RC first, or straight to 1.0.1 final? | **B (revised from C)** — cut `v1.0.1` directly as the first real signed release. Q1=C (throwaway `v0.0.0-wave2-smoke` smoke dispatch) was incompatible with the Wave 2 preflight check (`sign-release-tag.yml` enforces `PKG_VERSION == pyproject.toml.version` and a matching CHANGELOG entry — both checks block dispatching any version that doesn't live on main). Rather than weaken the preflight with a smoke-mode bypass, drop the smoke step; the preflight + CHANGELOG + commit_sha validation already provide the safety rails the smoke was supposed to supply |
 | Q2 | CHANGELOG 1.0.1 entry framing? | **A** — "Release-infrastructure hardening" headline: Sigstore bundle signing, PEP 740 attestations on PyPI, workflow-driven signed tags, verification docs. No user-facing API changes |
 | Q3 | Smoke-test tag name? | **N/A (superseded by Q1=B)** — no smoke step with the revised Q1 |
 | Q4 | 1.0.1 release notes body? | **A** — auto-generated from PR labels via `.github/release.yml`, with a documented escape hatch (optional `body:` addition to `publish.yml`'s create-release step) for future releases that want a custom headline |
@@ -50,7 +50,7 @@ Ship clickwork 1.0.1 as the first release signed through the full pipeline built
 
 Three sub-waves — one PR (4a) merged into this release cycle, plus two maintainer-executed steps (4b–4c) at release time:
 
-1. **Wave 4a (PR)**: release-cut PR — bump `pyproject.toml` to `1.0.1`, add `## [1.0.1] - <date>` entry to `CHANGELOG.md` framing release-infra hardening. Left OPEN for maintainer review; merged by the maintainer in the release session.
+1. **Wave 4a (PR)**: release-cut PR — bump `pyproject.toml` to `1.0.1`, add `## [1.0.1] - <release-date>` entry to `CHANGELOG.md` framing release-infra hardening. Left OPEN for maintainer review; merged by the maintainer in the release session.
 2. **Wave 4b (maintainer, one-time)**: complete the Wave 2 prereq — generate the dedicated release-signing GPG key, upload public half to GitHub, store the three secrets in the `pypi` environment. Full procedure in [CONTRIBUTING.md](../../../CONTRIBUTING.md#release-signing-key--pat-rotation).
 3. **Wave 4c (maintainer, real)**: merge 4a's PR, dispatch `sign-release-tag.yml` with `version=1.0.1`, approve `pypi` twice (once for tag signing, once for publish), verify artifacts on GitHub Release + PyPI, run all three verify commands from `docs/reference/verifying.md` against the real 1.0.1 release.
 
