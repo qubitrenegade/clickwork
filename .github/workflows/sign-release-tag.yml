@@ -278,4 +278,19 @@ jobs:
               ;;
           esac
           TAG="v$VERSION"
-          git push "https://x-access-token:${PAT}@github.com/${{ github.repository }}.git" "$TAG"
+          # Push via git credential helper rather than embedding the
+          # PAT in the remote URL. Actions already masks secrets, but
+          # putting the PAT in the URL risks it leaking through:
+          # - git error messages that echo the remote URL
+          # - git remote/config inspection inside the runner
+          # - process listings (/proc/*/cmdline) on self-hosted runners
+          # - downstream tool logs that capture command strings
+          # The credential helper file keeps the PAT out of the URL
+          # and out of argv; mktemp + 0600 + trap-rm contains its
+          # lifetime to this one push.
+          cred_file="$(mktemp)"
+          chmod 600 "$cred_file"
+          trap 'rm -f "$cred_file"' EXIT
+          printf 'https://x-access-token:%s@github.com\n' "$PAT" >"$cred_file"
+          git -c "credential.helper=store --file=$cred_file" \
+              push "https://github.com/${{ github.repository }}.git" "$TAG"
