@@ -157,10 +157,10 @@ In one maintainer session:
 4. Click Run workflow. Approve the `pypi` environment gate **twice**:
    - First approval: `sign-release-tag.yml` reads the GPG key + PAT, creates signed `v1.0.1` tag, pushes via PAT → fires `publish.yml`.
    - Second approval: `publish.yml`'s PyPI publish job (after build + create-release + sign have succeeded).
-5. Verify on GitHub Release page:
-   - `v1.0.1` exists with Verified badge.
-   - Release assets include `clickwork-1.0.1-py3-none-any.whl`, `clickwork-1.0.1.tar.gz`, and the matching `.sigstore` bundle files.
-   - Release notes auto-generated per `.github/release.yml`.
+5. Verify on GitHub:
+   - Tag detail page for `v1.0.1` shows the tag as Verified.
+   - GitHub Release page for `v1.0.1` includes `clickwork-1.0.1-py3-none-any.whl`, `clickwork-1.0.1.tar.gz`, and the matching `.sigstore` bundle files.
+   - GitHub Release page shows release notes auto-generated per `.github/release.yml`.
 6. Verify on PyPI:
    - `clickwork 1.0.1` visible.
    - Attestations section present.
