@@ -46,7 +46,7 @@ Ship clickwork 1.0.1 as the first release signed through the full pipeline built
 
 ## Scope of this plan
 
-Four sub-waves, two merged into this release cycle and two executed by the maintainer at release time:
+Four sub-waves — one PR (4a) merged into this release cycle, plus three maintainer-executed steps (4b–4d) at release time:
 
 1. **Wave 4a (PR)**: release-cut PR — bump `pyproject.toml` to `1.0.1`, add `## [1.0.1] - <date>` entry to `CHANGELOG.md` framing release-infra hardening. Left OPEN for maintainer review; merged by the maintainer in the release session.
 2. **Wave 4b (maintainer, one-time)**: complete the Wave 2 prereq — generate the dedicated release-signing GPG key, upload public half to GitHub, store the three secrets in the `pypi` environment. Full procedure in [CONTRIBUTING.md](../../../CONTRIBUTING.md#release-signing-key--pat-rotation).
@@ -107,10 +107,6 @@ consumer who was running 1.0.0 can upgrade to 1.0.1 as a drop-in.
   summary of the three verify paths with a link to `verifying.md`
   for the full examples. Hash-pinning retained as a fallback for
   pre-1.0.1 releases and tooling-unavailable scenarios.
-
-### Fixed
-
-(Nothing in this release.)
 ```
 
 The date in `- <release-date>` is filled in at merge time.
