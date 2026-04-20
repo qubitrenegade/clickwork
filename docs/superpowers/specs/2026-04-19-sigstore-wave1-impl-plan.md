@@ -195,7 +195,7 @@ If anything fails, the RC is throwaway — yank on PyPI, delete the GitHub Relea
 
 ## Success criteria
 
-- After this PR merges and an RC tag is pushed: a `pypi-attestations verify` (or equivalent) against the PyPI-hosted RC wheel and sdist returns success, using the workflow identity on Fulcio.
+- After the Wave 1 implementation PR merges and an RC tag is pushed: a `pypi-attestations verify` (or equivalent) against the PyPI-hosted RC wheel and sdist returns success, using the workflow identity on Fulcio.
 - `sigstore verify identity --bundle …--cert-identity … --cert-oidc-issuer …` against the GitHub Release-attached `.sigstore` bundle returns success.
 - GitHub Actions for the RC tag shows all three jobs green end-to-end.
 - No regression: `publish.yml` still publishes releases successfully with the added signing/attestation steps, and the normal `pip install clickwork==<older version>` flow for older unsigned releases remains unchanged.
