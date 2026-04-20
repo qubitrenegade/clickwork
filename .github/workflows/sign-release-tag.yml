@@ -151,8 +151,17 @@ jobs:
               exit 1
               ;;
           esac
+          # Strip any digit-letter hyphen from input: "1.0.1-rc0" →
+          # "1.0.1rc0". Produces canonical PEP 440.
           PKG_VERSION=$(printf '%s' "$VERSION" | sed -E 's/([0-9])-([a-zA-Z])/\1\2/')
-          TAG_VERSION=$(printf '%s' "$PKG_VERSION" | sed -E 's/([0-9])([a-zA-Z])/\1-\2/')
+          # Insert a hyphen before a recognized prerelease/dev label so
+          # publish.yml's hyphen-based prerelease detection fires. Matches
+          # PEP 440 pre-releases (a, b, c, rc, alpha, beta, pre) and dev
+          # releases (.dev), letting an optional dot precede the label
+          # so "1.0.1.dev0" → "1.0.1-dev0". Post-releases (.post) are
+          # intentionally NOT in this list — post1 is not a prerelease
+          # and should NOT flip publish.yml's prerelease flag.
+          TAG_VERSION=$(printf '%s' "$PKG_VERSION" | sed -E 's/([0-9])\.?(a|b|c|rc|alpha|beta|pre|dev)([0-9]+)/\1-\2\3/')
           echo "PKG_VERSION=$PKG_VERSION" >> "$GITHUB_ENV"
           echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
           echo "Normalized: inputs.version='$VERSION' → PKG_VERSION='$PKG_VERSION' (pyproject.toml match target), TAG_VERSION='$TAG_VERSION' (git tag form)"
