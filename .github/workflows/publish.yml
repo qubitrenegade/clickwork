@@ -31,9 +31,14 @@ jobs:
     # zero rights by default, so we must re-grant here or
     # actions/upload-artifact@v4 will 403 and later jobs have nothing
     # to download.
+    #
+    # id-token: write is required for Sigstore keyless signing: the
+    # sigstore action exchanges the job's OIDC token for an ephemeral
+    # signing certificate from Fulcio. No long-lived keys involved.
     permissions:
       contents: read
       actions: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +62,20 @@ jobs:
 
       - name: Build package
         run: uv build
+
+      # Sigstore keyless signing. The action emits a `.sigstore` bundle
+      # file alongside each input, so with `inputs:` pointing at wheel +
+      # sdist we get two bundles written into dist/. The subsequent
+      # upload-artifact step uploads the whole dist/ directory, so the
+      # bundles flow to create-release and publish jobs without any
+      # additional plumbing. SHA-pinned (v3.3.0) for supply-chain
+      # discipline; Dependabot will need to be enabled to auto-bump.
+      - name: Sign artifacts with Sigstore
+        uses: sigstore/gh-action-sigstore-python@04cffa1d795717b140764e8b640de88853c92acc # v3.3.0
+        with:
+          inputs: |
+            dist/*.whl
+            dist/*.tar.gz
 
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
@@ -108,6 +127,7 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
+            dist/*.sigstore
 
   publish:
     name: Publish to PyPI
@@ -137,3 +157,10 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Publish PEP 740 attestations alongside the wheel + sdist.
+          # The action uses the same id-token OIDC exchange Trusted
+          # Publishing already relies on, so no additional secrets or
+          # permissions are needed. Covers both wheel and sdist by
+          # default in recent versions of the action.
+          attestations: true
