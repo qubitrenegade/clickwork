@@ -13,9 +13,9 @@ After review on this PR the maintainer confirmed:
 
 | # | Question | Decision |
 |---|---|---|
-| Q1 | RC first, or straight to 1.0.1 final? | **C** — cut a `v0.0.0-wave2-smoke` throwaway tag first (smokes the signing workflow + publish pipeline but the `pypi` environment gate on `publish.yml`'s PyPI job is NOT approved, so nothing hits PyPI), then cut `v1.0.1` as the first real signed release on PyPI |
+| Q1 | RC first, or straight to 1.0.1 final? | **B (revised from C)** — cut `v1.0.1` directly as the first real signed release. Q1=C (throwaway `v0.0.0-wave2-smoke` smoke dispatch) was incompatible with the Wave 2 preflight check (`sign-release-tag.yml` enforces `PKG_VERSION == pyproject.toml.version` and a matching CHANGELOG entry — both blocks dispatching any version that doesn't live on main). Rather than weaken the preflight with a smoke-mode bypass, drop the smoke step; the preflight + CHANGELOG + commit_sha validation already provide the safety rails the smoke was supposed to supply |
 | Q2 | CHANGELOG 1.0.1 entry framing? | **A** — "Release-infrastructure hardening" headline: Sigstore bundle signing, PEP 740 attestations on PyPI, workflow-driven signed tags, verification docs. No user-facing API changes |
-| Q3 | Smoke-test tag name? | **A** — `v0.0.0-wave2-smoke` (matches the Wave 2 plan's example) |
+| Q3 | Smoke-test tag name? | **N/A (superseded by Q1=B)** — no smoke step with the revised Q1 |
 | Q4 | 1.0.1 release notes body? | **A** — auto-generated from PR labels via `.github/release.yml`, with a documented escape hatch (optional `body:` addition to `publish.yml`'s create-release step) for future releases that want a custom headline |
 | Q5 | Gate the release-cut PR on secrets-ready? | **C** — write the PR (version bump + CHANGELOG entry) and leave it open for maintainer review. Maintainer merges + tags in one session when ready. Avoids the awkward "main shows 1.0.1 but PyPI still shows 1.0.0" window |
 
@@ -46,12 +46,13 @@ Ship clickwork 1.0.1 as the first release signed through the full pipeline built
 
 ## Scope of this plan
 
-Four sub-waves — one PR (4a) merged into this release cycle, plus three maintainer-executed steps (4b–4d) at release time:
+Three sub-waves — one PR (4a) merged into this release cycle, plus two maintainer-executed steps (4b–4c) at release time:
 
 1. **Wave 4a (PR)**: release-cut PR — bump `pyproject.toml` to `1.0.1`, add `## [1.0.1] - <date>` entry to `CHANGELOG.md` framing release-infra hardening. Left OPEN for maintainer review; merged by the maintainer in the release session.
 2. **Wave 4b (maintainer, one-time)**: complete the Wave 2 prereq — generate the dedicated release-signing GPG key, upload public half to GitHub, store the three secrets in the `pypi` environment. Full procedure in [CONTRIBUTING.md](../../../CONTRIBUTING.md#release-signing-key--pat-rotation).
-3. **Wave 4c (maintainer, smoke)**: dispatch `sign-release-tag.yml` against `v0.0.0-wave2-smoke` to verify the signing workflow produces a Verified tag + fires `publish.yml`'s build job. Do NOT approve the PyPI environment gate on `publish.yml` — cancel it or let it expire. Delete the throwaway tag + Release afterwards.
-4. **Wave 4d (maintainer, real)**: merge 4a's PR, dispatch `sign-release-tag.yml` with `version=1.0.1`, approve `pypi` twice (once for tag signing, once for publish), verify artifacts on GitHub Release + PyPI, run all three verify commands from `docs/reference/verifying.md` against the real 1.0.1 release.
+3. **Wave 4c (maintainer, real)**: merge 4a's PR, dispatch `sign-release-tag.yml` with `version=1.0.1`, approve `pypi` twice (once for tag signing, once for publish), verify artifacts on GitHub Release + PyPI, run all three verify commands from `docs/reference/verifying.md` against the real 1.0.1 release.
+
+No smoke-test step: the Wave 2 preflight + CHANGELOG-entry check + commit_sha validation already catch the "tag version doesn't match artifact version" / "CHANGELOG not updated" / "wrong commit tagged" failure modes that a smoke step was meant to surface. See Q1 decision above for the reasoning.
 
 ## Proposed implementation
 
@@ -78,23 +79,23 @@ consumer who was running 1.0.0 can upgrade to 1.0.1 as a drop-in.
 
 ### Added
 
-- **Sigstore keyless signing** of release artifacts (#108). Wheel
-  and sdist are signed inside the `build` job of `publish.yml`
-  using `sigstore/gh-action-sigstore-python`; the resulting
-  `.sigstore` bundles appear as GitHub Release assets alongside
-  the wheel/sdist.
-- **PEP 740 attestations on PyPI** (#108). `pypa/gh-action-pypi-publish`
-  now publishes attestations via the existing Trusted Publishing
-  OIDC exchange; consumers can verify with `pypi-attestations
-  verify pypi clickwork==1.0.1` (see
+- **Sigstore keyless signing** of release artifacts (PR #108,
+  part of #61). Wheel and sdist are signed inside the `build` job
+  of `publish.yml` using `sigstore/gh-action-sigstore-python`; the
+  resulting `.sigstore` bundles appear as GitHub Release assets
+  alongside the wheel/sdist.
+- **PEP 740 attestations on PyPI** (PR #108, part of #61).
+  `pypa/gh-action-pypi-publish` now publishes attestations via the
+  existing Trusted Publishing OIDC exchange; consumers can verify
+  with `pypi-attestations verify pypi clickwork==1.0.1` (see
   [docs/reference/verifying.md](docs/reference/verifying.md)).
-- **Workflow-driven signed git tags** (#110). A new
-  `sign-release-tag.yml` workflow signs release tags from a
+- **Workflow-driven signed git tags** (PR #110, part of #61). A
+  new `sign-release-tag.yml` workflow signs release tags from a
   dedicated workflow-only GPG key (not the maintainer's personal
   key) with defense-in-depth input validation and a PAT-based push
   that triggers `publish.yml`. The local-GPG fallback path stays
   documented in `CONTRIBUTING.md` for emergencies.
-- **Verification documentation** (#112). New
+- **Verification documentation** (PR #112, part of #61). New
   [docs/reference/verifying.md](docs/reference/verifying.md) with
   concrete worked examples for all three verify paths, plus
   troubleshooting for common failure modes. Cross-linked from
@@ -103,10 +104,11 @@ consumer who was running 1.0.0 can upgrade to 1.0.1 as a drop-in.
 ### Changed
 
 - **`docs/reference/security.md`** "Verifying release artifacts"
-  section (#112) rewritten from pre-Sigstore hash-pinning-only to a
-  summary of the three verify paths with a link to `verifying.md`
-  for the full examples. Hash-pinning retained as a fallback for
-  pre-1.0.1 releases and tooling-unavailable scenarios.
+  section (PR #112, part of #61) rewritten from pre-Sigstore
+  hash-pinning-only to a summary of the three verify paths with a
+  link to `verifying.md` for the full examples. Hash-pinning
+  retained as a fallback for pre-1.0.1 releases and
+  tooling-unavailable scenarios.
 ```
 
 The date in `- <release-date>` is filled in at merge time.
@@ -126,7 +128,7 @@ Locked Q4=A ships 1.0.1 with auto-generated release notes only. For future relea
       append_body: true  # append the generate_release_notes output
 ```
 
-This is NOT part of the 1.0.1 release-cut PR — it's documented here as a design note for future tightening. If Wave 4d's auto-generated 1.0.1 release notes look weak, a follow-up PR can add this pattern.
+This is NOT part of the 1.0.1 release-cut PR — it's documented here as a design note for future tightening. If Wave 4c's auto-generated 1.0.1 release notes look weak, a follow-up PR can add this pattern.
 
 ### Wave 4b — one-time secret setup
 
@@ -140,25 +142,7 @@ Full procedure in [CONTRIBUTING.md](../../../CONTRIBUTING.md#release-signing-key
 
 Gates all subsequent Wave 4 steps.
 
-### Wave 4c — workflow smoke-test against `v0.0.0-wave2-smoke`
-
-Maintainer dispatches the signing workflow:
-
-1. Go to **Actions → Sign release tag → Run workflow**.
-2. Fill in:
-   - `version`: `0.0.0-wave2-smoke`
-   - `commit_sha`: leave blank (default branch HEAD)
-   - `headline`: `Wave 2 smoke test`
-3. Click Run workflow. Approve the `pypi` environment gate once (for `sign-release-tag.yml`).
-4. Verify:
-   - Workflow run succeeds end-to-end.
-   - Tag `v0.0.0-wave2-smoke` exists with a GPG "Verified" badge on the tag detail page.
-   - `publish.yml` fires on the tag push (visible in Actions tab).
-   - `publish.yml`'s `build` job succeeds; the workflow then waits at its gated PyPI publish job.
-5. **Do NOT approve `publish.yml`'s PyPI job.** Cancel the run or let the gate expire. The build artifact's version is still `1.0.0` (from `pyproject.toml`); approving PyPI would attempt a re-upload of `1.0.0` and fail. This smoke-test validates tag-signing + publish.yml trigger only; PyPI is deliberately untouched.
-6. Delete the smoke-test tag + Release: `git push --delete origin v0.0.0-wave2-smoke`, then delete the GitHub Release from the UI.
-
-### Wave 4d — cut the real 1.0.1 release
+### Wave 4c — cut the real 1.0.1 release
 
 In one maintainer session:
 
@@ -194,8 +178,7 @@ Total: Wave 4a's PR is ~31 lines. Waves 4b–d are maintainer activity, not comm
 ## Merge-order constraints
 
 - Wave 4a depends on Waves 1–3 (all merged: #108, #110, #112). ✓
-- Wave 4c gates on Wave 4b (secrets must exist). Both are maintainer-side; sequenced in the release session.
-- Wave 4d gates on Wave 4a merged + 4b complete + 4c smoke passed.
+- Wave 4c gates on Wave 4a merged + Wave 4b complete. All maintainer-side; sequenced in the release session.
 - No dependency on #62 (conda-forge). conda-forge's timeline is separate; `v1.0.1` on PyPI is a prerequisite for the conda-forge recipe's initial grayskull generation, but conda-forge submission is on a post-Wave-4 track anyway.
 
 ## Success criteria
@@ -210,8 +193,8 @@ Total: Wave 4a's PR is ~31 lines. Waves 4b–d are maintainer activity, not comm
 
 ## Risks / open
 
-- **Secrets-setup friction delays the cut.** Wave 4b is a one-time ~10-minute task for the maintainer; if GPG keyring or PAT generation trips up, the release slips. Mitigated by the detailed runbook in CONTRIBUTING.md and the `v0.0.0-wave2-smoke` test (surfaces secrets-wiring bugs before the real 1.0.1 cut).
-- **Auto-generated release notes don't cover all the Sigstore-related PRs.** `#108`/`#110`/`#112` should be labeled `enhancement` or `documentation`; if they landed without labels, they fall under "Other changes" in the auto-generated body. Can be fixed with a post-merge label sweep before Wave 4d, or accepted (the CHANGELOG entry is the authoritative changelog anyway).
+- **Secrets-setup friction delays the cut.** Wave 4b is a one-time ~10-minute task for the maintainer; if GPG keyring or PAT generation trips up, the release slips. Mitigated by the detailed runbook in CONTRIBUTING.md. Any secrets-wiring bug surfaces in 4c's first workflow dispatch with a clear error message from the fingerprint-validation / PAT-empty checks added in Wave 2 rounds 5 and 11.
+- **Auto-generated release notes don't cover all the Sigstore-related PRs.** `#108`/`#110`/`#112` should be labeled `enhancement` or `documentation`; if they landed without labels, they fall under "Other changes" in the auto-generated body. Can be fixed with a post-merge label sweep before Wave 4c, or accepted (the CHANGELOG entry is the authoritative changelog anyway).
 - **Verify commands diverge between `docs/reference/verifying.md` (written pre-1.0.1) and reality (observed at 4d).** If any divergence surfaces, file a follow-up against verifying.md. Low-probability since the commands were derived from Wave 1+2 implementation shapes, not guessed.
 - **PyPI attestation endpoint is flaky at the moment of publish.** Outside our control; `publish.yml` fails loudly if attestation upload fails. Retry by re-running the publish job (the sign-release-tag workflow doesn't need to re-run).
 
@@ -219,5 +202,4 @@ Total: Wave 4a's PR is ~31 lines. Waves 4b–d are maintainer activity, not comm
 
 - Retroactively signing 1.0.0 or 0.2.x (locked Q6=A).
 - Cutting 1.1.0 or adding features.
-- Automating the smoke test (Wave 4c) via CI. One-time step at release time is fine.
 - Supplementing release notes with custom headline text on 1.0.1 specifically (Q4=A; escape hatch documented above as a follow-up).
