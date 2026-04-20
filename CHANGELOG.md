@@ -5,7 +5,7 @@ All notable changes to clickwork will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.1] - <release-date>
+## [1.0.1] - TBD
 
 Release-infrastructure hardening. No user-facing API changes; every
 consumer who was running 1.0.0 can upgrade to 1.0.1 as a drop-in.
@@ -278,6 +278,7 @@ subsection.
   redacts all env values (secret-sourced as `<redacted>`, other env
   entries as `<set>`) from the single INFO-level log line. (#11)
 
+[1.0.1]: https://github.com/qubitrenegade/clickwork/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/qubitrenegade/clickwork/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/qubitrenegade/clickwork/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/qubitrenegade/clickwork/releases/tag/v0.1.0
