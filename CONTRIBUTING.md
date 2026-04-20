@@ -168,9 +168,9 @@ they were created and how to rotate).
      PEP 440's unhyphenated form (`1.0.1rc0`) would silently land
      as a "latest" release. The workflow rejects unhyphenated
      letter forms at validation.
-   - `commit_sha`: leave blank for `main` HEAD, or paste a SHA if
-     `main` has moved since the release PR merged and you want to
-     tag a specific commit.
+   - `commit_sha`: leave blank for the default branch HEAD, or paste
+     a SHA if the default branch has moved since the release PR
+     merged and you want to tag a specific commit.
    - `headline`: short description for the tag annotation. The
      workflow templates the full message as
      `clickwork X.Y.Z — <headline>` so you only need to supply the

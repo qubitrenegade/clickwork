@@ -72,13 +72,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Always check out main with full history. If commit_sha is
-          # provided, we validate it in the next step and then
-          # detach-HEAD to that commit. Passing commit_sha directly as
-          # `ref:` would accept branch/tag names too, which could tag
-          # an unintended revision (e.g., a typo matching a branch
-          # name).
-          ref: main
+          # Always check out the repo's default branch (main today)
+          # with full history. If commit_sha is provided, we validate
+          # it in the next step and then detach-HEAD to that commit.
+          # Passing commit_sha directly as `ref:` would accept
+          # branch/tag names too, which could tag an unintended
+          # revision (e.g., a typo matching a branch name).
+          #
+          # Using github.event.repository.default_branch (not
+          # hardcoded 'main') keeps this in sync with the job-level
+          # if: guard above and survives any future default-branch
+          # rename.
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
 
       - name: Validate + check out requested commit SHA (if provided)
