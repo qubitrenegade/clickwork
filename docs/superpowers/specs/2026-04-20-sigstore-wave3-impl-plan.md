@@ -11,7 +11,7 @@
 
 Ship concrete, copy-pasteable verification commands for every provenance path clickwork now supports:
 
-1. **PyPI attestation** (PEP 740) — `pypi-attestations verify` against an installed wheel or sdist.
+1. **PyPI attestation** (PEP 740) — `pypi-attestations verify` for a PyPI-hosted `clickwork` release at a given version.
 2. **Sigstore bundle on the GitHub Release** — `sigstore verify identity` against a downloaded `.sigstore` bundle + artifact.
 3. **Signed git tag** — `git verify-tag vX.Y.Z` against the workflow-signed tag.
 
@@ -27,7 +27,7 @@ The current `security.md` "Verifying release artifacts" section is a placeholder
 ## Current state
 
 - `docs/reference/security.md` lines 215–238 document only the hash-pinning verify path (pre-Sigstore). It still describes Sigstore as "planned," which is now stale even though the issue reference points to active tracker #61.
-- `docs/SECURITY.md` is a 1-line redirect to `reference/security.md`.
+- `docs/SECURITY.md` is a short redirect stub to `reference/security.md`.
 - No dedicated verify doc exists.
 - Wave 1 produces `.sigstore` bundles on the Release + PEP 740 attestations on PyPI.
 - Wave 2 produces signed annotated tags `vX.Y.Z` verifiable via `git verify-tag`.
@@ -175,13 +175,18 @@ start with 1.0.1.
 
 ### `git verify-tag` says "Can't check signature: No public key"
 
-The local-GPG fallback path (documented in `CONTRIBUTING.md`) was
-used for this release. The tag is still signed, but with the
-maintainer's personal key rather than the workflow key. Either tag
-signature verifies via `git verify-tag`; this message means your
-local GPG keyring doesn't have the signer public key yet. Fetch it:
+The tag is signed (by the workflow key for the recommended release
+path, or the maintainer's personal key for the local-GPG fallback
+documented in `CONTRIBUTING.md`), but your local GPG keyring doesn't
+have the signer public key yet. Both keys are published as GPG keys
+on the maintainer's GitHub account, which GitHub exposes via
+`https://github.com/<user>.gpg`:
 
-    gpg --keyserver keys.openpgp.org --recv-keys <fingerprint-from-tag-page>
+    curl -fsSL https://github.com/qubitrenegade.gpg | gpg --import
+
+This returns every public GPG key associated with the account
+(workflow key + maintainer key); GPG will pick whichever one matches
+the tag's signature.
 
 If `git verify-tag` instead reports "no signature", the tag is
 unsigned and this fallback flow does not apply.
@@ -256,7 +261,7 @@ Append a short note to the existing `## Installation` section (the actual headin
 `README.md` is PyPI's long-description per `pyproject.toml` (`readme = "README.md"`), so relative `docs/...` links render broken on the PyPI project page. The existing README already uses absolute `clickwork.readthedocs.io` URLs for docs references — match that pattern:
 
     **Verifying your install:** see
-    <https://clickwork.readthedocs.io/en/latest/reference/verifying/>
+    <https://clickwork.readthedocs.io/reference/verifying/>
     for the three verify paths — PyPI attestation, Sigstore bundle,
     signed tag.
 
