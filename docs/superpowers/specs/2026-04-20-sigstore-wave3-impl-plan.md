@@ -26,7 +26,7 @@ The current `security.md` "Verifying release artifacts" section is a placeholder
 
 ## Current state
 
-- `docs/reference/security.md` lines 215–238 document only the hash-pinning verify path (pre-Sigstore). It names Sigstore as "planned" with a stale issue reference.
+- `docs/reference/security.md` lines 215–238 document only the hash-pinning verify path (pre-Sigstore). It still describes Sigstore as "planned," which is now stale even though the issue reference points to active tracker #61.
 - `docs/SECURITY.md` is a 1-line redirect to `reference/security.md`.
 - No dedicated verify doc exists.
 - Wave 1 produces `.sigstore` bundles on the Release + PEP 740 attestations on PyPI.
@@ -129,7 +129,8 @@ named.
 ## Verifying a GitHub Release asset
 
 Download the wheel (or sdist) + its `.sigstore` bundle from the
-Release page. Install `sigstore-python`:
+Release page. Install the `sigstore-python` CLI from PyPI
+(`sigstore`):
 
     pip install sigstore
 
@@ -250,10 +251,12 @@ unavailable, pin by hash:
 
 ### Step 5. README cross-link
 
-Append a short note to the existing `## Installation` section (the actual heading — not "Install"). The existing section already contains the `uv pip install "clickwork>=1.0,<2"` block and surrounding prose; we add a new trailing paragraph:
+Append a short note to the existing `## Installation` section (the actual heading — not "Install"). The existing section already contains the `uv pip install "clickwork>=1.0,<2"` block and surrounding prose; we add a new trailing paragraph.
 
-    **Verifying your install:** see [docs/VERIFYING.md](docs/VERIFYING.md)
-    (top-level redirect to [docs/reference/verifying.md](docs/reference/verifying.md))
+`README.md` is PyPI's long-description per `pyproject.toml` (`readme = "README.md"`), so relative `docs/...` links render broken on the PyPI project page. The existing README already uses absolute `clickwork.readthedocs.io` URLs for docs references — match that pattern:
+
+    **Verifying your install:** see
+    <https://clickwork.readthedocs.io/en/latest/reference/verifying/>
     for the three verify paths — PyPI attestation, Sigstore bundle,
     signed tag.
 
@@ -306,7 +309,7 @@ Total: ~135 lines net, 2 new files.
 
 - **Identity-string drift between spec + reality.** The `--cert-identity` string in the Sigstore verify command is workflow-path-sensitive — if we ever rename `publish.yml` the string breaks. Mitigation: `verifying.md` mentions the identity-string is "the workflow URL" and shows the current shape, not a regex match — users who copy-paste are fine, but a future `publish.yml` rename will drift the doc. Flagged as a maintenance note in `verifying.md`.
 - **`pypi-attestations verify` command syntax changes.** The CLI is early-stage (0.0.x at time of writing). Version-pinning the install recommendation (`pip install pypi-attestations==X.Y.Z`) could help future-proof, but we'd need to bump with its releases. Open to maintainer preference.
-- **Stale "planned" language elsewhere.** Besides `security.md`, the phrase "Sigstore planned" may appear in other docs. Sweep as part of Step 2.
+- **Stale "planned" language elsewhere.** Besides `security.md`, the phrase "Sigstore planned" may appear in other docs. Sweep as part of the implementation PR's general doc cleanup.
 
 ## Out of scope for this plan
 
