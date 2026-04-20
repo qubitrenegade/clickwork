@@ -162,12 +162,13 @@ they were created and how to rotate).
    adds the new entry to `CHANGELOG.md`, and (if relevant) updates
    the trove classifier from Beta -> Production/Stable.
 2. Go to **Actions → Sign release tag → Run workflow**. Fill in:
-   - `version`: e.g. `1.0.1` (no leading `v`). For prereleases, use
-     the hyphenated form `1.0.1-rc0` — `publish.yml` marks
-     `prerelease: true` only when the tag contains a hyphen, so
-     PEP 440's unhyphenated form (`1.0.1rc0`) would silently land
-     as a "latest" release. The workflow rejects unhyphenated
-     letter forms at validation.
+   - `version`: e.g. `1.0.1` for a final release. For prereleases
+     either PEP 440 (`1.0.1rc0`) or hyphenated (`1.0.1-rc0`) is
+     accepted — the workflow normalizes internally. The package
+     version (what lands in `pyproject.toml` and on PyPI) is the
+     unhyphenated PEP 440 form; the git tag is the hyphenated form
+     (so `publish.yml` marks it as prerelease). No leading `v` on
+     input — the tag gets `v` prefixed automatically.
    - `commit_sha`: leave blank for the default branch HEAD, or paste
      a SHA if the default branch has moved since the release PR
      merged and you want to tag a specific commit.

@@ -24,11 +24,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to tag (without leading v). Final: 1.0.1. Prerelease: 1.0.1-rc0 (hyphenated — publish.yml uses hyphen to mark prerelease).'
+        description: 'Version to tag (without leading v). Use the PEP 440 form that appears in pyproject.toml — final: 1.0.1, prerelease: 1.0.1rc0 (or hyphenated 1.0.1-rc0; normalized internally). The tag gets the hyphen added automatically when needed for publish.yml prerelease detection.'
         required: true
         type: string
       commit_sha:
-        description: 'Commit to tag (default: main HEAD)'
+        description: 'Commit to tag (default: default branch HEAD)'
         required: false
         type: string
       headline:
@@ -117,20 +117,64 @@ jobs:
           fi
           git checkout --detach "$COMMIT_SHA"
 
-      - name: Preflight — inputs.version matches pyproject.toml + CHANGELOG.md
-        # Without this check, a skew between inputs.version and the
-        # pyproject.toml version at the checked-out commit produces a
+      - name: Normalize version — validate + compute PKG_VERSION and TAG_VERSION
+        # Validate inputs.version then derive two normalized forms:
+        #   PKG_VERSION (PEP 440): the canonical package version. This
+        #     is what pyproject.toml holds and what PyPI accepts — no
+        #     hyphen between digits and letters. Produced by stripping
+        #     any digit-letter hyphen (so `1.0.1-rc0` → `1.0.1rc0`).
+        #   TAG_VERSION (hyphenated): the git tag form. publish.yml
+        #     marks Release.prerelease=true when the tag contains a
+        #     hyphen (see publish.yml), so we insert a hyphen between
+        #     digit and letter (so `1.0.1rc0` → `1.0.1-rc0`). Finals
+        #     like `1.0.1` have no letters and stay unchanged in
+        #     both forms.
+        #
+        # Accepting either input form (PEP 440 `1.0.1rc0` or
+        # hyphenated `1.0.1-rc0`) keeps the maintainer from having to
+        # remember two conventions; the workflow handles the mapping.
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          case "$VERSION" in
+            '')
+              echo "Version must not be empty" >&2
+              exit 1
+              ;;
+            v*|V*)
+              echo "Version must NOT start with 'v' — use '1.0.1' not 'v1.0.1' (tag gets 'v' automatically)" >&2
+              exit 1
+              ;;
+            *[!0-9a-zA-Z.+-]*)
+              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
+              exit 1
+              ;;
+          esac
+          PKG_VERSION=$(printf '%s' "$VERSION" | sed -E 's/([0-9])-([a-zA-Z])/\1\2/')
+          TAG_VERSION=$(printf '%s' "$PKG_VERSION" | sed -E 's/([0-9])([a-zA-Z])/\1-\2/')
+          echo "PKG_VERSION=$PKG_VERSION" >> "$GITHUB_ENV"
+          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
+          echo "Normalized: inputs.version='$VERSION' → PKG_VERSION='$PKG_VERSION' (pyproject.toml match target), TAG_VERSION='$TAG_VERSION' (git tag form)"
+
+      - name: Preflight — PKG_VERSION matches pyproject.toml + CHANGELOG.md
+        # Without this check, a skew between the requested version and
+        # pyproject.toml at the checked-out commit produces a
         # silently-broken release: the tag says v1.0.1 but uv build
         # reads pyproject.toml (still 1.0.0) and the artifacts are
         # 1.0.0-named. publish.yml then either fails the PyPI upload
         # (1.0.0 already published) or, worse, overwrites/republishes
         # something unintended. Fail loudly here instead.
         #
+        # Compare PKG_VERSION (PEP 440 normalized form) to
+        # pyproject.toml. Hyphenated inputs like `1.0.1-rc0` normalize
+        # to `1.0.1rc0` which is what pyproject.toml must contain —
+        # hyphenated prereleases are invalid on PyPI.
+        #
         # Also require a matching CHANGELOG.md entry — Keep-a-Changelog
         # format (## [X.Y.Z]) — so a maintainer can't ship a release
-        # without noting it in the changelog.
-        env:
-          VERSION: ${{ inputs.version }}
+        # without noting it in the changelog. Uses PKG_VERSION since
+        # that's the canonical release number.
         run: |
           set -eu
           # awk extracts the first `version = "..."` line (the one
@@ -141,13 +185,13 @@ jobs:
             echo "Could not parse version from pyproject.toml" >&2
             exit 1
           fi
-          if [ "$PROJECT_VERSION" != "$VERSION" ]; then
-            echo "Version mismatch: inputs.version=$VERSION but pyproject.toml has $PROJECT_VERSION." >&2
-            echo "Merge a release PR that bumps pyproject.toml to $VERSION before dispatching this workflow." >&2
+          if [ "$PROJECT_VERSION" != "$PKG_VERSION" ]; then
+            echo "Version mismatch: PKG_VERSION=$PKG_VERSION but pyproject.toml has $PROJECT_VERSION." >&2
+            echo "Merge a release PR that bumps pyproject.toml to $PKG_VERSION before dispatching this workflow." >&2
             exit 1
           fi
-          if ! grep -qF "## [${VERSION}]" CHANGELOG.md; then
-            echo "CHANGELOG.md has no entry '## [$VERSION]'. Add a Keep-a-Changelog entry before cutting the release." >&2
+          if ! grep -qF "## [${PKG_VERSION}]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no entry '## [$PKG_VERSION]'. Add a Keep-a-Changelog entry before cutting the release." >&2
             exit 1
           fi
 
@@ -171,80 +215,34 @@ jobs:
         run: git config user.signingkey "${{ secrets.RELEASE_GPG_FINGERPRINT }}"
 
       - name: Create signed tag
-        # Shell-injection hardening: pass inputs.version and
-        # inputs.headline via env vars rather than direct ${{ }}
-        # interpolation. First validate version against a shell-
-        # metacharacter-free character set (digits, letters, dot,
-        # plus, hyphen), then apply the stricter release-version
-        # rules used by this workflow: finals like 1.0.1 and
-        # hyphenated prereleases like 1.0.1-rc0 are allowed, but
-        # non-hyphenated letter suffixes like 1.0.1rc0 are rejected;
-        # `;`, `$`, `|`, spaces, etc. are also rejected. Write the
-        # annotation body to a temp file and `git tag -F` from it so
-        # quotes/newlines in the headline can't break out of the
-        # shell context.
+        # Shell-injection hardening for HEADLINE: passed via env var
+        # (not direct ${{ }} interpolation), reject control chars,
+        # write annotation body to a temp file and `git tag -F` so
+        # quotes/newlines can't break out of the shell context.
+        # PKG_VERSION + TAG_VERSION come from the normalize step
+        # upstream (set via $GITHUB_ENV).
         env:
-          VERSION: ${{ inputs.version }}
           HEADLINE: ${{ inputs.headline }}
         run: |
           set -eu
-          case "$VERSION" in
-            '')
-              echo "Version must not be empty" >&2
-              exit 1
-              ;;
-            v*|V*)
-              echo "Version must NOT start with 'v' — use '1.0.1' not 'v1.0.1' (tag gets the 'v' prefixed automatically)" >&2
-              exit 1
-              ;;
-            *[!0-9a-zA-Z.+-]*)
-              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
-              exit 1
-              ;;
-          esac
-          # Prereleases must use hyphenated form (1.0.1-rc0) not PEP 440
-          # unhyphenated (1.0.1rc0). publish.yml keys its prerelease
-          # field on whether the tag contains a hyphen (see publish.yml
-          # "prerelease:" line). An unhyphenated prerelease would
-          # create a GitHub Release NOT marked as prerelease, silently
-          # advancing the "latest" pointer.
-          case "$VERSION" in
-            *[a-zA-Z]*)
-              case "$VERSION" in
-                *-*) ;;  # Has letters AND a hyphen — OK
-                *)
-                  echo "Prerelease versions must use hyphenated form: '1.0.1-rc0' not '1.0.1rc0'" >&2
-                  echo "publish.yml marks Release.prerelease=true based on hyphen presence." >&2
-                  exit 1
-                  ;;
-              esac
-              ;;
-          esac
-          # grep -q [[:cntrl:]] is line-oriented and misses embedded
-          # newlines in HEADLINE (the newline becomes the record
-          # separator, so each sub-line is checked independently with
-          # no control chars in it). Shell `case` sees the full string
-          # and correctly matches [[:cntrl:]] anywhere in HEADLINE.
           case "$HEADLINE" in
             *[[:cntrl:]]*)
               echo "Headline must not contain control characters (newlines, tabs, etc.)" >&2
               exit 1
               ;;
           esac
-          TAG="v$VERSION"
+          TAG="v$TAG_VERSION"
           msg_file="$(mktemp)"
           trap 'rm -f "$msg_file"' EXIT
-          printf 'clickwork %s — %s\n' "$VERSION" "$HEADLINE" >"$msg_file"
+          printf 'clickwork %s — %s\n' "$PKG_VERSION" "$HEADLINE" >"$msg_file"
           git tag -s -F "$msg_file" "$TAG"
 
       - name: Push tag with PAT
-        # Same hardening: VERSION via env, re-validate (defense in
-        # depth). PAT-authenticated URL authenticates as the PAT
-        # owner, not as GITHUB_TOKEN, so the tag push fires
-        # publish.yml normally.
+        # PAT-authenticated push (not GITHUB_TOKEN) so the tag push
+        # fires publish.yml normally. TAG_VERSION comes from the
+        # normalize step upstream — no re-validation needed.
         env:
           PAT: ${{ secrets.RELEASE_TAG_PUSH_TOKEN }}
-          VERSION: ${{ inputs.version }}
         run: |
           set -eu
           if [ -z "$PAT" ]; then
@@ -252,32 +250,7 @@ jobs:
             echo "See CONTRIBUTING.md 'Release-signing key + PAT rotation' for setup." >&2
             exit 1
           fi
-          case "$VERSION" in
-            '')
-              echo "Version must not be empty" >&2
-              exit 1
-              ;;
-            v*|V*)
-              echo "Version must NOT start with 'v'" >&2
-              exit 1
-              ;;
-            *[!0-9a-zA-Z.+-]*)
-              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
-              exit 1
-              ;;
-          esac
-          case "$VERSION" in
-            *[a-zA-Z]*)
-              case "$VERSION" in
-                *-*) ;;
-                *)
-                  echo "Prerelease versions must use hyphenated form: '1.0.1-rc0' not '1.0.1rc0'" >&2
-                  exit 1
-                  ;;
-              esac
-              ;;
-          esac
-          TAG="v$VERSION"
+          TAG="v$TAG_VERSION"
           # Push via git credential helper rather than embedding the
           # PAT in the remote URL. Actions already masks secrets, but
           # putting the PAT in the URL risks it leaking through:
