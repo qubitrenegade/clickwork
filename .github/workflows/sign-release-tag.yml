@@ -119,13 +119,16 @@ jobs:
       - name: Create signed tag
         # Shell-injection hardening: pass inputs.version and
         # inputs.headline via env vars rather than direct ${{ }}
-        # interpolation. Validate version against a shell-
+        # interpolation. First validate version against a shell-
         # metacharacter-free character set (digits, letters, dot,
-        # plus, hyphen) so PEP 440 prereleases like 1.0.1rc0 and
-        # hyphenated tags like 1.0.1-rc0 both pass, but `;`, `$`,
-        # `|`, spaces, etc. are rejected. Write the annotation body
-        # to a temp file and `git tag -F` from it so quotes/newlines
-        # in the headline can't break out of the shell context.
+        # plus, hyphen), then apply the stricter release-version
+        # rules used by this workflow: finals like 1.0.1 and
+        # hyphenated prereleases like 1.0.1-rc0 are allowed, but
+        # non-hyphenated letter suffixes like 1.0.1rc0 are rejected;
+        # `;`, `$`, `|`, spaces, etc. are also rejected. Write the
+        # annotation body to a temp file and `git tag -F` from it so
+        # quotes/newlines in the headline can't break out of the
+        # shell context.
         env:
           VERSION: ${{ inputs.version }}
           HEADLINE: ${{ inputs.headline }}
