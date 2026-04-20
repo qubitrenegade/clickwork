@@ -13,6 +13,7 @@ ignores:
   - docs/GUIDE.md
   - docs/PLUGINS.md
   - docs/SECURITY.md
+  - docs/VERIFYING.md
   - docs/MIGRATING.md
   - docs/LLM_REFERENCE.md
 
