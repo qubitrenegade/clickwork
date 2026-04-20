@@ -5,7 +5,7 @@
 **Parent plan:** [2026-04-19-sigstore-signing-plan.md](2026-04-19-sigstore-signing-plan.md) (locked Q1–Q6; Q6=A: first signed release is 1.0.1)
 **Parent issue:** [#61](https://github.com/qubitrenegade/clickwork/issues/61)
 **Scope:** Wave 4 — cut the 1.0.1 release, exercise the full Sigstore + tag-signing + PyPI pipeline end-to-end against a real release. Final wave of the Sigstore work; closes #61.
-**Relevant files:** [pyproject.toml](../../../pyproject.toml) (version = "1.0.0" today), [CHANGELOG.md](../../../CHANGELOG.md) (latest entry: 1.0.0 2026-04-18), [.github/workflows/sign-release-tag.yml](../../../.github/workflows/sign-release-tag.yml) (Wave 2, dispatched), [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (Waves 1+2, tag-triggered), [CONTRIBUTING.md](../../../CONTRIBUTING.md) (release-cutting runbook), [docs/reference/verifying.md](../../reference/verifying.md) (Wave 3, the verify commands)
+**Relevant files:** [pyproject.toml](../../../pyproject.toml) (version = "1.0.0" today), [CHANGELOG.md](../../../CHANGELOG.md) (latest entry: 1.0.0 2026-04-18), [.github/workflows/sign-release-tag.yml](../../../.github/workflows/sign-release-tag.yml) (Wave 2, workflow_dispatch), [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (Waves 1+2, tag-triggered), [CONTRIBUTING.md](../../../CONTRIBUTING.md) (release-cutting runbook), [docs/reference/verifying.md](../../reference/verifying.md) (Wave 3, the verify commands)
 
 ## Decisions (locked 2026-04-20)
 
@@ -20,6 +20,8 @@ After review on this PR the maintainer confirmed:
 | Q5 | Gate the release-cut PR on secrets-ready? | **C** — write the PR (version bump + CHANGELOG entry) and leave it open for maintainer review. Maintainer merges + tags in one session when ready. Avoids the awkward "main shows 1.0.1 but PyPI still shows 1.0.0" window |
 
 Implementation waves below assume these decisions are final.
+
+**Supersession note for the 1.0.1 release session:** this Wave 4 plan overrides older in-repo instructions that still mention cutting a prerelease smoke/RC (for example `v1.0.1-rc0` in the earlier Wave 1 plan at `docs/superpowers/specs/2026-04-19-sigstore-wave1-impl-plan.md` or the release runbook's smoke-test references). Follow Wave 4's direct `v1.0.1` flow documented here: the smoke/RC step was dropped because the current Wave 2 preflight blocks off-main or version-mismatched tags, so adding a special smoke release would require weakening those checks or adding bypass-only logic for a one-off path.
 
 ## Goal
 
@@ -146,11 +148,11 @@ Gates all subsequent Wave 4 steps.
 
 In one maintainer session:
 
-1. Review Wave 4a's PR (the `pyproject.toml` + `CHANGELOG.md` change), fill in `<release-date>` with today, merge it.
+1. Review Wave 4a's PR (the `pyproject.toml` + `CHANGELOG.md` change), fill in `<release-date>` with today, merge it, and copy the merge commit SHA from the merged PR.
 2. Go to **Actions → Sign release tag → Run workflow**.
 3. Fill in:
    - `version`: `1.0.1`
-   - `commit_sha`: leave blank (merge commit of 4a's PR is now HEAD)
+   - `commit_sha`: paste the merge commit SHA from step 1 so the tag is pinned to the reviewed release-cut commit. (Leaving it blank tags whatever `main` HEAD is at dispatch time, which is fine for a solo maintainer but exposes a race if `main` advances between 4a's merge and the dispatch.)
    - `headline`: a short description — suggested: "Release infrastructure: Sigstore signing, attestations, verify docs."
 4. Click Run workflow. Approve the `pypi` environment gate **twice**:
    - First approval: `sign-release-tag.yml` reads the GPG key + PAT, creates signed `v1.0.1` tag, pushes via PAT → fires `publish.yml`.
