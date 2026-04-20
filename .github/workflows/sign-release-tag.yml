@@ -221,7 +221,33 @@ jobs:
         # to whatever identifier the action derives. We override with
         # the full 40-char fingerprint so collisions against any
         # other key in the ephemeral keyring are impossible.
-        run: git config user.signingkey "${{ secrets.RELEASE_GPG_FINGERPRINT }}"
+        #
+        # Validate the fingerprint secret is non-empty and exactly 40
+        # hex chars before applying. An empty value would overwrite
+        # user.signingkey with "" and the subsequent git tag -s would
+        # either error cryptically or (worse) fall back to some other
+        # default key.
+        env:
+          FP: ${{ secrets.RELEASE_GPG_FINGERPRINT }}
+        run: |
+          set -eu
+          if [ -z "$FP" ]; then
+            echo "RELEASE_GPG_FINGERPRINT secret is empty or missing in the pypi environment." >&2
+            echo "See CONTRIBUTING.md 'Release-signing key + PAT rotation' for setup." >&2
+            exit 1
+          fi
+          case "$FP" in
+            *[!0-9a-fA-F]*)
+              echo "RELEASE_GPG_FINGERPRINT must contain only hexadecimal characters (0-9, a-f, A-F)." >&2
+              exit 1
+              ;;
+          esac
+          if [ "${#FP}" -ne 40 ]; then
+            echo "RELEASE_GPG_FINGERPRINT must be exactly 40 characters (full GPG fingerprint, not a short/long key ID)." >&2
+            echo "Current length: ${#FP}. See CONTRIBUTING.md setup section." >&2
+            exit 1
+          fi
+          git config user.signingkey "$FP"
 
       - name: Create signed tag
         # Shell-injection hardening for HEADLINE: passed via env var
