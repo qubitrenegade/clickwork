@@ -1,0 +1,304 @@
+name: Sign release tag
+
+# Creates and pushes a GPG-signed annotated tag for a planned release,
+# using a dedicated workflow-only GPG key (NOT the maintainer's personal
+# key). The pushed tag fires publish.yml and runs the existing 3-job
+# pipeline (build → create-release → publish).
+#
+# This workflow is the recommended path for most releases and
+# supersedes the prior CONTRIBUTING.md runbook of "locally run
+# git tag -s && git push origin vX.Y.Z" in the common case, while
+# keeping the local-GPG flow documented as a fallback. See Wave 2 plan
+# (docs/superpowers/specs/2026-04-20-sigstore-wave2-impl-plan.md)
+# and parent plan (docs/superpowers/specs/2026-04-19-sigstore-signing-plan.md)
+# for the full rationale and design decisions.
+#
+# Why a PAT instead of GITHUB_TOKEN for the push: pushes authored by
+# GITHUB_TOKEN do NOT fire sibling on:push workflows (GitHub's
+# anti-recursion guard). So a naive GITHUB_TOKEN push here would
+# silently skip publish.yml. The RELEASE_TAG_PUSH_TOKEN PAT bypasses
+# that restriction while keeping least-privilege (contents:write on
+# this repo only).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag (without leading v). Use the PEP 440 form that appears in pyproject.toml — final: 1.0.1, prerelease: 1.0.1rc0 (or hyphenated 1.0.1-rc0; normalized internally). The tag gets the hyphen added automatically when needed for publish.yml prerelease detection.'
+        required: true
+        type: string
+      commit_sha:
+        description: 'Commit to tag (default: default branch HEAD)'
+        required: false
+        type: string
+      headline:
+        description: 'Release headline for tag annotation (e.g. "Sigstore signing end-to-end")'
+        required: true
+        type: string
+
+# Workflow-level deny-all. The job re-grants only what it needs.
+permissions: {}
+
+jobs:
+  sign-and-push:
+    name: Sign and push release tag
+    runs-on: ubuntu-latest
+    # Defense-in-depth branch guard: workflow_dispatch can be fired
+    # from any branch that contains this workflow file. Without this
+    # check, a maintainer could accidentally (or an attacker with
+    # write access could intentionally) push a modified copy of this
+    # workflow to a non-main branch, dispatch it, and that modified
+    # workflow would run with access to the pypi environment's
+    # RELEASE_GPG_PRIVATE_KEY + RELEASE_TAG_PUSH_TOKEN secrets.
+    # Comparing github.ref_name to the repo's default_branch ensures
+    # we only sign tags from trusted main-branch workflow contents.
+    # The pypi environment's deployment_branch_policy is the other
+    # layer of this protection; this if: guard makes the same rule
+    # enforced in the workflow itself, visible in code review.
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    # Same pypi environment as publish.yml — the maintainer approves
+    # a deployment here before the release-signing secrets become
+    # readable to the job. First of the two release-flow approvals
+    # (second is publish.yml's PyPI job).
+    environment: pypi
+
+    # contents:read is for checkout only. The actual tag push is
+    # authenticated with RELEASE_TAG_PUSH_TOKEN (a fine-scoped PAT
+    # with contents:write on this repo), NOT with GITHUB_TOKEN.
+    # See workflow header for why.
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Always check out the repo's default branch (main today)
+          # with full history. If commit_sha is provided, we validate
+          # it in the next step and then detach-HEAD to that commit.
+          # Passing commit_sha directly as `ref:` would accept
+          # branch/tag names too, which could tag an unintended
+          # revision (e.g., a typo matching a branch name).
+          #
+          # Using github.event.repository.default_branch (not
+          # hardcoded 'main') keeps this in sync with the job-level
+          # if: guard above and survives any future default-branch
+          # rename.
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Validate + check out requested commit SHA (if provided)
+        # When commit_sha is empty the step is a no-op and we tag main
+        # HEAD. When it's set, validate hex-only + length 7–40, then
+        # confirm it resolves to a commit object, then detach-HEAD to
+        # it. Without this, actions/checkout would happily accept a
+        # branch name like "main" or "feat/x" as commit_sha and we'd
+        # tag the wrong revision.
+        if: ${{ inputs.commit_sha != '' }}
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          set -eu
+          case "$COMMIT_SHA" in
+            *[!0-9a-fA-F]*)
+              echo "Invalid commit_sha: must contain only hexadecimal characters" >&2
+              exit 1
+              ;;
+          esac
+          case "${#COMMIT_SHA}" in
+            [7-9]|[1-3][0-9]|40) ;;
+            *)
+              echo "Invalid commit_sha: must be 7 to 40 hexadecimal characters" >&2
+              exit 1
+              ;;
+          esac
+          if ! git cat-file -e "${COMMIT_SHA}^{commit}" 2>/dev/null; then
+            echo "Invalid commit_sha: ${COMMIT_SHA} not found or not a commit" >&2
+            exit 1
+          fi
+          git checkout --detach "$COMMIT_SHA"
+
+      - name: Normalize version — validate + compute PKG_VERSION and TAG_VERSION
+        # Validate inputs.version then derive two normalized forms:
+        #   PKG_VERSION (PEP 440): the canonical package version. This
+        #     is what pyproject.toml holds and what PyPI accepts — no
+        #     hyphen between digits and letters. Produced by stripping
+        #     any digit-letter hyphen (so `1.0.1-rc0` → `1.0.1rc0`).
+        #   TAG_VERSION (hyphenated): the git tag form. publish.yml
+        #     marks Release.prerelease=true when the tag contains a
+        #     hyphen (see publish.yml), so we insert a hyphen between
+        #     digit and letter (so `1.0.1rc0` → `1.0.1-rc0`). Finals
+        #     like `1.0.1` have no letters and stay unchanged in
+        #     both forms.
+        #
+        # Accepting either input form (PEP 440 `1.0.1rc0` or
+        # hyphenated `1.0.1-rc0`) keeps the maintainer from having to
+        # remember two conventions; the workflow handles the mapping.
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          case "$VERSION" in
+            '')
+              echo "Version must not be empty" >&2
+              exit 1
+              ;;
+            v*|V*)
+              echo "Version must NOT start with 'v' — use '1.0.1' not 'v1.0.1' (tag gets 'v' automatically)" >&2
+              exit 1
+              ;;
+            *[!0-9a-zA-Z.+-]*)
+              echo "Invalid version: $VERSION (allowed: digits, letters, . + -)" >&2
+              exit 1
+              ;;
+          esac
+          # Strip any digit-letter hyphen from input: "1.0.1-rc0" →
+          # "1.0.1rc0". Produces canonical PEP 440.
+          PKG_VERSION=$(printf '%s' "$VERSION" | sed -E 's/([0-9])-([a-zA-Z])/\1\2/')
+          # Insert a hyphen before a recognized prerelease/dev label so
+          # publish.yml's hyphen-based prerelease detection fires. Matches
+          # PEP 440 pre-releases (a, b, c, rc, alpha, beta, pre) and dev
+          # releases (.dev), letting an optional dot precede the label
+          # so "1.0.1.dev0" → "1.0.1-dev0". Post-releases (.post) are
+          # intentionally NOT in this list — post1 is not a prerelease
+          # and should NOT flip publish.yml's prerelease flag.
+          TAG_VERSION=$(printf '%s' "$PKG_VERSION" | sed -E 's/([0-9])\.?(a|b|c|rc|alpha|beta|pre|dev)([0-9]+)/\1-\2\3/')
+          echo "PKG_VERSION=$PKG_VERSION" >> "$GITHUB_ENV"
+          echo "TAG_VERSION=$TAG_VERSION" >> "$GITHUB_ENV"
+          echo "Normalized: inputs.version='$VERSION' → PKG_VERSION='$PKG_VERSION' (pyproject.toml match target), TAG_VERSION='$TAG_VERSION' (git tag form)"
+
+      - name: Preflight — PKG_VERSION matches pyproject.toml + CHANGELOG.md
+        # Without this check, a skew between the requested version and
+        # pyproject.toml at the checked-out commit produces a
+        # silently-broken release: the tag says v1.0.1 but uv build
+        # reads pyproject.toml (still 1.0.0) and the artifacts are
+        # 1.0.0-named. publish.yml then either fails the PyPI upload
+        # (1.0.0 already published) or, worse, overwrites/republishes
+        # something unintended. Fail loudly here instead.
+        #
+        # Compare PKG_VERSION (PEP 440 normalized form) to
+        # pyproject.toml. Hyphenated inputs like `1.0.1-rc0` normalize
+        # to `1.0.1rc0` which is what pyproject.toml must contain —
+        # hyphenated prereleases are invalid on PyPI.
+        #
+        # Also require a matching CHANGELOG.md entry — Keep-a-Changelog
+        # format (## [X.Y.Z]) — so a maintainer can't ship a release
+        # without noting it in the changelog. Uses PKG_VERSION since
+        # that's the canonical release number.
+        run: |
+          set -eu
+          # awk extracts the first `version = "..."` line (the one
+          # under [project]; pyproject.toml doesn't have others at
+          # time of writing, but if it did we'd only match the first).
+          PROJECT_VERSION=$(awk -F'"' '/^version = "/ { print $2; exit }' pyproject.toml)
+          if [ -z "$PROJECT_VERSION" ]; then
+            echo "Could not parse version from pyproject.toml" >&2
+            exit 1
+          fi
+          if [ "$PROJECT_VERSION" != "$PKG_VERSION" ]; then
+            echo "Version mismatch: PKG_VERSION=$PKG_VERSION but pyproject.toml has $PROJECT_VERSION." >&2
+            echo "Merge a release PR that bumps pyproject.toml to $PKG_VERSION before dispatching this workflow." >&2
+            exit 1
+          fi
+          if ! grep -qF "## [${PKG_VERSION}]" CHANGELOG.md; then
+            echo "CHANGELOG.md has no entry '## [$PKG_VERSION]'. Add a Keep-a-Changelog entry before cutting the release." >&2
+            exit 1
+          fi
+
+      - name: Import GPG key + configure git identity
+        # crazy-max/ghaction-import-gpg sets user.name, user.email,
+        # user.signingkey, and enables tag GPG signing from the
+        # imported key's UID. The runner starts with an unconfigured
+        # git identity, so without this step `git tag -s` would fail
+        # with "please tell me who you are".
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          git_user_signingkey: true
+          git_tag_gpgsign: true
+
+      - name: Pin signing key by fingerprint
+        # Belt-and-suspenders: the import step sets user.signingkey
+        # to whatever identifier the action derives. We override with
+        # the full 40-char fingerprint so collisions against any
+        # other key in the ephemeral keyring are impossible.
+        #
+        # Validate the fingerprint secret is non-empty and exactly 40
+        # hex chars before applying. An empty value would overwrite
+        # user.signingkey with "" and the subsequent git tag -s would
+        # either error cryptically or (worse) fall back to some other
+        # default key.
+        env:
+          FP: ${{ secrets.RELEASE_GPG_FINGERPRINT }}
+        run: |
+          set -eu
+          if [ -z "$FP" ]; then
+            echo "RELEASE_GPG_FINGERPRINT secret is empty or missing in the pypi environment." >&2
+            echo "See CONTRIBUTING.md 'Release-signing key + PAT rotation' for setup." >&2
+            exit 1
+          fi
+          case "$FP" in
+            *[!0-9a-fA-F]*)
+              echo "RELEASE_GPG_FINGERPRINT must contain only hexadecimal characters (0-9, a-f, A-F)." >&2
+              exit 1
+              ;;
+          esac
+          if [ "${#FP}" -ne 40 ]; then
+            echo "RELEASE_GPG_FINGERPRINT must be exactly 40 characters (full GPG fingerprint, not a short/long key ID)." >&2
+            echo "Current length: ${#FP}. See CONTRIBUTING.md setup section." >&2
+            exit 1
+          fi
+          git config user.signingkey "$FP"
+
+      - name: Create signed tag
+        # Shell-injection hardening for HEADLINE: passed via env var
+        # (not direct ${{ }} interpolation), reject control chars,
+        # write annotation body to a temp file and `git tag -F` so
+        # quotes/newlines can't break out of the shell context.
+        # PKG_VERSION + TAG_VERSION come from the normalize step
+        # upstream (set via $GITHUB_ENV).
+        env:
+          HEADLINE: ${{ inputs.headline }}
+        run: |
+          set -eu
+          case "$HEADLINE" in
+            *[[:cntrl:]]*)
+              echo "Headline must not contain control characters (newlines, tabs, etc.)" >&2
+              exit 1
+              ;;
+          esac
+          TAG="v$TAG_VERSION"
+          msg_file="$(mktemp)"
+          trap 'rm -f "$msg_file"' EXIT
+          printf 'clickwork %s — %s\n' "$PKG_VERSION" "$HEADLINE" >"$msg_file"
+          git tag -s -F "$msg_file" "$TAG"
+
+      - name: Push tag with PAT
+        # PAT-authenticated push (not GITHUB_TOKEN) so the tag push
+        # fires publish.yml normally. TAG_VERSION comes from the
+        # normalize step upstream — no re-validation needed.
+        env:
+          PAT: ${{ secrets.RELEASE_TAG_PUSH_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "$PAT" ]; then
+            echo "RELEASE_TAG_PUSH_TOKEN secret is empty or missing in the pypi environment." >&2
+            echo "See CONTRIBUTING.md 'Release-signing key + PAT rotation' for setup." >&2
+            exit 1
+          fi
+          TAG="v$TAG_VERSION"
+          # Push via git credential helper rather than embedding the
+          # PAT in the remote URL. Actions already masks secrets, but
+          # putting the PAT in the URL risks it leaking through:
+          # - git error messages that echo the remote URL
+          # - git remote/config inspection inside the runner
+          # - process listings (/proc/*/cmdline) on self-hosted runners
+          # - downstream tool logs that capture command strings
+          # The credential helper file keeps the PAT out of the URL
+          # and out of argv; mktemp + 0600 + trap-rm contains its
+          # lifetime to this one push.
+          cred_file="$(mktemp)"
+          chmod 600 "$cred_file"
+          trap 'rm -f "$cred_file"' EXIT
+          printf 'https://x-access-token:%s@github.com\n' "$PAT" >"$cred_file"
+          git -c "credential.helper=store --file=$cred_file" \
+              push "https://github.com/${{ github.repository }}.git" "$TAG"

@@ -149,7 +149,56 @@ single-PR cuts that bump version and changelog. If you're unsure
 whether a change you want to make warrants a roadmap-style rollout,
 open an issue and ask.
 
-### Cutting a release
+### Cutting a release (recommended: workflow-driven)
+
+The tag is signed by a dedicated release-signing GPG key that lives
+in the `pypi` environment as a secret. No local GPG setup required.
+Prerequisite: the `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_FINGERPRINT`,
+and `RELEASE_TAG_PUSH_TOKEN` secrets must already exist in the `pypi`
+environment (see "Release-signing key + PAT rotation" below for how
+they were created and how to rotate).
+
+1. Merge a release PR that bumps `version` in `pyproject.toml`,
+   adds the new entry to `CHANGELOG.md`, and (if relevant) updates
+   the trove classifier from Beta -> Production/Stable.
+2. Go to **Actions → Sign release tag → Run workflow**. Fill in:
+   - `version`: e.g. `1.0.1` for a final release. For prereleases
+     either PEP 440 (`1.0.1rc0`) or hyphenated (`1.0.1-rc0`) is
+     accepted — the workflow normalizes internally. The package
+     version (what lands in `pyproject.toml` and on PyPI) is the
+     unhyphenated PEP 440 form; the git tag is the hyphenated form
+     (so `publish.yml` marks it as prerelease). No leading `v` on
+     input — the tag gets `v` prefixed automatically.
+   - `commit_sha`: leave blank for the default branch HEAD, or paste
+     a SHA if the default branch has moved since the release PR
+     merged and you want to tag a specific commit.
+   - `headline`: short description for the tag annotation. The
+     workflow templates the full message as
+     `clickwork X.Y.Z — <headline>` so you only need to supply the
+     trailing bit.
+3. Click **Run workflow**. The `pypi` environment's approval gate
+   fires — open the run, click "Review deployments", approve
+   `pypi`. The workflow imports the release-signing GPG key,
+   creates and pushes a signed `v...` tag using the PAT
+   (`RELEASE_TAG_PUSH_TOKEN`) — `vX.Y.Z` for final releases, or
+   a hyphenated prerelease tag such as `vX.Y.Z-rc0` / `vX.Y.Z-dev0`
+   — so the tag push fires `publish.yml` normally.
+4. The push fires `.github/workflows/publish.yml`: build wheel +
+   sdist, Sigstore-sign them, create the GitHub Release with
+   auto-generated notes (from `.github/release.yml` label
+   grouping) and the dist + `.sigstore` bundle files attached,
+   then publish to PyPI via Trusted Publishing with PEP 740
+   attestations.
+5. Approve the `pypi` environment a **second time** for
+   `publish.yml`'s PyPI job. (Two approvals per release by design
+   — one for tag signing, one for PyPI publish.) The publish job
+   finishes shortly after (typically under a minute).
+
+### Cutting a release (fallback: local GPG)
+
+Use this path if the release-signing secrets aren't configured yet,
+or if you need to tag from a machine-local build for some reason
+(e.g., emergency cut while the signing workflow is broken).
 
 1. Merge a release PR that bumps `version` in `pyproject.toml`,
    adds the new entry to `CHANGELOG.md`, and (if relevant) updates
@@ -178,14 +227,96 @@ open an issue and ask.
    future releases.
 
 3. The push fires `.github/workflows/publish.yml`: build wheel +
-   sdist, create the GitHub Release with auto-generated notes
-   (from `.github/release.yml` label grouping) and the dist files
-   attached, then publish to PyPI via Trusted Publishing.
+   sdist, Sigstore-sign them, create the GitHub Release with
+   auto-generated notes and the dist + `.sigstore` bundle files
+   attached, then publish to PyPI via Trusted Publishing with
+   PEP 740 attestations.
 4. The `pypi` environment is gated on maintainer approval. After
    the tag push, open the Actions tab, find the Publish run, click
    "Review deployments", approve `pypi`. The publish job finishes
    shortly after (typically under a minute; longer if runner load
    or the PyPI upload API is slow).
+
+### Release-signing key + PAT rotation
+
+The dedicated release-signing GPG key and the `RELEASE_TAG_PUSH_TOKEN`
+PAT rotate **yearly, or immediately on any suspected exposure**.
+
+**One-time setup (if the secrets don't exist yet):**
+
+1. Generate the release-signing GPG key. This is a dedicated key,
+   NOT the maintainer's personal identity:
+
+   ```bash
+   gpg --batch --pinentry-mode loopback --passphrase '' \
+       --quick-gen-key 'clickwork-release-bot <release@clickwork.invalid>' rsa4096 sign 1y
+   ```
+
+   `--pinentry-mode loopback` is required on GnuPG 2.1+ for
+   `--passphrase ''` to be honored in batch mode. The `1y`
+   expiration matches the yearly rotation cadence — if a rotation
+   is missed, the key expires on its own instead of silently
+   working past its intended lifetime. Extend manually with
+   `gpg --edit-key <fingerprint>` → `expire` if you need to push
+   the expiry forward before rotating.
+
+2. Export and upload the public half to the maintainer's GitHub
+   account (Settings → SSH and GPG keys → New GPG key). This is
+   what lets GitHub show tags signed with this key as "Verified"
+   on the maintainer's account:
+
+   ```bash
+   gpg --armor --export 'clickwork-release-bot <release@clickwork.invalid>'
+   ```
+
+3. Export the private half (ASCII-armored block):
+
+   ```bash
+   gpg --armor --export-secret-keys 'clickwork-release-bot <release@clickwork.invalid>'
+   ```
+
+4. Capture the full 40-character fingerprint (filter by UID so
+   multiple secret keys in the keyring don't cause a wrong pickup):
+
+   ```bash
+   gpg --list-secret-keys --with-colons 'clickwork-release-bot <release@clickwork.invalid>' \
+     | awk -F: '$1=="fpr" {print $10; exit}'
+   ```
+
+5. Create a fine-scoped PAT (Settings → Developer settings →
+   Personal access tokens → Fine-grained):
+   - Repository access: Only `qubitrenegade/clickwork`.
+   - Repository permissions: **Contents: Read and write**.
+   - Expiration: one year out.
+
+6. Store the three secrets in the `pypi` environment (Settings →
+   Environments → pypi → Secrets):
+   - `RELEASE_GPG_PRIVATE_KEY` — armored private block from step 3.
+   - `RELEASE_GPG_FINGERPRINT` — 40-character fingerprint from step 4.
+   - `RELEASE_TAG_PUSH_TOKEN` — PAT from step 5.
+
+**Yearly rotation (no compromise suspected):**
+
+1. Generate a new GPG key + PAT, same procedure as steps 1-5
+   above.
+2. Upload the new public GPG key to your GitHub account. Do NOT
+   delete the old public key — existing tag signatures reference
+   it and should remain verifiable.
+3. Update `RELEASE_GPG_PRIVATE_KEY`, `RELEASE_GPG_FINGERPRINT`,
+   and `RELEASE_TAG_PUSH_TOKEN` in the `pypi` environment.
+4. Run the next release through the workflow to confirm it signs
+   cleanly against the new key.
+5. After a clean release with the new key: delete the old PAT.
+   Keep the old public GPG key published on your GitHub account so
+   historical signed tags continue to show as "Verified".
+
+**If the old GPG private key is exposed or compromised:** revoke
+the old GPG key (publish the revocation certificate to your GitHub
+account's GPG keys and to any keyservers it was distributed to).
+Revocation is for compromise handling, NOT routine yearly rotation
+— revoking a key causes historical tag signatures made with it to
+be treated as suspect by verifiers, which is appropriate when the
+key was stolen but is a regression in the routine-rotation case.
 
 ## Code of conduct
 
