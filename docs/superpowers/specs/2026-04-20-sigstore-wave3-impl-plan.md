@@ -7,6 +7,19 @@
 **Scope:** Wave 3 only — user-facing verification documentation. Builds on Wave 1 (#108 Sigstore + PEP 740 attestations) and Wave 2 (#110 workflow-driven signed tags). Wave 4 (cut 1.0.1) is a separate plan.
 **Relevant files:** [docs/reference/security.md](../../reference/security.md) (existing 1-line "Verifying release artifacts" section, last ~25 lines), [docs/SECURITY.md](../../SECURITY.md) (redirect to reference/security.md), [.github/workflows/publish.yml](../../../.github/workflows/publish.yml) (Wave 1 output: Sigstore + attestations), [.github/workflows/sign-release-tag.yml](../../../.github/workflows/sign-release-tag.yml) (Wave 2 output: signed tags)
 
+## Decisions (locked 2026-04-20)
+
+After review on this PR the maintainer confirmed:
+
+| # | Question | Decision |
+|---|---|---|
+| Q1 | File path for verify doc? | **A** — `docs/reference/verifying.md` for real content + top-level `docs/VERIFYING.md` redirect stub (matches the existing `SECURITY.md` → `reference/security.md` pattern and honors parent plan #97's Q5=C "docs/VERIFYING.md" wording) |
+| Q2 | Worked examples vs templates? | **A** — concrete worked examples using `1.0.1` as the placeholder, with a single "substitute your version" sentence |
+| Q3 | How explicit about pip/uv auto-verify not GA? | **A** — a dedicated "Note" box at the top of the PyPI-attestation section |
+| Q4 | Cross-references? | **Both** — README install section + CONTRIBUTING release-cutting runbook |
+
+Implementation below assumes these decisions are final.
+
 ## Goal
 
 Ship concrete, copy-pasteable verification commands for every provenance path clickwork now supports:
@@ -43,7 +56,9 @@ Five deliverables:
 4. **Rewrite** `docs/reference/security.md` lines 215–238 from hash-pinning-focused to a short "Verifying release artifacts" summary that names the three paths and links to `verifying.md`.
 5. **Cross-link** from `README.md` (install section mentions the verify doc) and `CONTRIBUTING.md` (release-cutting runbook references the verify doc for consumer-side expectations).
 
-## Design questions
+## Design questions (resolved — kept for historical context)
+
+The A/B/C alternatives below were the options considered; each has a **Decision:** line pointing at the locked choice from the table above. Left in the doc so future readers can see what was weighed and why.
 
 ### Q1. File path for the verify doc?
 
@@ -53,9 +68,7 @@ clickwork's `docs/` tree has `reference/`, `how-to/`, `tutorials/`, `explanation
 - **B) `docs/how-to/verify-a-release.md`** — Diátaxis says "how-to" is for goal-oriented recipes, which fits verification perfectly. Diverges from parent plan.
 - **C) Top-level `docs/VERIFYING.md` with no redirect** — literal reading of parent plan. Inconsistent with how `security.md` is placed (real content lives in `reference/`).
 
-**Recommendation:** A. The `SECURITY.md` → `reference/security.md` redirect pattern is already the project's established convention; applying it to VERIFYING.md keeps docs/reference/ as the home for detailed reference pages while the top-level path still resolves for anyone following the parent plan's wording or wanting a short URL.
-
-**Open question for maintainer:** confirm A (redirect + reference/ content), or push back toward B (how-to) or C (top-level only)?
+**Decision: A.** The `SECURITY.md` → `reference/security.md` redirect pattern is already the project's established convention; applying it to VERIFYING.md keeps docs/reference/ as the home for detailed reference pages while the top-level path still resolves for anyone following the parent plan's wording or wanting a short URL.
 
 ### Q2. Depth of worked examples — templates vs specific version?
 
@@ -63,9 +76,7 @@ clickwork's `docs/` tree has `reference/`, `how-to/`, `tutorials/`, `explanation
 - **B) Template with `<version>` substitution markers** — e.g., `sigstore verify identity dist/clickwork-<version>-py3-none-any.whl ...`. Less visual noise, reader has to substitute.
 - **C) Both — worked example first, template underneath** — verbose but maximally clear.
 
-**Recommendation:** A with a single-sentence "substitute your target version" note above. Worked examples read faster; the reader sees the real shape of the command. The "1.0.1" placeholder is the first signed release anyway, so it's real-ish.
-
-**Open question for maintainer:** confirm A (worked examples), or B (templates)?
+**Decision: A.** Worked examples with a single-sentence "substitute your target version" note above. Worked examples read faster; the reader sees the real shape of the command. The "1.0.1" placeholder is the first signed release anyway, so it's real-ish.
 
 ### Q3. How explicit about the "pip/uv auto-verify not yet GA" caveat?
 
@@ -75,9 +86,7 @@ PyPI's PEP 740 attestations are published by our Wave 1 changes, but `pip instal
 - **B) One sentence inline in the PyPI-attestation section** — less prominent, still honest.
 - **C) No explicit note — just document the `pypi-attestations verify` command as THE way** — cleaner doc, but readers who assume `pip install` already verifies will be surprised later.
 
-**Recommendation:** A. The "manual vs auto-verify" distinction is a real gotcha that will catch readers who assume the attestation does auto-magic. Being explicit up front saves a confused-user-opens-issue cycle.
-
-**Open question for maintainer:** A (note box), or B (single sentence)?
+**Decision: A.** The "manual vs auto-verify" distinction is a real gotcha that will catch readers who assume the attestation does auto-magic. Being explicit up front saves a confused-user-opens-issue cycle.
 
 ### Q4. Cross-references from README + CONTRIBUTING?
 
@@ -85,9 +94,7 @@ PyPI's PEP 740 attestations are published by our Wave 1 changes, but `pip instal
 - **B) CONTRIBUTING.md "Cutting a release" section adds a closing note pointing at the verify doc for consumer expectations** — visible to release-cutters thinking about what consumers will do.
 - **C) Both A + B** — redundant but each catches a different audience.
 
-**Recommendation:** C. Low-cost, high-coverage. README reaches consumers. CONTRIBUTING reaches maintainers. They're different audiences with different needs for the same doc.
-
-**Open question for maintainer:** confirm C (both), or just A (README only — consumers are the primary audience)?
+**Decision: C (both).** Low-cost, high-coverage. README reaches consumers. CONTRIBUTING reaches maintainers. They're different audiences with different needs for the same doc.
 
 ## Proposed implementation
 
