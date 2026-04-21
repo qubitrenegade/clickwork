@@ -5,6 +5,44 @@ All notable changes to clickwork will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - TBD
+
+Release-infrastructure hardening. No user-facing API changes; every
+consumer who was running 1.0.0 can upgrade to 1.0.1 as a drop-in.
+
+### Added
+
+- **Sigstore keyless signing** of release artifacts (PR #108, part
+  of #61). Wheel and sdist are signed inside the `build` job of
+  `publish.yml` using `sigstore/gh-action-sigstore-python`; the
+  resulting `.sigstore` bundles appear as GitHub Release assets
+  alongside the wheel/sdist.
+- **PEP 740 attestations on PyPI** (PR #108, part of #61).
+  `pypa/gh-action-pypi-publish` now publishes attestations via the
+  existing Trusted Publishing OIDC exchange; consumers can verify
+  with `pypi-attestations verify pypi clickwork==1.0.1` (see
+  [docs/reference/verifying.md](docs/reference/verifying.md)).
+- **Workflow-driven signed git tags** (PR #110, part of #61). A
+  new `sign-release-tag.yml` workflow signs release tags from a
+  dedicated workflow-only GPG key (not the maintainer's personal
+  key) with defense-in-depth input validation and a PAT-based push
+  that triggers `publish.yml`. The local-GPG fallback path stays
+  documented in `CONTRIBUTING.md` for emergencies.
+- **Verification documentation** (PR #112, part of #61). New
+  [docs/reference/verifying.md](docs/reference/verifying.md) with
+  concrete worked examples for all three verify paths, plus
+  troubleshooting for common failure modes. Cross-linked from
+  `README.md` and `CONTRIBUTING.md`.
+
+### Changed
+
+- **`docs/reference/security.md`** "Verifying release artifacts"
+  section (PR #112, part of #61) rewritten from pre-Sigstore
+  hash-pinning-only to a summary of the three verify paths with a
+  link to `verifying.md` for the full examples. Hash-pinning
+  retained as a fallback for pre-1.0.1 releases and
+  tooling-unavailable scenarios.
+
 ## [1.0.0] - 2026-04-18
 
 First stable release. The public surface is now covered by
@@ -240,6 +278,7 @@ subsection.
   redacts all env values (secret-sourced as `<redacted>`, other env
   entries as `<set>`) from the single INFO-level log line. (#11)
 
+[1.0.1]: https://github.com/qubitrenegade/clickwork/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/qubitrenegade/clickwork/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/qubitrenegade/clickwork/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/qubitrenegade/clickwork/releases/tag/v0.1.0
